@@ -6,9 +6,9 @@ One stack, `LostInPlaceSim`, in us-east-1. It contains:
 - **ECR repository** for the image built from `docker/Dockerfile`.
 - **S3 bucket** for results: private, encrypted, TLS only. Runs move to Glacier Instant Retrieval after 30 days.
 - **Cost guard:**
-  - a monthly AWS Budget with alerts at 50, 80 and 100%;
+  - a monthly AWS Budget that counts only resources tagged `project=lost-in-place`, with alerts at 50, 80 and 100% of actual spend and 100% of forecast spend;
   - a budget action that blocks job submission through the operator role at 100%;
-  - a CloudWatch billing alarm at 120% as a backstop.
+  - optionally, a CloudWatch alarm on the whole account's estimated charges (`accountAlarmUsd`). It is off by default, because billing metrics can't be filtered by tag.
 - **Operator role** for submitting jobs and reading results.
 
 There is no NAT gateway: instances sit in public subnets and only make outbound connections.
@@ -24,7 +24,8 @@ npx aws-cdk@2 deploy -c alertEmail=you@example.com -c budgetUsd=100 -c maxVcpus=
 
 Before the first deploy:
 
-- Enable *Receive Billing Alerts* in the Billing console, so the billing alarm has data.
+- Activate `project` as a user-defined cost allocation tag in the Billing console. Until it is active, the budget sees $0, so neither the alerts nor the stop action fire.
+- If you set `accountAlarmUsd`, enable *Receive Billing Alerts* in the Billing console, so the alarm has data.
 - Check the EC2 quota *All Standard Spot Instance Requests* in us-east-1. It must be at least `maxVcpus`.
 - Confirm the SNS email subscription.
 
@@ -47,11 +48,14 @@ Each episode writes `runs/<scenario>_s<seed>/` (ULog, `episode.json`, `metrics.j
 
 | Context key | Default | Meaning |
 |---|---|---|
-| `budgetUsd` | 100 | Monthly budget for the account (all services) |
+| `budgetUsd` | 100 | Monthly budget for resources tagged `project=lost-in-place` |
+| `accountAlarmUsd` | 0 (off) | Alarm threshold for the whole account's estimated charges, across all projects |
 | `maxVcpus` | 32 | Hard cap on concurrent compute (16 episodes) |
 | `alertEmail` | none | Where budget alerts go |
 | `imageTag` | latest | Image tag the job definition runs |
 | `region` | us-east-1 | Billing metrics only exist in us-east-1 |
+
+Untagged costs, such as data transfer and the instances' root EBS volumes, fall outside the budget. They are small next to instance hours.
 
 ## Test
 

@@ -20,6 +20,7 @@ settings = SimSettings(
     max_vcpus=int(ctx("maxVcpus", "32")),
     alert_email=ctx("alertEmail", ""),
     image_tag=ctx("imageTag", "latest"),
+    account_alarm_usd=float(ctx("accountAlarmUsd", "0")),
 )
 SimStack(
     app,
@@ -28,5 +29,4 @@ SimStack(
     env=cdk.Environment(account=os.environ.get("CDK_DEFAULT_ACCOUNT"), region=ctx("region", "us-east-1")),
     description="lost-in-place: spot AWS Batch for PX4/Gazebo episodes with a budget stop",
 )
-cdk.Tags.of(app).add("project", "lost-in-place")
 app.synth()

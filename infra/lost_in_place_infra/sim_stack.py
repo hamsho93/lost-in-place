@@ -4,7 +4,11 @@ Cost controls, strongest first:
 1. `max_vcpus` on the compute environment caps how much can run at once.
 2. An AWS Budgets action attaches a deny policy to the operator role at 100% of the budget,
    so no new jobs can be submitted through it.
-3. Budget emails at 50/80/100% and a CloudWatch billing alarm as a backstop.
+3. Budget emails at 50/80/100% actual and 100% forecast.
+
+The budget counts only costs tagged `project=lost-in-place`, so other workloads in a shared account
+neither trip the stop nor hide this project's spend. That needs `project` activated as a cost
+allocation tag in the Billing console; until then the budget sees $0.
 """
 
 from __future__ import annotations
@@ -18,6 +22,7 @@ from aws_cdk import (
     RemovalPolicy,
     Size,
     Stack,
+    Tags,
 )
 from aws_cdk import aws_batch as batch
 from aws_cdk import aws_budgets as budgets
@@ -44,6 +49,9 @@ EPISODE_VCPUS = 2  # two episodes per 4 vCPUs was reliable in testing; three was
 EPISODE_MEMORY_MIB = 3072
 EPISODE_TIMEOUT = Duration.minutes(30)
 
+PROJECT_TAG_KEY = "project"
+PROJECT_TAG_VALUE = "lost-in-place"
+
 
 @dataclass(frozen=True)
 class SimSettings:
@@ -51,6 +59,9 @@ class SimSettings:
     max_vcpus: int = 32
     alert_email: str = ""
     image_tag: str = "latest"
+    # Account-wide EstimatedCharges alarm threshold; 0 disables it. Billing metrics cannot be
+    # filtered by tag, so this alarm also counts every other workload in the account.
+    account_alarm_usd: float = 0.0
 
 
 class SimStack(Stack):
@@ -58,6 +69,8 @@ class SimStack(Stack):
         self, scope: Construct, construct_id: str, *, settings: SimSettings, **kwargs: object
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)  # type: ignore[arg-type]
+        # The compute environment forwards this to the spot instances it launches.
+        Tags.of(self).add(PROJECT_TAG_KEY, PROJECT_TAG_VALUE)
 
         alerts = sns.Topic(self, "Alerts", display_name="lost-in-place cost alerts")
         alerts.add_to_resource_policy(
@@ -220,12 +233,13 @@ class SimStack(Stack):
                 budget_type="COST",
                 time_unit="MONTHLY",
                 budget_limit=budgets.CfnBudget.SpendProperty(amount=settings.budget_usd, unit="USD"),
+                cost_filters={"TagKeyValue": [f"user:{PROJECT_TAG_KEY}${PROJECT_TAG_VALUE}"]},
             ),
             notifications_with_subscribers=[
                 budgets.CfnBudget.NotificationWithSubscribersProperty(
                     notification=budgets.CfnBudget.NotificationProperty(
                         comparison_operator="GREATER_THAN",
-                        notification_type="ACTUAL",
+                        notification_type=kind,
                         threshold=pct,
                         threshold_type="PERCENTAGE",
                     ),
@@ -235,7 +249,7 @@ class SimStack(Stack):
                         )
                     ],
                 )
-                for pct in (50, 80, 100)
+                for kind, pct in (("ACTUAL", 50), ("ACTUAL", 80), ("ACTUAL", 100), ("FORECASTED", 100))
             ],
         )
         stop_action = budgets.CfnBudgetsAction(
@@ -256,22 +270,24 @@ class SimStack(Stack):
         )
         stop_action.node.add_dependency(budget)
 
-        # Billing metrics exist only in us-east-1 and need "Receive Billing Alerts" enabled.
-        billing = cloudwatch.Alarm(
-            self,
-            "BillingBackstop",
-            metric=cloudwatch.Metric(
-                namespace="AWS/Billing",
-                metric_name="EstimatedCharges",
-                dimensions_map={"Currency": "USD"},
-                statistic="Maximum",
-                period=Duration.hours(6),
-            ),
-            threshold=settings.budget_usd * 1.2,
-            evaluation_periods=1,
-            alarm_description="Estimated charges passed 120% of the lost-in-place budget",
-        )
-        billing.add_alarm_action(cw_actions.SnsAction(alerts))
+        if settings.account_alarm_usd > 0:
+            # Billing metrics exist only in us-east-1 and need "Receive Billing Alerts" enabled.
+            billing = cloudwatch.Alarm(
+                self,
+                "AccountBillingAlarm",
+                metric=cloudwatch.Metric(
+                    namespace="AWS/Billing",
+                    metric_name="EstimatedCharges",
+                    dimensions_map={"Currency": "USD"},
+                    statistic="Maximum",
+                    period=Duration.hours(6),
+                ),
+                threshold=settings.account_alarm_usd,
+                evaluation_periods=1,
+                alarm_description="Estimated charges for the whole AWS account (all projects) passed "
+                f"{settings.account_alarm_usd:g} USD",
+            )
+            billing.add_alarm_action(cw_actions.SnsAction(alerts))
 
         for name, value in {
             "ResultsBucket": results.bucket_name,

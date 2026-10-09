@@ -49,7 +49,22 @@ def test_budget_alerts_and_stop_action(template: Template) -> None:
         "AWS::Budgets::Budget",
         {
             "Budget": Match.object_like(
-                {"BudgetLimit": {"Amount": 50, "Unit": "USD"}, "TimeUnit": "MONTHLY"}
+                {
+                    "BudgetLimit": {"Amount": 50, "Unit": "USD"},
+                    "TimeUnit": "MONTHLY",
+                    "CostFilters": {"TagKeyValue": ["user:project$lost-in-place"]},
+                }
+            ),
+            "NotificationsWithSubscribers": Match.array_with(
+                [
+                    Match.object_like(
+                        {
+                            "Notification": Match.object_like(
+                                {"NotificationType": "FORECASTED", "Threshold": 100}
+                            )
+                        }
+                    )
+                ]
             ),
         },
     )
@@ -100,3 +115,28 @@ def test_results_bucket_is_private_and_encrypted(template: Template) -> None:
 
 def test_no_nat_gateway(template: Template) -> None:
     template.resource_count_is("AWS::EC2::NatGateway", 0)
+
+
+def test_spot_instances_carry_the_budget_tag(template: Template) -> None:
+    template.has_resource_properties(
+        "AWS::Batch::ComputeEnvironment",
+        {"ComputeResources": Match.object_like({"Tags": {"project": "lost-in-place"}})},
+    )
+
+
+def test_no_account_wide_billing_alarm_by_default(template: Template) -> None:
+    template.resource_count_is("AWS::CloudWatch::Alarm", 0)
+
+
+def test_account_wide_billing_alarm_is_opt_in() -> None:
+    app = cdk.App()
+    stack = SimStack(
+        app,
+        "WithAlarm",
+        settings=SimSettings(account_alarm_usd=400),
+        env=cdk.Environment(account="123456789012", region="us-east-1"),
+    )
+    Template.from_stack(stack).has_resource_properties(
+        "AWS::CloudWatch::Alarm",
+        {"Namespace": "AWS/Billing", "MetricName": "EstimatedCharges", "Threshold": 400},
+    )

@@ -10,6 +10,7 @@
     "maxVcpus": 32,
     "alertEmail": "",
     "imageTag": "latest",
+    "accountAlarmUsd": 0,
     "@aws-cdk/aws-iam:minimizePolicies": true,
     "@aws-cdk/aws-s3:createDefaultLoggingPolicy": true,
     "@aws-cdk/aws-ec2:restrictDefaultSecurityGroup": true
