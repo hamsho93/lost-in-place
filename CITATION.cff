@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+message: "If you use Lost in Place, please cite it as below."
+title: "Lost in Place: an estimator-degraded safety benchmark for LLM-commanded drones"
+authors:
+  - family-names: Hamsho
+    given-names: Mahmoud
+repository-code: "https://github.com/hamsho93/lost-in-place"
+license: MIT
+version: 0.0.1
+date-released: 2026-10-09

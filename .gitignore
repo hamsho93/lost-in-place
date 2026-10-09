@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+
+# Benchmark output (results go to S3, not git)
+runs/
+*.ulg
+
+# CDK
+infra/cdk.out/
+infra/.venv/
+node_modules/
+
+.DS_Store
+.env*
