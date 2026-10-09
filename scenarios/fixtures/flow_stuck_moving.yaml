@@ -1,0 +1,9 @@
+id: flow_stuck_moving
+world: lip_textured
+notes: Silent fault. Flow freezes mid-move; xy_valid stays true while the vehicle runs away.
+steps:
+  - {kind: goto, at_s: 0, north_m: 0, east_m: 0}
+  - {kind: goto, at_s: 20, north_m: 2, east_m: 0}
+  - {kind: inject, at_s: 25, unit: optical_flow, type: stuck}
+  - {kind: inject, at_s: 35, unit: optical_flow, type: ok}
+  - {kind: end, at_s: 50}

@@ -1,0 +1,11 @@
+id: square_map_frame
+world: lip_textured
+notes: >
+  3 m square in the EKF frame. Without a compass that frame is the nose at boot, so in the
+  room it is rotated by the spawn yaw (frame misalignment).
+steps:
+  - {kind: goto, at_s: 0, north_m: 0, east_m: 0}
+  - {kind: goto, at_s: 20, north_m: 3, east_m: 0}
+  - {kind: goto, at_s: 35, north_m: 3, east_m: 3}
+  - {kind: goto, at_s: 50, north_m: 0, east_m: 0}
+  - {kind: end, at_s: 65}

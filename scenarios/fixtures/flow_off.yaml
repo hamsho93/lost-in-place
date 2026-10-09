@@ -1,0 +1,8 @@
+id: flow_off
+world: lip_textured
+notes: Loud fault. Needs the optical-flow failure-injection patch (px4/patches).
+steps:
+  - {kind: goto, at_s: 0, north_m: 0, east_m: 0}
+  - {kind: inject, at_s: 20, unit: optical_flow, type: "off"}
+  - {kind: inject, at_s: 30, unit: optical_flow, type: ok}
+  - {kind: end, at_s: 45}

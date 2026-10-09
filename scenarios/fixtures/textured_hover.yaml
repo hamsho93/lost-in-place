@@ -1,0 +1,6 @@
+id: textured_hover
+world: lip_textured
+notes: Baseline. Well-textured floor, healthy estimator, 60 s hover.
+steps:
+  - {kind: goto, at_s: 0, north_m: 0, east_m: 0}
+  - {kind: end, at_s: 60}

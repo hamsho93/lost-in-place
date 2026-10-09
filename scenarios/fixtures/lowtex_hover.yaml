@@ -1,0 +1,8 @@
+id: lowtex_hover
+world: lip_lowtex
+notes: >
+  3% contrast floor. With the fixed flow plugin PX4 sees quality 0 and blind-lands within
+  seconds; with the stock plugin the estimate holds while the vehicle drifts away.
+steps:
+  - {kind: goto, at_s: 0, north_m: 0, east_m: 0}
+  - {kind: end, at_s: 60}
