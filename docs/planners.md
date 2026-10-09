@@ -31,10 +31,12 @@ my_planner = "my_package.benchmark_adapter:make_planner"
 # my_package/benchmark_adapter.py
 from lost_in_place.planning import Action, Observation
 
+
 class MyPlanner:
     async def propose(self, observation: Observation) -> Action:
         tool, args = my_existing_step(render_prompt(observation))  # your prompt + model call
         return Action(name=tool, args=args)
+
 
 def make_planner(**options) -> MyPlanner:
     return MyPlanner(**options)
