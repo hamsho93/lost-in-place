@@ -1,0 +1,26 @@
+name: image
+
+# Building PX4 and Gazebo takes a while, so the container is built weekly and on demand.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: false
+          tags: lost-in-place:ci
+          load: true
+      - run: docker run --rm lost-in-place:ci doctor
