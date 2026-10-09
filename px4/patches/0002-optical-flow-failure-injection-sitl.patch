@@ -1,0 +1,50 @@
+diff --git a/src/modules/failure_injection_manager/FailureTable.cpp b/src/modules/failure_injection_manager/FailureTable.cpp
+index 23938e71d7..7233435fd9 100644
+--- a/src/modules/failure_injection_manager/FailureTable.cpp
++++ b/src/modules/failure_injection_manager/FailureTable.cpp
+@@ -54,6 +54,7 @@ bool FailureTable::isSupported(uint8_t unit, uint8_t type)
+ 
+ 	case failure_injection_s::FAILURE_UNIT_SENSOR_GPS:
+ 	case failure_injection_s::FAILURE_UNIT_SENSOR_AIRSPEED:
++	case failure_injection_s::FAILURE_UNIT_SENSOR_OPTICAL_FLOW:
+ 		return type == failure_injection_s::FAILURE_TYPE_OK
+ 		       || type == failure_injection_s::FAILURE_TYPE_OFF
+ 		       || type == failure_injection_s::FAILURE_TYPE_STUCK
+diff --git a/src/modules/simulation/gz_bridge/GZBridge.cpp b/src/modules/simulation/gz_bridge/GZBridge.cpp
+index 51308d351f..7d7a32b484 100644
+--- a/src/modules/simulation/gz_bridge/GZBridge.cpp
++++ b/src/modules/simulation/gz_bridge/GZBridge.cpp
+@@ -391,6 +391,19 @@ void GZBridge::opticalFlowCallback(const px4::msgs::OpticalFlow &msg)
+ 	// This means that delta angle will come from vehicle gyro
+ 	// Distance will come from vehicle distance sensor
+ 
++	_flow_failure_config.update();
++	const failure_injection::Mode flow_mode = _flow_failure_config.mode(failure_injection_s::FAILURE_UNIT_SENSOR_OPTICAL_FLOW, 1);
++
++	// Off and Stuck first, so the Stuck cache only ever holds uncorrupted samples
++	if (!failure_injection::process(flow_mode, report, _flow_stuck)) {
++		return;
++	}
++
++	if (flow_mode == failure_injection::Mode::Wrong) {
++		// degraded tracking: data keeps arriving but the sensor reports it as untrustworthy
++		report.quality = 0;
++	}
++
+ 	_optical_flow_pub.publish(report);
+ }
+ 
+diff --git a/src/modules/simulation/gz_bridge/GZBridge.hpp b/src/modules/simulation/gz_bridge/GZBridge.hpp
+index 93c4d87fcf..cfccd26192 100644
+--- a/src/modules/simulation/gz_bridge/GZBridge.hpp
++++ b/src/modules/simulation/gz_bridge/GZBridge.hpp
+@@ -165,6 +165,9 @@ private:
+ 
+ 	failure_injection::Config _failure_config;
+ 	failure_injection::Stuck<sensor_gnss_s> _gnss_stuck;
++	// separate cache: the flow and GNSS callbacks may run on different gz-transport threads
++	failure_injection::Config _flow_failure_config;
++	failure_injection::Stuck<sensor_optical_flow_s> _flow_stuck;
+ 
+ 	GZMixingInterfaceESC   _mixing_interface_esc{_node};
+ 	GZMixingInterfaceServo _mixing_interface_servo{_node};

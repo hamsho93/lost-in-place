@@ -1,0 +1,39 @@
+From 27a8facee540a1df30270415fb3bc9478af968c4 Mon Sep 17 00:00:00 2001
+From: hamsho93 <mhamsho@berkeley.edu>
+Date: Fri, 9 Oct 2026 02:56:04 +0000
+Subject: [PATCH] fix(simulation): skip rate-limited frames in gz optical flow
+ sensor
+
+OpticalFlowOpenCV::calcFlow() returns -1 for frames it accumulates into the
+next rate-limited output, but the sensor published them anyway. GZBridge
+assigns that quality to the uint8 sensor_optical_flow field, which is
+undefined for a negative float and reads 255 on x86. Over a low-texture
+floor every other sample was zero flow at maximum quality, so EKF2 kept
+fusing it and the vehicle drifted while the estimate held position.
+
+Assisted-by: Cursor:claude-opus-5-5
+Signed-off-by: hamsho93 <mhamsho@berkeley.edu>
+---
+ .../gz_plugins/optical_flow/OpticalFlowSensor.cpp           | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/modules/simulation/gz_plugins/optical_flow/OpticalFlowSensor.cpp b/src/modules/simulation/gz_plugins/optical_flow/OpticalFlowSensor.cpp
+index 6ec20d6c35..a69ea73023 100644
+--- a/src/modules/simulation/gz_plugins/optical_flow/OpticalFlowSensor.cpp
++++ b/src/modules/simulation/gz_plugins/optical_flow/OpticalFlowSensor.cpp
+@@ -151,6 +151,12 @@ bool OpticalFlowSensor::Update(const std::chrono::steady_clock::duration &_now)
+ 	int quality = _optical_flow->calcFlow(_last_image_gray.data, _last_image_timestamp,
+ 					      _integration_time_us, flow_x, flow_y);
+ 
++	// calcFlow() returns -1 for frames folded into the next rate-limited output
++	if (quality < 0) {
++		_new_image_available = false;
++		return true;
++	}
++
+ 	msg.set_integrated_x(flow_x);
+ 	msg.set_integrated_y(flow_y);
+ 	msg.set_integration_time_us(_integration_time_us);
+-- 
+2.43.0
+
