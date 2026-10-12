@@ -187,3 +187,11 @@ def test_provenance_is_recorded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     assert prov["px4"]["commit"] != "unknown"
     assert set(prov["px4"]["patches"]) >= {"0001-gz-optical-flow-skip-rate-limited-frames.patch"}
     assert len(prov["scenario_sha256"]) == 16
+
+
+def test_image_digest_is_the_pinned_registry_digest() -> None:
+    repo = "123.dkr.ecr.us-east-1.amazonaws.com/images"
+    pinned = {"Image": f"{repo}@sha256:a0512efa", "ImageID": "sha256:40e7368d"}
+    assert episode.provenance.digest_from_task_metadata(pinned) == "sha256:a0512efa"
+    tagged = {"Image": f"{repo}:latest", "ImageID": "sha256:40e7368d"}
+    assert episode.provenance.digest_from_task_metadata(tagged) == "sha256:40e7368d"
