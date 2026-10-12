@@ -1,0 +1,14 @@
+#!/bin/sh
+# Sourced by PX4's SITL rcS right after px4-rc.mavlink, so $udp_offboard_port_local is the
+# offboard (MAVSDK) link of this instance.
+#
+# Rates follow sim time in lockstep. At 1 Hz the heartbeat misses MAVSDK's 3 s wall-clock timeout
+# below about 0.33x real time (Batch runs at 0.16-0.24x); mavsdk_server then aborted on commands
+# sent while it considered the vehicle lost. 5 Hz holds down to about 0.07x.
+mavlink stream -r 5 -s HEARTBEAT -u $udp_offboard_port_local
+# Health and truth for agent episodes, read with MAVSDK's MavlinkDirect plugin. Set here rather
+# than with SET_MESSAGE_INTERVAL over MAVSDK, which hung or aborted mavsdk_server on Batch.
+mavlink stream -r 10 -s ESTIMATOR_STATUS -u $udp_offboard_port_local
+mavlink stream -r 10 -s OPTICAL_FLOW_RAD -u $udp_offboard_port_local
+# Truth at 50 Hz: at 10 Hz the online hazard label lagged truth by up to 0.8 m in a runaway.
+mavlink stream -r 50 -s HIL_STATE_QUATERNION -u $udp_offboard_port_local

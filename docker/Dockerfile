@@ -27,6 +27,8 @@ RUN git clone --quiet https://github.com/PX4/PX4-Autopilot.git /opt/PX4-Autopilo
  && rm -rf /var/lib/apt/lists/*
 # The default c++ may be clang without libstdc++ headers; PX4 SITL builds cleanly with gcc.
 RUN cd /opt/PX4-Autopilot && CC=gcc CXX=g++ make px4_sitl
+# MAVLink stream rates for the offboard link, applied at boot (see the file).
+COPY docker/4021_gz_x500_flow.post /opt/PX4-Autopilot/build/px4_sitl_default/etc/init.d-posix/airframes/
 
 # The runner.
 COPY --from=ghcr.io/astral-sh/uv:0.12 /uv /usr/local/bin/uv

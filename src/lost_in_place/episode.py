@@ -17,16 +17,25 @@ import traceback
 from collections.abc import Iterator
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from mavsdk_grpc import System
 from mavsdk_grpc.failure import FailureType, FailureUnit
 from mavsdk_grpc.offboard import OffboardError, PositionNedYaw
 
 from lost_in_place import provenance
-from lost_in_place.config import FLOW_ENABLE_AFTER_SIM_S, HARNESS_PARAMS, VEHICLE_PARAMS, Paths
+from lost_in_place.config import (
+    FLOW_ENABLE_AFTER_SIM_S,
+    HARNESS_PARAMS,
+    MISSION_PARAMS,
+    VEHICLE_PARAMS,
+    Paths,
+)
 from lost_in_place.scenario import End, Goto, Inject, Scenario, SetParam
 from lost_in_place.sim import SimInstance, offboard_port
+
+if TYPE_CHECKING:
+    from lost_in_place.agent import AgentConfig
 
 BOOT_STALL_WALL_S = 150.0  # sim clock still at zero this long after connect: a wedged boot
 SIM_STALL_WALL_S = 90.0  # sim clock frozen mid-episode: Gazebo died (e.g. after a runaway)
@@ -74,6 +83,10 @@ class EpisodeResult:
     events: list[dict[str, Any]] = field(default_factory=list)
     params: dict[str, int | float] = field(default_factory=dict)
     provenance: dict[str, Any] = field(default_factory=dict)
+    scenario: dict[str, Any] = field(default_factory=dict)  # as flown, so an episode scores on its own
+    agent: dict[str, Any] = field(default_factory=dict)  # planner, validator and observation arms
+    decisions: list[dict[str, Any]] = field(default_factory=list)
+    planner_decisions: list[dict[str, Any]] = field(default_factory=list)  # model calls, for LLM planners
 
 
 _FAILURE_UNITS = {
@@ -101,6 +114,7 @@ class _Episode:
         self.range_m: float | None = None
         self._t0 = time.monotonic()
         self._clock_start: tuple[float, int] | None = None  # (wall, sim_us) at the first sim tick
+        self.paused = False  # the world is paused on purpose (agent episodes), not stalled
 
     def real_time_factor(self) -> float | None:
         if self._clock_start is None:
@@ -125,7 +139,7 @@ class _Episode:
         last_change, last_value = time.monotonic(), self.sim_us
         while self.sim_s < target_s:
             await asyncio.sleep(0.1)
-            if self.sim_us != last_value:
+            if self.sim_us != last_value or self.paused:
                 last_change, last_value = time.monotonic(), self.sim_us
             elif self.sim_us == 0 and time.monotonic() - last_change > BOOT_STALL_WALL_S:
                 raise BootStall("simulation clock never started")
@@ -214,16 +228,7 @@ class _Episode:
         start = self.sim_s
         range_at_arm = self.range_m
         self.log(action="offboard_start")
-        takeoff_checked = False
-        for step in self.scenario.steps:
-            if not takeoff_checked and step.at_s > TAKEOFF_CHECK_SIM_S:
-                await self.wait_sim(start + TAKEOFF_CHECK_SIM_S)
-                self.check_takeoff(range_at_arm)
-                takeoff_checked = True
-            await self.wait_sim(start + step.at_s)
-            await self._apply(drone, step)
-            if isinstance(step, End):
-                break
+        await self._mission(drone, start, range_at_arm)
         self.mark("mission_end")
 
         with contextlib.suppress(OffboardError):
@@ -235,6 +240,19 @@ class _Episode:
             await asyncio.sleep(0.5)
         self.mark("landed")
         return "completed"
+
+    async def _mission(self, drone: System, start: float, range_at_arm: float | None) -> None:
+        """Fly the scenario's scripted steps."""
+        takeoff_checked = False
+        for step in self.scenario.steps:
+            if not takeoff_checked and step.at_s > TAKEOFF_CHECK_SIM_S:
+                await self.wait_sim(start + TAKEOFF_CHECK_SIM_S)
+                self.check_takeoff(range_at_arm)
+                takeoff_checked = True
+            await self.wait_sim(start + step.at_s)
+            await self._apply(drone, step)
+            if isinstance(step, End):
+                break
 
     async def _apply(self, drone: System, step: Goto | Inject | SetParam | End) -> None:
         if isinstance(step, Goto):
@@ -283,10 +301,23 @@ def _mavsdk_server_log(path: Path) -> Iterator[None]:
 
 
 def run_episode(
-    scenario: Scenario, seed: int, out_dir: Path, *, instance: int = 0, paths: Paths | None = None
+    scenario: Scenario,
+    seed: int,
+    out_dir: Path,
+    *,
+    instance: int = 0,
+    paths: Paths | None = None,
+    agent: AgentConfig | None = None,
 ) -> EpisodeResult:
     """Fly one scenario; reboots the sim after a wedged boot or a vehicle that never left the
-    ground, up to MAX_BOOT_ATTEMPTS boots in all."""
+    ground, up to MAX_BOOT_ATTEMPTS boots in all. A mission scenario is flown by `agent`'s
+    planner (scripted-naive by default)."""
+    from lost_in_place.agent import AgentConfig, AgentEpisode
+
+    if scenario.mission is None and agent is not None:
+        raise ValueError(f"{scenario.id} has no mission for a planner to fly")
+    if scenario.mission is not None:
+        agent = agent or AgentConfig()
     paths = paths or Paths.from_env()
     missing = paths.missing()
     if missing:
@@ -294,6 +325,8 @@ def run_episode(
     out_dir.mkdir(parents=True, exist_ok=True)
     spawn = scenario.spawn_for(seed)
     params = {**VEHICLE_PARAMS, **HARNESS_PARAMS, "EKF2_OF_CTRL": 0}
+    if scenario.mission is not None:
+        params.update(MISSION_PARAMS)
     result = EpisodeResult(
         scenario_id=scenario.id,
         seed=seed,
@@ -302,6 +335,7 @@ def run_episode(
         spawn=spawn.model_dump(),
         params=params,
         provenance=provenance.collect(scenario.model_dump_json()),
+        scenario=scenario.model_dump(mode="json"),
     )
     sim = SimInstance(paths=paths, world=scenario.world, spawn=spawn, params=params, instance=instance)
 
@@ -313,7 +347,13 @@ def run_episode(
             result.events.clear()
             result.wall_s.clear()
             result.failsafe = False
-            episode = _Episode(scenario, seed, sim, result)
+            result.decisions.clear()
+            result.planner_decisions.clear()
+            episode = (
+                AgentEpisode(scenario, seed, sim, result, agent)
+                if agent
+                else _Episode(scenario, seed, sim, result)
+            )
             sim.start(out_dir / "px4_console.txt")
             try:
                 result.outcome = asyncio.run(asyncio.wait_for(episode.run(), EPISODE_TIMEOUT_WALL_S))

@@ -25,7 +25,7 @@ class Room:
 
     north_m: float
     east_m: float
-    wall_height_m: float = 2.5
+    wall_height_m: float = 6.0  # a runaway climbed to 2.4 m and cleared 2.5 m walls
     wall_thickness_m: float = 0.2
 
     def interior_ne(self) -> list[tuple[float, float]]:

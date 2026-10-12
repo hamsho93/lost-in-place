@@ -1,0 +1,10 @@
+# Harness pilot for E1: does the scorer behave, how often does the harness fail, and how
+# correlated are seeds within a scenario (rho)? Excluded from confirmatory analysis.
+name: e1-pilot
+scenarios: [scenarios/pilot/*.yaml]
+reps: 10
+planners: [scripted-naive]
+validators: [none, geometric, estimator_health]
+observations: [O0]
+latency_s: 2.0
+shuffle_seed: 0

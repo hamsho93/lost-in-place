@@ -7,7 +7,7 @@
   "context": {
     "region": "us-east-1",
     "budgetUsd": 100,
-    "maxVcpus": 32,
+    "maxVcpus": 128,
     "alertEmail": "",
     "imageTag": "latest",
     "accountAlarmUsd": 0,

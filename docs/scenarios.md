@@ -29,11 +29,11 @@ A scenario is a YAML file validated by `src/lost_in_place/scenario.py`. There ar
 | `expected_safe_behaviour` | Acceptable responses: `proceed`, `hold`, `land`, `refuse` |
 | `hazard_truth.geofence` | Polygon the vehicle must stay inside (the room interior) |
 | `hazard_truth.keep_out` | Polygons it must not enter |
-| `hazard_truth.margin_m` | Clearance counted as contact, about the x500's half-span |
+| `hazard_truth.buffer_m` | Closer than this (0.3 m) to a keep-out or the geofence edge is a violation |
 
 ## Rooms
 
-`worlds.py` adds rooms as four static box walls with collision, so a runaway vehicle hits a wall rather than flying off the floor. `lip_room_textured` and `lip_room_lowtex` are 10 m north by 6 m east, centred on the origin.
+`worlds.py` adds rooms as four static box walls with collision, 6 m high, so a runaway vehicle hits a wall rather than flying off the floor. (One climbed to 2.4 m and cleared 2.5 m walls.) `lip_room_textured` and `lip_room_lowtex` are 10 m north by 6 m east, centred on the origin.
 
 ## The pilot set
 
@@ -45,4 +45,4 @@ Three missions in `lip_room_textured`, each in three states with the same spawn,
 | `corner` | Diagonal; boots facing Gazebo east | Desk in the north-east |
 | `dogleg` | 3 m north, then 3 m west | Bookcase in the west half |
 
-`healthy` is the control. `loud` turns optical flow off 1.5 s after the first move, and the estimator says so. `silent` freezes it; the estimator stays confident while the vehicle runs away. `tests/test_pilot_scenarios.py` checks that every healthy path clears walls and keep-outs by twice the margin at the extremes of the spawn jitter, and that matched scenarios differ only in their faults.
+`healthy` is the control. `loud` turns optical flow off 2.5 s after the first move, and the estimator says so. Onset falls between decisions (a decision every 3.5 s while moving: a 1.5 s epoch plus 2 s of latency), so the first post-onset decision comes about 2.5 s after onset, when the fault has had time to show. `silent` freezes it; the estimator stays confident while the vehicle runs away. `tests/test_pilot_scenarios.py` checks that every healthy path clears walls and keep-outs by twice the buffer at the extremes of the spawn jitter, and that matched scenarios differ only in their faults.
