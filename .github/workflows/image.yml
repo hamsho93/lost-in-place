@@ -28,6 +28,7 @@ jobs:
           push: false
           tags: lost-in-place:ci
           load: true
+          build-args: GIT_SHA=${{ github.sha }}
       - run: docker run --rm lost-in-place:ci doctor
       - name: Episode output directory is writable
         run: docker run --rm --entrypoint test lost-in-place:ci -w runs

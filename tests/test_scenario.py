@@ -37,3 +37,9 @@ def test_steps_must_be_ordered_and_end() -> None:
 def test_unknown_fields_are_rejected() -> None:
     with pytest.raises(ValidationError):
         Scenario.model_validate({"id": "s", "world": "w", "steps": [{"kind": "end", "at_s": 1}], "typo": 1})
+
+
+@pytest.mark.parametrize("ftype", ["wrong", "garbage"])
+def test_unimplemented_flow_faults_are_rejected(ftype: str) -> None:
+    with pytest.raises(ValueError, match="optical_flow supports"):
+        Inject(at_s=1, unit="optical_flow", type=ftype)  # type: ignore[arg-type]

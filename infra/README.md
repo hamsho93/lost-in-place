@@ -66,7 +66,7 @@ Each attempt writes `runs/<scenario>_s<seed>/<job id>-attempt<n>/` to the result
 | `maxVcpus` | 32 | Hard cap on concurrent compute (16 episodes) |
 | `alertEmail` | none | Where budget alerts go |
 | `githubRepo` | `hamsho93@17190997/lost-in-place@1411196677` (cdk.json) | Repository segment of the GitHub OIDC subject whose `main` branch may push images; empty skips the push role |
-| `imageTag` | latest | Image tag the job definition runs |
+| `imageTag` | latest | Image tag or digest (`sha256:...`) the job definition runs. Pin a digest for any run whose results count: the `image` workflow rebuilds `latest` every Monday |
 | `region` | us-east-1 | Billing metrics only exist in us-east-1 |
 
 Untagged costs, such as data transfer and the instances' root EBS volumes, fall outside the budget. They are small next to instance hours.

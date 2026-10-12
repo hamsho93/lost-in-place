@@ -36,7 +36,9 @@ COPY src/ src/
 COPY scenarios/ scenarios/
 RUN uv sync --frozen --no-dev --extra aws
 
-ENV LIP_PX4_DIR=/opt/PX4-Autopilot \
+ARG GIT_SHA=unknown
+ENV LIP_GIT_SHA=$GIT_SHA \
+    LIP_PX4_DIR=/opt/PX4-Autopilot \
     LIP_WORLDS_DIR=/opt/worlds \
     PATH=/opt/lost-in-place/.venv/bin:$PATH
 RUN lip worlds

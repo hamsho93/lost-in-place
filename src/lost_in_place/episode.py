@@ -23,6 +23,7 @@ from mavsdk_grpc import System
 from mavsdk_grpc.failure import FailureType, FailureUnit
 from mavsdk_grpc.offboard import OffboardError, PositionNedYaw
 
+from lost_in_place import provenance
 from lost_in_place.config import FLOW_ENABLE_AFTER_SIM_S, HARNESS_PARAMS, VEHICLE_PARAMS, Paths
 from lost_in_place.scenario import End, Goto, Inject, Scenario, SetParam
 from lost_in_place.sim import SimInstance, offboard_port
@@ -53,6 +54,10 @@ class StuckOnGround(RuntimeError):
     """PX4 commands full thrust but Gazebo's vehicle doesn't move (seen on a packed, fresh host)."""
 
 
+class InjectFailed(RuntimeError):
+    """PX4 refused a scheduled fault, so the episode would be labelled degraded while healthy."""
+
+
 @dataclass
 class EpisodeResult:
     scenario_id: str
@@ -64,9 +69,11 @@ class EpisodeResult:
     failsafe: bool = False
     boot_attempts: int = 0
     retried: list[str] = field(default_factory=list)  # outcomes of earlier boots of this episode
+    real_time_factor: float | None = None  # sim seconds per wall second, from connect to stop
     wall_s: dict[str, float] = field(default_factory=dict)
     events: list[dict[str, Any]] = field(default_factory=list)
     params: dict[str, int | float] = field(default_factory=dict)
+    provenance: dict[str, Any] = field(default_factory=dict)
 
 
 _FAILURE_UNITS = {
@@ -93,6 +100,14 @@ class _Episode:
         self.sim_us = 0
         self.range_m: float | None = None
         self._t0 = time.monotonic()
+        self._clock_start: tuple[float, int] | None = None  # (wall, sim_us) at the first sim tick
+
+    def real_time_factor(self) -> float | None:
+        if self._clock_start is None:
+            return None
+        wall = time.monotonic() - self._clock_start[0]
+        sim = (self.sim_us - self._clock_start[1]) / 1e6
+        return round(sim / wall, 3) if wall > 0 and sim > 0 else None
 
     def log(self, **event: Any) -> None:
         self.result.events.append(
@@ -151,6 +166,8 @@ class _Episode:
         await drone.telemetry.set_rate_imu(50)
         async for imu in drone.telemetry.imu():
             self.sim_us = int(imu.timestamp_us)
+            if self._clock_start is None and self.sim_us > 0:
+                self._clock_start = (time.monotonic(), self.sim_us)
 
     async def _watch_range(self, drone: System) -> None:
         await drone.telemetry.set_rate_distance_sensor(10)
@@ -233,6 +250,8 @@ class _Episode:
             except Exception as exc:  # e.g. UNSUPPORTED on a PX4 build without the flow patch
                 ack = str(exc).splitlines()[0]
             self.log(action="inject", unit=step.unit, type=step.type, ack=ack)
+            if ack != "accepted":
+                raise InjectFailed(f"{step.unit} {step.type}: {ack}")
         elif isinstance(step, SetParam):
             await drone.param.set_param_float(step.name, step.value)
             self.log(action="param", name=step.name, value=step.value)
@@ -282,6 +301,7 @@ def run_episode(
         world=scenario.world,
         spawn=spawn.model_dump(),
         params=params,
+        provenance=provenance.collect(scenario.model_dump_json()),
     )
     sim = SimInstance(paths=paths, world=scenario.world, spawn=spawn, params=params, instance=instance)
 
@@ -301,6 +321,8 @@ def run_episode(
                 result.outcome = "boot_stall"
             except StuckOnGround as exc:
                 result.outcome = f"stuck_on_ground: {exc}"
+            except InjectFailed as exc:
+                result.outcome = f"inject_failed: {exc}"
             except SimStall as exc:
                 result.outcome = f"sim_stall: {exc}"
             except TimeoutError:
@@ -313,6 +335,7 @@ def run_episode(
                 result.outcome = f"error: {type(exc).__name__}" + (f": {first_line}" if first_line else "")
             finally:
                 episode.mark("stopped")
+                result.real_time_factor = episode.real_time_factor()
                 sim.stop()
             if not result.outcome.startswith(RETRIED_OUTCOMES):
                 break

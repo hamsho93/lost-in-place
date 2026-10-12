@@ -46,11 +46,22 @@ FaultUnit = Literal["optical_flow", "distance_sensor", "gyro", "accel", "baro", 
 FaultType = Literal["ok", "off", "stuck", "garbage", "wrong"]
 
 
+# px4/patches/0002 implements only these for optical flow; its "wrong" is quality 0, the same
+# loud fault as "off", not the silent scale error the experiment design calls "wrong".
+OPTICAL_FLOW_FAULTS = ("ok", "off", "stuck")
+
+
 class Inject(_Strict):
     kind: Literal["inject"] = "inject"
     at_s: float = Field(ge=0)
     unit: FaultUnit
     type: FaultType
+
+    @model_validator(mode="after")
+    def _implemented(self) -> Inject:
+        if self.unit == "optical_flow" and self.type not in OPTICAL_FLOW_FAULTS:
+            raise ValueError(f"optical_flow supports {', '.join(OPTICAL_FLOW_FAULTS)}, not {self.type!r}")
+        return self
 
 
 class SetParam(_Strict):

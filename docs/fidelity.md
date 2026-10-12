@@ -25,6 +25,18 @@ What the simulator gets right, and where it differs from a real flow-and-rangefi
 | Retries overwrote earlier attempts | The bucket isn't versioned, and every attempt uploaded to `runs/<scenario>_s<seed>/`. A successful retry replaced a crashed attempt's files | Each attempt uploads under `<job id>-attempt<n>/` |
 | **The first episode on a fresh host is unreliable, mostly on AMD** (open) | On 2-vCPU `.large` instances, 4 of 9 failed: two MAVSDK gRPC resets on `set_param EKF2_OF_CTRL` about 12 s into the sim, and two `no_local_position` after "Preflight Fail: no valid barometer data". On `xlarge`, 4 of 8 first episodes on `c7a` went wrong (two gRPC resets, two that never took off, see the next row) against 0 of 26 on `m7i` and `c7i` (three Intel boot stalls, all recovered by a reboot). All four had the fastest PX4 start-ups (connected after 15 to 17 s), but two Intel episodes that connected after 17 and 18 s were fine, so a fast start-up alone isn't the trigger. Retries on a host that had already run an episode: 6 of 6 fine | The compute environment launches only Intel `xlarge` and `2xlarge` instances (c7i, m7i, c6i). Batch retries failed attempts, and the runner reboots wedged or stuck sims. Cause not found |
 | **Gazebo sometimes ignores the motors** (open) | 2 of 24 on `xlarge`, both on one `c7a`: PX4 armed, detected take-off and went to full thrust, but Gazebo's ground truth never moved. The flow camera saw nothing, the estimator dead-reckoned until its position went invalid, and a blind-land failsafe fired before the fault was injected. Both runs reported `completed` | The runner checks the rangefinder 8 s after arming. If it hasn't risen 0.3 m, the outcome is `stuck_on_ground` and the sim is rebooted, up to three boots in all. Earlier boots' outcomes are kept in `episode.json` as `retried`. Cause unknown |
+| A rejected fault injection went unnoticed | An episode labelled "degraded" could fly healthy, e.g. on a PX4 build without the flow patch | Any ack other than "accepted" ends the episode as `inject_failed`. Optical-flow faults are limited to `off`, `stuck` and `ok`, which `px4/patches/0002` implements |
+
+## Which attempt counts
+
+Retries exist to get past harness failures, never to re-roll a result. The rule, fixed before any counted run:
+
+- **Harness failures** are outcomes the vehicle and planner didn't cause: `boot_stall`, `stuck_on_ground`, `sim_stall`, `inject_failed`, `no_local_position`, `arming_denied`, `timeout`, `error: ...`, and spot reclaims (no files, Batch status "Host EC2 ... terminated"). They exit non-zero, so Batch retries them.
+- **Every other outcome is a result**, including failsafes, crashes and refusals. It exits zero and is never retried.
+- An episode's result is its **first attempt that isn't a harness failure**. Every attempt is kept under its own `<job id>-attempt<n>/` folder. Reports give the harness-failure rate per cell next to the results, so a cell whose failures cluster can't hide them.
+- An episode with no valid attempt after Batch's 3 attempts counts as missing, and is reported as such, never re-run until it passes.
+
+Every `episode.json` also records `provenance` (package version, git SHA, image digest, PX4 commit and patch hashes, scenario hash) and `real_time_factor`, the sim seconds per wall second from connect to stop.
 
 ## Spot smoke run (2026-10-12)
 
