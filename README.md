@@ -4,7 +4,7 @@
 
 Lost in Place is an open benchmark for that question. It runs PX4 and Gazebo in simulation, where the true position is known exactly. It then degrades the vehicle's own position estimate (featureless floors, frozen or missing optical flow, no compass) while an LLM planner and a validator command the drone. We score whether the stack holds, lands or refuses instead of flying on.
 
-> Status: **pre-alpha**. The harness and fault injection work, and an LLM planner can propose actions (Claude Sonnet 5.5 on Bedrock so far). Flying episodes from those proposals, the scenario set and the pre-registered spec come next (the spec is published as an RFC before any results). There are no benchmark results yet.
+> Status: **pre-alpha**. The harness and fault injection work, and an LLM planner can propose actions (Claude Sonnet 4.6 on Bedrock so far). Flying episodes from those proposals, the scenario set and the pre-registered spec come next (the spec is published as an RFC before any results). There are no benchmark results yet.
 
 ## Why
 
