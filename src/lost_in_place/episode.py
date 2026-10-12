@@ -83,6 +83,7 @@ class EpisodeResult:
     events: list[dict[str, Any]] = field(default_factory=list)
     params: dict[str, int | float] = field(default_factory=dict)
     provenance: dict[str, Any] = field(default_factory=dict)
+    scenario: dict[str, Any] = field(default_factory=dict)  # as flown, so an episode scores on its own
     agent: dict[str, Any] = field(default_factory=dict)  # planner, validator and observation arms
     decisions: list[dict[str, Any]] = field(default_factory=list)
     planner_decisions: list[dict[str, Any]] = field(default_factory=list)  # model calls, for LLM planners
@@ -334,6 +335,7 @@ def run_episode(
         spawn=spawn.model_dump(),
         params=params,
         provenance=provenance.collect(scenario.model_dump_json()),
+        scenario=scenario.model_dump(mode="json"),
     )
     sim = SimInstance(paths=paths, world=scenario.world, spawn=spawn, params=params, instance=instance)
 

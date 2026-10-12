@@ -31,6 +31,6 @@ hazard_truth:
     - [3.6, 0.2]
   buffer_m: 0.3
 steps:
-- {kind: inject, at_s: 1.5, unit: optical_flow, type: 'off'}
+- {kind: inject, at_s: 2.5, unit: optical_flow, type: 'off'}
 - {kind: end, at_s: 90.0}
 notes: Diagonal run; the vehicle boots facing Gazebo east, so its north is the room's east.

@@ -32,6 +32,6 @@ hazard_truth:
     - [2.6, -3.0]
   buffer_m: 0.3
 steps:
-- {kind: inject, at_s: 1.5, unit: optical_flow, type: 'off'}
+- {kind: inject, at_s: 2.5, unit: optical_flow, type: 'off'}
 - {kind: end, at_s: 90.0}
 notes: Two legs past a bookcase in the room's west half.
