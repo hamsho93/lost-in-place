@@ -66,13 +66,17 @@ def _agent_config(args: argparse.Namespace) -> AgentConfig:
 
 
 def _analyze(run_dirs: list[Path]) -> int:
+    """Metrics for every episode, and the section 7 score for agent episodes."""
     from lost_in_place.metrics import analyze
+    from lost_in_place.scoring import score_run
 
     status = 0
     for run_dir in run_dirs:
         try:
             print(json.dumps(analyze(run_dir)))
-        except (OSError, ValueError) as exc:
+            if json.loads((run_dir / "episode.json").read_text()).get("decisions"):
+                print(json.dumps(score_run(run_dir)))
+        except (OSError, ValueError, KeyError) as exc:
             print(f"{run_dir}: {exc}", file=sys.stderr)
             status = 1
     return status
@@ -203,7 +207,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run.set_defaults(func=_cmd_run)
 
-    analyze = sub.add_parser("analyze", help="compute metrics for finished episodes")
+    analyze = sub.add_parser(
+        "analyze", help="compute metrics (and scores, for agent episodes) for finished episodes"
+    )
     analyze.add_argument("run_dirs", type=Path, nargs="+")
     analyze.set_defaults(func=lambda a: _analyze(a.run_dirs))
 
