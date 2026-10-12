@@ -29,6 +29,8 @@ jobs:
           tags: lost-in-place:ci
           load: true
       - run: docker run --rm lost-in-place:ci doctor
+      - name: Episode output directory is writable
+        run: docker run --rm --entrypoint test lost-in-place:ci -w runs
       - if: github.ref == 'refs/heads/main' && env.PUSH_ROLE != '' && env.REPOSITORY != ''
         uses: aws-actions/configure-aws-credentials@v4
         with:
