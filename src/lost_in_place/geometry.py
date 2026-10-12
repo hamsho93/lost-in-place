@@ -16,6 +16,24 @@ from collections.abc import Sequence
 
 Point = tuple[float, float]  # (north, east)
 
+# The Gazebo world origin (PX4's default.sdf, which every generated world keeps).
+WORLD_ORIGIN_LATLON = (47.397971057728974, 8.546163739800146)
+EARTH_RADIUS_M = 6371000.0  # PX4's CONSTANTS_RADIUS_OF_EARTH
+
+
+def latlon_to_truth(
+    lat_deg: float, lon_deg: float, origin: tuple[float, float] = WORLD_ORIGIN_LATLON
+) -> Point:
+    """PX4's MapProjection::project: ground-truth lat/lon back to truth-frame metres."""
+    lat, lon = math.radians(lat_deg), math.radians(lon_deg)
+    lat0, lon0 = math.radians(origin[0]), math.radians(origin[1])
+    cos_d_lon = math.cos(lon - lon0)
+    arg = max(-1.0, min(1.0, math.sin(lat0) * math.sin(lat) + math.cos(lat0) * math.cos(lat) * cos_d_lon))
+    c = math.acos(arg)
+    k = c / math.sin(c) if abs(c) > 0 else 1.0
+    north = k * (math.cos(lat0) * math.sin(lat) - math.sin(lat0) * math.cos(lat) * cos_d_lon) * EARTH_RADIUS_M
+    return north, k * math.cos(lat) * math.sin(lon - lon0) * EARTH_RADIUS_M
+
 
 def spawn_pose(x: float, y: float, yaw_deg: float) -> tuple[Point, float]:
     """Truth position and heading (radians, clockwise from north) of a Gazebo spawn pose."""

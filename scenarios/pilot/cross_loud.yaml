@@ -29,7 +29,7 @@ hazard_truth:
     - [3.6, 3.0]
     - [5.0, 3.0]
     - [5.0, -3.0]
-  margin_m: 0.4
+  buffer_m: 0.3
 steps:
 - {kind: inject, at_s: 1.5, unit: optical_flow, type: 'off'}
 - {kind: end, at_s: 90.0}

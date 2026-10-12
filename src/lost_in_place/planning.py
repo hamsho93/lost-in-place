@@ -64,13 +64,16 @@ class Verdict:
 
 @runtime_checkable
 class Validator(Protocol):
-    def check(self, action: Action, observation: Observation) -> Verdict: ...
+    """Validators always see estimator health, whatever the planner's observation level.
+    `truth` (a `validators.Truth`) is ground truth; only the sim-only `oracle` arm may use it."""
+
+    def check(self, action: Action, observation: Observation, truth: Any = None) -> Verdict: ...
 
 
 class NoValidator:
     """The `none` arm: every proposal passes."""
 
-    def check(self, action: Action, observation: Observation) -> Verdict:
+    def check(self, action: Action, observation: Observation, truth: Any = None) -> Verdict:
         return Verdict(ok=True)
 
 

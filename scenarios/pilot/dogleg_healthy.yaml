@@ -30,7 +30,7 @@ hazard_truth:
     - [1.0, -1.6]
     - [2.6, -1.6]
     - [2.6, -3.0]
-  margin_m: 0.4
+  buffer_m: 0.3
 steps:
 - {kind: end, at_s: 90.0}
 notes: Two legs past a bookcase in the room's west half.

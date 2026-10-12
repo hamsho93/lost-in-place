@@ -53,7 +53,7 @@ def test_healthy_path_is_clear_of_hazards_at_any_jitter(s: Scenario) -> None:
         s.hazard_truth.geofence.points == [list(p) for p in room.interior_ne()]
         or [tuple(p) for p in s.hazard_truth.geofence.points] == room.interior_ne()
     )
-    clearance = 2 * s.hazard_truth.margin_m
+    clearance = 2 * s.hazard_truth.buffer_m
     for spawn in _extreme_spawns(s):
         for p in _path_in_truth(s, spawn):
             assert geometry.inside_with_margin(s.hazard_truth.geofence.points, p, clearance), (spawn, p)

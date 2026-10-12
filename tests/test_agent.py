@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 from mavsdk_grpc.telemetry import FlightMode
 
-from lost_in_place import agent
+from lost_in_place import agent, geometry
 from lost_in_place.agent import AgentConfig, AgentEpisode, Telemetry, health_from_estimator_status
 from lost_in_place.config import Paths
 from lost_in_place.episode import EpisodeResult, InjectFailed
@@ -217,7 +217,7 @@ def test_rejected_actions_are_held_not_executed() -> None:
     ep = _agent_episode("cross_healthy.yaml", AgentConfig(latency_s=0.0, epoch_s=1.0))
 
     class RejectAll:
-        def check(self, action: Action, observation: Observation) -> Verdict:
+        def check(self, action: Action, observation: Observation, truth: object = None) -> Verdict:
             return Verdict(ok=False, reason="no")
 
     ep.validator = RejectAll()
@@ -246,3 +246,23 @@ def test_a_vehicle_back_on_the_floor_ends_the_loop() -> None:
     assert not ep.on_floor()
     ep.sim_us = 32_100_000
     assert ep.on_floor() and not ep.in_control
+
+
+def test_decisions_carry_truth_and_the_hazard_label() -> None:
+    ep = _agent_episode("cross_silent.yaml", AgentConfig(latency_s=0.0, validator="geometric"))
+    assert ep.sim.spawn is not None
+    origin, _ = geometry.spawn_pose(ep.sim.spawn.x, ep.sim.spawn.y, ep.sim.spawn.yaw_deg)
+    # The estimate says the vehicle is at take-off; in truth it has drifted into the shelf.
+    ep.tel.truth_ne = (4.6, origin[1])
+    ep.tel.xy_valid, ep.tel.eph_m = True, 0.2
+    asyncio.run(ep._decide(1))
+    (decision,) = ep.result.decisions
+    assert decision["verdict"]["ok"]  # the geometric arm trusts the estimate
+    assert "shelf" in decision["hazard"] and decision["truth"]["north_m"] == 4.6
+    assert decision["observation"]["health"] is None and decision["health"]["xy_valid"]
+
+
+def test_ground_truth_latlon_maps_back_to_the_truth_frame() -> None:
+    # A Batch ULog: vehicle_global_position_groundtruth against vehicle_local_position_groundtruth.
+    north, east = geometry.latlon_to_truth(47.3979823899, 8.5461610509)
+    assert (north, east) == (pytest.approx(1.26, abs=0.01), pytest.approx(-0.203, abs=0.01))
