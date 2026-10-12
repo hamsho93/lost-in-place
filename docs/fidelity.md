@@ -89,7 +89,7 @@ None hit the ground. eph at arm was 0.024 to 0.030 m.
 
 - **Packing works.** Batch put seeds 4, 6 and 7 on one `c7a.2xlarge`. They claimed slots 0, 1 and 2 and all completed on the first attempt.
 - **No gRPC reset this time**, but seeds 2 and 3 failed their first attempts differently. PX4 reported "Preflight Fail: no valid barometer data", the sim took about 60 s of wall time to reach 12 s (40 to 52 s in good runs), and local position never became valid. Each retry ran on the other's instance, by then warm, and succeeded. Seed 5, the third fresh `.large`, needed a boot retry.
-- MAVSDK logs "heartbeats timed out" every few seconds in every attempt, good ones included. In lockstep PX4's heartbeat follows sim time, so at 0.2x real time it misses MAVSDK's wall-clock timeout. This is noise, not the failure.
+- MAVSDK logs "heartbeats timed out" every few seconds in every attempt, good ones included. In lockstep PX4's heartbeat follows sim time, so at 0.2x real time it misses MAVSDK's wall-clock timeout. For these hover episodes it was noise. It wasn't for agent episodes, which send commands mid-flight: see [the E1 pilot](pilot.md#harness-failures). Since then, the airframe's `.post` script sets a 5 Hz heartbeat at boot, and the timeouts are gone.
 - Every failure so far was the first episode on a freshly started 2-vCPU instance. A likely cause is CPU contention from instance start-up (ECS agent, image extraction) while Gazebo and PX4 need both cores. That isn't confirmed. A cheap test is to limit the compute environment to `xlarge` and up, or to wait for the host's load to settle before booting the sim.
 - Compute was about $0.04 (three `c7a.large` and one `c7a.2xlarge` for about 10 minutes).
 

@@ -42,6 +42,17 @@ def image_digest(env: Mapping[str, str] = os.environ) -> str:
             meta = json.load(response)
     except (OSError, ValueError):
         return ""
+    return digest_from_task_metadata(meta)
+
+
+def digest_from_task_metadata(meta: Mapping[str, Any]) -> str:
+    """The registry digest when the job pinned one (`repo@sha256:...`), so it matches the job definition.
+
+    ECS's `ImageID` is the local image config digest, which never appears in ECR or the job definition.
+    """
+    image = str(meta.get("Image", ""))
+    if "@sha256:" in image:
+        return image.split("@", 1)[1]
     return str(meta.get("ImageID", ""))
 
 
