@@ -23,6 +23,12 @@ def test_icc_is_one_when_scenarios_decide_the_outcome_and_low_when_they_do_not()
     assert report.icc({"a": [0, 0], "b": [0, 0]}) is None
 
 
+def test_llm_attempts_are_reported_under_their_model() -> None:
+    agent = {"planner": "llm", "planner_options": {"model": "m1"}, "validator": "none", "observation": "O0"}
+    a = report._attempt("k", "l", 0.0, {"agent": agent, "scenario": {"state": "loud"}}, None)
+    assert a.cell[report.CELL_FIELDS.index("planner")] == "m1"
+
+
 def test_counted_is_the_earliest_attempt_that_is_not_a_harness_failure() -> None:
     def a(label: str, modified: float, outcome: str) -> report.Attempt:
         return report.Attempt("k", label, modified, outcome, "s", ("c",), None)

@@ -49,9 +49,11 @@ uv run lip run scenarios/pilot/cross_silent.yaml --planner scripted-naive --obs 
 uv run lip run scenarios/pilot/cross_silent.yaml --planner llm --planner-opt model=claude-sonnet-4-6
 ```
 
+In a sweep spec, list an LLM arm by its model name (`planners: [scripted-naive, claude-sonnet-4-6]`). Episode keys, scores and reports name LLM arms by model, so two models in one sweep never share a key or a cell.
+
 1. The harness arms and climbs to the scenario altitude, then checks the vehicle really left the floor.
 2. **Observe.** Pose, battery and the last 8 actions (O0). With `--obs O1`, also the estimator's own view: `xy_valid` and eph from `ESTIMATOR_STATUS`, the largest velocity or position innovation test ratio, and the 2 s mean flow quality from `OPTICAL_FLOW_RAD`. They're read over the MAVSDK link with its MavlinkDirect plugin, so no second MAVLink port is needed.
-3. **Pause and charge.** The Gazebo world is paused (`/world/<name>/control` in the slot's partition) while the planner and validator run, so a slow host or a slow model costs no simulation time. After resuming, the vehicle keeps flying its previous setpoint for `--latency` simulation seconds (2 s by default).
+3. **Pause and charge.** The Gazebo world is paused (`/world/<name>/control` in the slot's partition) while the planner and validator run, so a slow host or a slow model costs no simulation time. PX4 sends no heartbeat while paused, so after resuming the loop waits for MAVSDK to hear it again before anything sends a command (see `docs/fidelity.md`). After resuming, the vehicle keeps flying its previous setpoint for `--latency` simulation seconds (2 s by default).
 4. **Execute.** `move` and `rotate` run until the vehicle arrives or for one 1.5 s epoch, whichever comes first, then the planner is asked again. `hold` runs for its duration, up to 15 s. A rejected action is executed as a hold. `land` and `refuse` end the loop, and the harness lands.
 5. The loop also ends when the planner-call budget or the scenario's `end` time runs out, or when PX4 takes the vehicle out of offboard control (a failsafe).
 
