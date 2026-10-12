@@ -9,9 +9,13 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from lost_in_place import __version__
 from lost_in_place.config import Paths
+
+if TYPE_CHECKING:
+    from lost_in_place.agent import AgentConfig
 
 
 def _cmd_worlds(args: argparse.Namespace) -> int:
@@ -32,8 +36,9 @@ def _cmd_run(args: argparse.Namespace) -> int:
     scenario = load_scenario(args.scenario)
     seed = args.seed + int(os.environ.get("AWS_BATCH_JOB_ARRAY_INDEX", "0"))
     out = args.out or Path("runs") / f"{scenario.id}_s{seed}"
+    agent = _agent_config(args) if scenario.mission is not None else None
     with claim_slot(args.instance) as instance:
-        result = run_episode(scenario, seed, out, instance=instance)
+        result = run_episode(scenario, seed, out, instance=instance, agent=agent)
     summary = {"scenario": scenario.id, "seed": seed, "outcome": result.outcome, "failsafe": result.failsafe}
     print(json.dumps({**summary, "out": str(out)}))
     status = 0 if result.outcome == "completed" else 1
@@ -44,6 +49,20 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
         print(f"uploaded {out} to {upload_dir(out, args.upload, attempt_label())}")
     return status
+
+
+def _agent_config(args: argparse.Namespace) -> AgentConfig:
+    from lost_in_place.agent import AgentConfig
+
+    options = dict(opt.split("=", 1) for opt in args.planner_opt)
+    return AgentConfig(
+        planner=args.planner,
+        planner_options=options,
+        validator=args.validator,
+        observation=args.obs,
+        latency_s=args.latency,
+        pause=not args.no_pause,
+    )
 
 
 def _analyze(run_dirs: list[Path]) -> int:
@@ -160,6 +179,23 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--out", type=Path)
     run.add_argument("--analyze", action="store_true", help="compute metrics after the episode")
     run.add_argument("--upload", metavar="S3_URI", help="upload the episode directory, e.g. s3://bucket/runs")
+    agent = run.add_argument_group("agent episodes (scenarios with a mission)")
+    agent.add_argument("--planner", default="scripted-naive", help="planner arm (default: scripted-naive)")
+    agent.add_argument(
+        "--planner-opt",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="planner option, e.g. model=...",
+    )
+    agent.add_argument("--validator", default="none", help="validator arm (default: none)")
+    agent.add_argument("--obs", choices=["O0", "O1"], default="O0", help="observation level (default: O0)")
+    agent.add_argument(
+        "--latency", type=float, default=2.0, help="simulation seconds charged per decision (default: 2)"
+    )
+    agent.add_argument(
+        "--no-pause", action="store_true", help="keep the sim running while the planner thinks"
+    )
     run.set_defaults(func=_cmd_run)
 
     analyze = sub.add_parser("analyze", help="compute metrics for finished episodes")

@@ -36,6 +36,10 @@ class SimInstance:
     _proc: subprocess.Popen[bytes] | None = field(default=None, init=False, repr=False)
 
     @property
+    def gz_partition(self) -> str:
+        return f"lip{self.instance}"
+
+    @property
     def run_dir(self) -> Path:
         return self.workdir / f"instance{self.instance}"
 
@@ -65,7 +69,7 @@ class SimInstance:
             GZ_SIM_RESOURCE_PATH=":".join([*models, str(worlds)]),
             GZ_SIM_SYSTEM_PLUGIN_PATH=str(self.paths.gz_plugins),
             GZ_SIM_SERVER_CONFIG_PATH=str(self.paths.gz_server_config),
-            GZ_PARTITION=f"lip{self.instance}",
+            GZ_PARTITION=self.gz_partition,
         )
         env.update({f"PX4_PARAM_{k}": str(v) for k, v in self.params.items()})
         return env
