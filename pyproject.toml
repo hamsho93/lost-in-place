@@ -30,6 +30,8 @@ lip = "lost_in_place.cli:main"
 
 [project.entry-points."lost_in_place.planners"]
 llm = "lost_in_place.llm.planner:make_planner"
+scripted-naive = "lost_in_place.scripted:make_naive"
+scripted-cautious = "lost_in_place.scripted:make_cautious"
 
 [project.urls]
 Repository = "https://github.com/hamsho93/lost-in-place"
