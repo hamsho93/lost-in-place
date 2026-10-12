@@ -4,7 +4,7 @@
 
 Lost in Place is an open benchmark for that question. It runs PX4 and Gazebo in simulation, where the true position is known exactly. It then degrades the vehicle's own position estimate (featureless floors, frozen or missing optical flow, no compass) while an LLM planner and a validator command the drone. We score whether the stack holds, lands or refuses instead of flying on.
 
-> Status: **pre-alpha**. The harness and fault injection work; the scenario set and the pre-registered spec come next (published as an RFC before any results). There are no benchmark results yet.
+> Status: **pre-alpha**. The harness and fault injection work, and an LLM planner can propose actions (Claude Sonnet 5.5 on Bedrock so far). Flying episodes from those proposals, the scenario set and the pre-registered spec come next (the spec is published as an RFC before any results). There are no benchmark results yet.
 
 ## Why
 
@@ -31,11 +31,12 @@ To run episodes on spot AWS Batch, see [`infra/`](infra/README.md). The first sm
 | Path | What it is |
 |---|---|
 | `src/lost_in_place/` | Episode runner, scenario schema, metrics, world generator, planner and validator interfaces |
+| `src/lost_in_place/llm/` | LLM planner and its model registry ([`models.yaml`](src/lost_in_place/llm/models.yaml)) |
 | `scenarios/` | Scenario files (YAML) |
 | `px4/` | Pinned PX4 commit and the patches we apply to it |
 | `docker/` | Headless image with PX4, Gazebo and the runner |
 | `infra/` | AWS CDK app: spot Batch queue, results bucket, budget guard |
-| `docs/` | [Simulation fidelity notes](docs/fidelity.md), [using it with your own planner](docs/planners.md) |
+| `docs/` | [Simulation fidelity notes](docs/fidelity.md), [planners: adding a model or your own planner](docs/planners.md) |
 
 ## Credits and related work
 
