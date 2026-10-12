@@ -11,7 +11,7 @@
     "alertEmail": "",
     "imageTag": "latest",
     "accountAlarmUsd": 0,
-    "githubRepo": "hamsho93/lost-in-place",
+    "githubRepo": "hamsho93@17190997/lost-in-place@1411196677",
     "@aws-cdk/aws-iam:minimizePolicies": true,
     "@aws-cdk/aws-s3:createDefaultLoggingPolicy": true,
     "@aws-cdk/aws-ec2:restrictDefaultSecurityGroup": true
