@@ -43,9 +43,10 @@ from aws_cdk import aws_sns_subscriptions as subs
 from constructs import Construct
 
 # x86 only: the Gazebo flow plugin's quality cast is undefined behaviour and may differ on ARM.
+# Intel only: on fresh c7a (AMD) hosts 4 of 8 first episodes failed or never took off, against
+# 0 of 16 on m7i and c7i (docs/fidelity.md).
 INSTANCE_CLASSES = [
     ec2.InstanceClass.C7I,
-    ec2.InstanceClass.C7A,
     ec2.InstanceClass.M7I,
     ec2.InstanceClass.C6I,
 ]
