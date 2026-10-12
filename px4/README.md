@@ -12,6 +12,9 @@ Apply them to a PX4 checkout:
 ```bash
 px4/apply.sh ~/PX4-Autopilot      # checks out PX4_COMMIT and applies the patches in order
 cd ~/PX4-Autopilot && make px4_sitl
+cp docker/4021_gz_x500_flow.post ~/PX4-Autopilot/build/px4_sitl_default/etc/init.d-posix/airframes/
 ```
+
+The last line sets MAVLink stream rates on the offboard link at boot: a 5 Hz heartbeat, so MAVSDK doesn't lose the vehicle when the simulation runs well below real time, and the estimator-health and ground-truth messages that agent episodes read.
 
 The stock behaviour from before patch 0001 is still useful as a deliberate "silent false-zero" fault. To reproduce it, build without that patch.
