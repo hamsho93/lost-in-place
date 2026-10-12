@@ -14,7 +14,9 @@ RUN apt-get update \
  && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/pkgs-osrf-archive-keyring.gpg] http://packages.osrfoundation.org/gazebo/ubuntu-stable noble main" \
       > /etc/apt/sources.list.d/gazebo-stable.list \
  && apt-get update \
- && apt-get install -y --no-install-recommends gz-harmonic libopencv-dev \
+ && apt-get install -y --no-install-recommends \
+      gz-harmonic cppzmq-dev libunwind-dev libopencv-dev libeigen3-dev \
+      bc libxml2-utils pkg-config protobuf-compiler \
  && rm -rf /var/lib/apt/lists/*
 
 # PX4 at the pinned commit, with our patches, built for SITL.
