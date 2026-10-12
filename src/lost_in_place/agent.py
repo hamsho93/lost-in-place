@@ -378,6 +378,7 @@ class AgentEpisode(_Episode):
         paused = self.paused
         if self.paused:
             self.paused = not await self.world.resume()
+        await self.wait_connected()
         self.result.decisions.append(
             {
                 "index": index,
