@@ -5,7 +5,9 @@ FROM ubuntu:24.04
 ARG DEBIAN_FRONTEND=noninteractive
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# Gazebo Harmonic from the OSRF repository; OpenCV is needed by PX4's optical-flow plugin.
+# Gazebo Harmonic from the OSRF repository, plus the headless part of PX4's ubuntu.sh simulation
+# dependencies (the Dockerfile skips them with --no-sim-tools). On 24.04 gz-transport's CMake target
+# CPPZMQ::CPPZMQ needs cppzmq-dev; OpenCV is needed by PX4's optical-flow plugin.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl git gnupg lsb-release sudo \
  && curl -fsSL https://packages.osrfoundation.org/gazebo.gpg -o /usr/share/keyrings/pkgs-osrf-archive-keyring.gpg \
