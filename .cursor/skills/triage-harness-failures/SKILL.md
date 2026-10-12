@@ -36,7 +36,8 @@ Each attempt uploads to `runs/<key>/<job id>-<index>-attempt<n>/`:
 | Signature | Cause | Fix or handling |
 |---|---|---|
 | `error: AioRpcError ... failed to connect` or `inject_failed`, `mavsdk_server_exit: -6`, and "heartbeats timed out" every few seconds in `mavsdk_server.txt` | PX4's heartbeat runs on sim time. Below about 0.33× real time, a 1 Hz heartbeat misses MAVSDK's 3 s wall-clock timeout, and `mavsdk_server` aborts on the next command | The airframe's `.post` script (`docker/4021_gz_x500_flow.post`) sets a 5 Hz heartbeat at boot. Check that the image contains it. Never set stream rates from the runner over MAVSDK: that caused boot stalls in 13 of 17 attempts |
-| A good run still logs "heartbeats timed out" | The `.post` script isn't installed, or the real-time factor is below about 0.07× | Check the Dockerfile `COPY`, and `real_time_factor` |
+| "heartbeats timed out" once per planner call, each followed by "Discovered 1 component" a few seconds later | The world was paused for a slow (LLM) planner call, so PX4 sent no heartbeat | Expected. Commands wait for the reconnect (`reconnect_wait_s` events). `error: LinkLost` means none came within 30 s |
+| A good run still logs "heartbeats timed out" outside planner calls | The `.post` script isn't installed, or the real-time factor is below about 0.07× | Check the Dockerfile `COPY`, and `real_time_factor` |
 | gRPC "Stream removed" 12 to 50 s in, on a fresh host | Cold-start contention, mostly on AMD `c7a` | AMD is excluded from the compute environment. Batch retries the attempt |
 | `no_local_position` after "Preflight Fail: no valid barometer data", with a slow first 12 s of sim | Cold host | Retry. The barometer message by itself is harmless: it appeared in 8 of 12 good runs |
 | `stuck_on_ground` | Gazebo ignored the motors | The runner reboots the sim, up to three boots. Cause unknown |
@@ -54,4 +55,4 @@ Each attempt uploads to `runs/<key>/<job id>-<index>-attempt<n>/`:
 
 - Add a row to the known-issues table in `docs/fidelity.md`, with numbers.
 - Quarantine attempts from a broken image (see `run-sweep`), then resubmit.
-- If the cause is MAVLink timing, check that the paused-world path still sends heartbeats: an LLM planner call pauses Gazebo for seconds.
+- If the cause is MAVLink timing, also test the paused-world path, since an LLM planner call pauses Gazebo for seconds: run a scripted planner with `--planner-opt think_s=6` and check `reconnect_wait_s` in the events.

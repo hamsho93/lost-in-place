@@ -6,11 +6,12 @@ import pytest
 from mavsdk_grpc.telemetry import FlightMode
 
 from lost_in_place import agent, geometry
+from lost_in_place import episode as episode_module
 from lost_in_place.agent import AgentConfig, AgentEpisode, Telemetry, health_from_estimator_status
 from lost_in_place.config import Paths
 from lost_in_place.episode import EpisodeResult, InjectFailed
 from lost_in_place.planning import Action, EstimatorHealth, Observation, Verdict
-from lost_in_place.scenario import load_scenario
+from lost_in_place.scenario import Inject, load_scenario
 from lost_in_place.scripted import ScriptedCautious, ScriptedNaive
 from lost_in_place.sim import SimInstance
 
@@ -48,6 +49,23 @@ def test_scripted_cautious_lands_on_bad_health_only_when_shown_it() -> None:
     assert asyncio.run(ScriptedCautious(mission).propose(_obs(health=bad))).name == "land"
     assert asyncio.run(ScriptedCautious(mission).propose(_obs(health=good))).name == "move"
     assert asyncio.run(ScriptedCautious(mission).propose(_obs(health=None))).name == "move"  # O0
+
+
+def test_scripted_planners_can_take_wall_time_like_an_llm(monkeypatch: pytest.MonkeyPatch) -> None:
+    from lost_in_place import scripted
+
+    slept: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        slept.append(seconds)
+
+    monkeypatch.setattr(scripted.asyncio, "sleep", fake_sleep)
+    mission = load_scenario(PILOT / "cross_healthy.yaml").mission
+    assert mission is not None
+    assert asyncio.run(scripted.make_naive(mission, think_s="6").propose(_obs())).name == "move"
+    assert asyncio.run(scripted.make_cautious(mission, think_s="2.5").propose(_obs())).name == "move"
+    assert asyncio.run(scripted.make_naive(mission).propose(_obs())).name == "move"
+    assert slept == [6.0, 2.5]
 
 
 def test_estimator_status_maps_to_health() -> None:
@@ -125,6 +143,7 @@ def _agent_episode(scenario_file: str, config: AgentConfig | None = None) -> Age
     ep = AgentEpisode(scenario, 0, sim, result, config or AgentConfig())
     ep.world = FakeWorld()  # type: ignore[assignment]
     ep.tel.mode = FlightMode.OFFBOARD
+    ep.connected.set()
     return ep
 
 
@@ -157,6 +176,30 @@ def test_decision_pauses_the_world_and_charges_latency() -> None:
     assert (
         decision["sim_us"] == 10_000_000 and decision["paused"] and decision["observation"]["health"] is None
     )
+
+
+def test_commands_wait_for_the_heartbeat_after_a_pause(monkeypatch: pytest.MonkeyPatch) -> None:
+    ep = _agent_episode("cross_loud.yaml")
+    drone = FakeDrone()
+    step = next(s for s in ep.scenario.steps if isinstance(s, Inject))
+
+    async def scenario() -> None:
+        ep.connected.clear()  # MAVSDK timed out while the world was paused
+        inject = asyncio.create_task(ep._apply(drone, step))  # type: ignore[arg-type]
+        await asyncio.sleep(0.05)
+        assert not drone.failure.injected
+        ep.connected.set()
+        await asyncio.wait_for(inject, 1)
+        assert len(drone.failure.injected) == 1
+        assert any("reconnect_wait_s" in e for e in ep.result.events)
+
+        monkeypatch.setattr(episode_module, "LINK_LOST_WALL_S", 0.05)
+        ep.connected.clear()
+        with pytest.raises(episode_module.LinkLost):
+            await ep._apply(drone, step)  # type: ignore[arg-type]
+        assert len(drone.failure.injected) == 1
+
+    asyncio.run(scenario())
 
 
 def test_o1_shows_the_2s_mean_flow_quality_and_a_dead_sensor_reads_zero() -> None:

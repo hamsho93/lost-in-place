@@ -39,6 +39,7 @@ if TYPE_CHECKING:
 
 BOOT_STALL_WALL_S = 150.0  # sim clock still at zero this long after connect: a wedged boot
 SIM_STALL_WALL_S = 90.0  # sim clock frozen mid-episode: Gazebo died (e.g. after a runaway)
+LINK_LOST_WALL_S = 30.0  # MAVSDK still hasn't heard a heartbeat this long after it timed out
 LOCAL_POSITION_TIMEOUT_WALL_S = 120.0
 ARM_TIMEOUT_WALL_S = 90.0
 LAND_TIMEOUT_WALL_S = 90.0
@@ -61,6 +62,10 @@ class SimStall(RuntimeError):
 
 class StuckOnGround(RuntimeError):
     """PX4 commands full thrust but Gazebo's vehicle doesn't move (seen on a packed, fresh host)."""
+
+
+class LinkLost(RuntimeError):
+    """MAVSDK stopped hearing PX4 and didn't recover; reported as an `error:` harness failure."""
 
 
 class InjectFailed(RuntimeError):
@@ -115,6 +120,7 @@ class _Episode:
         self._t0 = time.monotonic()
         self._clock_start: tuple[float, int] | None = None  # (wall, sim_us) at the first sim tick
         self.paused = False  # the world is paused on purpose (agent episodes), not stalled
+        self.connected = asyncio.Event()
 
     def real_time_factor(self) -> float | None:
         if self._clock_start is None:
@@ -146,6 +152,29 @@ class _Episode:
             elif self.sim_us > 0 and time.monotonic() - last_change > SIM_STALL_WALL_S:
                 raise SimStall(f"simulation clock frozen at {self.sim_s:.1f} s")
 
+    async def wait_connected(self) -> None:
+        """Hold commands until MAVSDK has a heartbeat again.
+
+        In lockstep, PX4 sends no heartbeat while the world is paused, so a pause longer than
+        MAVSDK's 3 s wall-clock timeout drops the vehicle until the first heartbeat after resuming.
+        A command sent in that window can abort mavsdk_server.
+        """
+        if self.connected.is_set():
+            return
+        wall = time.monotonic()
+        try:
+            await asyncio.wait_for(self.connected.wait(), LINK_LOST_WALL_S)
+        except TimeoutError:
+            raise LinkLost(f"no heartbeat for {LINK_LOST_WALL_S:.0f} s") from None
+        self.log(reconnect_wait_s=round(time.monotonic() - wall, 2))
+
+    async def _watch_connection(self, drone: System) -> None:
+        async for state in drone.core.connection_state():
+            if state.is_connected:
+                self.connected.set()
+            else:
+                self.connected.clear()
+
     async def run(self) -> str:
         drone = System(port=51000 + 10 * self.sim.instance)
         await drone.connect(system_address=f"udpin://0.0.0.0:{offboard_port(self.sim.instance)}")
@@ -153,7 +182,9 @@ class _Episode:
             if state.is_connected:
                 break
         self.mark("connected")
+        self.connected.set()
         tasks = [
+            asyncio.create_task(self._watch_connection(drone)),
             asyncio.create_task(self._watch_status(drone)),
             asyncio.create_task(self._watch_clock(drone)),
             asyncio.create_task(self._watch_range(drone)),
@@ -255,6 +286,7 @@ class _Episode:
                 break
 
     async def _apply(self, drone: System, step: Goto | Inject | SetParam | End) -> None:
+        await self.wait_connected()
         if isinstance(step, Goto):
             await drone.offboard.set_position_ned(
                 PositionNedYaw(step.north_m, step.east_m, -self.scenario.altitude_m, 0.0)

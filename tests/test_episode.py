@@ -167,6 +167,7 @@ def test_rejected_fault_ends_the_episode() -> None:
     import asyncio
 
     ep = _episode_at_rest(None)
+    ep.connected.set()
 
     class Failure:
         async def inject(self, *args: object) -> None:
