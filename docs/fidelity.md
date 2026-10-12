@@ -20,7 +20,8 @@ What the simulator gets right, and where it differs from a real flow-and-rangefi
 | Lockstep doesn't make runs deterministic | The same seed gives different drift (0.8 m vs 2.8 m in one test) | Report distributions over seeds, never single runs |
 | Runaways can crash Gazebo | The episode hangs | The runner watches the sim clock and aborts |
 | No wind, IMU noise or lighting changes by default | Real vehicles are noisier | Treated as future fault models, not assumed |
-| **AWS Batch forces host networking** on EC2 jobs, and every episode runs as PX4 instance 0 | Two episodes placed on one instance would share MAVLink, MAVSDK and Gazebo ports. Batch does pack jobs: one smoke attempt put both on an `m7i.xlarge` | Not handled yet. Until the runner picks a free instance number, don't rely on more than one episode per instance |
+| **AWS Batch forces host networking** on EC2 jobs | Episodes packed onto one instance see each other's ports. Batch does pack jobs: one smoke attempt put two on an `m7i.xlarge` | `lip run` claims the lowest free slot (PX4 instance number) on the host by default (`--instance auto`), so packed episodes get separate MAVLink, MAVSDK and Gazebo ports |
+| Episodes that crash leave no trace | The first spot `flow_off` attempt died with no artefacts | Unexpected errors become the episode outcome (`error: ...`), so `episode.json`, the console log and the ULog are still written and uploaded |
 
 ## Spot smoke run (2026-10-12)
 
@@ -37,7 +38,7 @@ The week-1 check: run one healthy and one faulty episode from the container on s
 | Compute cost | | about $0.02 for the whole check, including two failed earlier attempts (spot at $0.03 to $0.04 per hour for each `.large`) |
 
 - The first `flow_off` attempt crashed about 12 s into the sim. MAVSDK's gRPC stream was reset during `set_param EKF2_OF_CTRL`. The automatic retry on the same instance succeeded. The cause is unknown, because the runner uploads nothing when an episode crashes. It was alone on its instance, so it was not a port collision.
-- Three episodes per 4 vCPUs was not tested. Batch sizes instances to the 2-vCPU job, and packing more than one episode per instance needs the instance-number fix above first.
+- Three episodes per 4 vCPUs was not tested. Batch sizes instances to the 2-vCPU job, and at the time packed episodes would have shared ports (fixed since, see the table above).
 
 ## What not to claim
 

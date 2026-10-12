@@ -27,11 +27,13 @@ def _cmd_worlds(args: argparse.Namespace) -> int:
 def _cmd_run(args: argparse.Namespace) -> int:
     from lost_in_place.episode import run_episode
     from lost_in_place.scenario import load_scenario
+    from lost_in_place.slots import claim_slot
 
     scenario = load_scenario(args.scenario)
     seed = args.seed + int(os.environ.get("AWS_BATCH_JOB_ARRAY_INDEX", "0"))
     out = args.out or Path("runs") / f"{scenario.id}_s{seed}"
-    result = run_episode(scenario, seed, out, instance=args.instance)
+    with claim_slot(args.instance) as instance:
+        result = run_episode(scenario, seed, out, instance=instance)
     summary = {"scenario": scenario.id, "seed": seed, "outcome": result.outcome, "failsafe": result.failsafe}
     print(json.dumps({**summary, "out": str(out)}))
     status = 0 if result.outcome == "completed" else 1
@@ -75,6 +77,18 @@ def _cmd_doctor(_: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
+def _instance_arg(value: str) -> int | None:
+    if value == "auto":
+        return None
+    try:
+        slot = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected a slot number or 'auto', got {value!r}") from None
+    if slot < 0:
+        raise argparse.ArgumentTypeError("slot numbers start at 0")
+    return slot
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="lip", description="Lost in Place benchmark runner")
     parser.add_argument("--version", action="version", version=__version__)
@@ -93,7 +107,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=0,
         help="spawn-pose seed when the scenario has none; AWS_BATCH_JOB_ARRAY_INDEX is added when set",
     )
-    run.add_argument("--instance", type=int, default=0, help="parallel slot (separate ports and partition)")
+    run.add_argument(
+        "--instance",
+        type=_instance_arg,
+        default=None,
+        metavar="N|auto",
+        help="parallel slot (separate ports and partition); default: the lowest slot free on this host",
+    )
     run.add_argument("--out", type=Path)
     run.add_argument("--analyze", action="store_true", help="compute metrics after the episode")
     run.add_argument("--upload", metavar="S3_URI", help="upload the episode directory, e.g. s3://bucket/runs")
