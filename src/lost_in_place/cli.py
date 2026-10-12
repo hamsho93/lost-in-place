@@ -188,7 +188,12 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="KEY=VALUE",
         help="planner option, e.g. model=...",
     )
-    agent.add_argument("--validator", default="none", help="validator arm (default: none)")
+    agent.add_argument(
+        "--validator",
+        default="none",
+        choices=["none", "geometric", "estimator_health", "oracle"],
+        help="validator arm (default: none)",
+    )
     agent.add_argument("--obs", choices=["O0", "O1"], default="O0", help="observation level (default: O0)")
     agent.add_argument(
         "--latency", type=float, default=2.0, help="simulation seconds charged per decision (default: 2)"

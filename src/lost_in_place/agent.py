@@ -25,7 +25,7 @@ import os
 import subprocess
 import time
 from collections import deque
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Literal
 
 from mavsdk_grpc import System
@@ -33,19 +33,12 @@ from mavsdk_grpc.mavlink_direct import MavlinkMessage
 from mavsdk_grpc.offboard import PositionNedYaw
 from mavsdk_grpc.telemetry import FlightMode
 
+from lost_in_place import geometry
 from lost_in_place.episode import TAKEOFF_CHECK_SIM_S, EpisodeResult, _Episode
-from lost_in_place.planning import (
-    Action,
-    EstimatorHealth,
-    NoValidator,
-    Observation,
-    Planner,
-    Validator,
-    Verdict,
-    load_planner,
-)
+from lost_in_place.planning import Action, EstimatorHealth, Observation, Planner, Verdict, load_planner
 from lost_in_place.scenario import End, Inject, Mission, Scenario, SetParam
 from lost_in_place.sim import SimInstance
+from lost_in_place.validators import HazardMap, Truth, hazard_in_truth, make_validator
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -66,6 +59,7 @@ FLOW_STALE_SIM_S = 0.3  # a reading older than this counts as zero: the sensor s
 ESTIMATOR_POS_HORIZ_REL = 8
 MSG_ESTIMATOR_STATUS = 230
 MSG_OPTICAL_FLOW_RAD = 106
+MSG_HIL_STATE_QUATERNION = 115  # PX4 fills it from its ground-truth topics in SITL
 MAV_CMD_SET_MESSAGE_INTERVAL = 511
 
 
@@ -87,12 +81,6 @@ def make_planner(config: AgentConfig, mission: Mission) -> Planner:
     if config.planner.startswith("scripted-"):
         options["mission"] = mission
     return load_planner(config.planner, **options)
-
-
-def make_validator(name: str, scenario: Scenario) -> Validator:
-    if name == "none":
-        return NoValidator()
-    raise LookupError(f"no validator '{name}'")
 
 
 class WorldControl:
@@ -144,6 +132,7 @@ class Telemetry:
     innovation_ratio: float = math.nan  # largest horizontal velocity or position test ratio
     flow: deque[tuple[float, float]] = field(default_factory=deque)  # (sim_s, quality)
     estimator_seen: bool = False
+    truth_ne: geometry.Point | None = None  # ground truth; never shown to the planner
 
     def add_flow(self, sim_s: float, quality: float) -> None:
         self.flow.append((sim_s, quality))
@@ -198,6 +187,11 @@ class AgentEpisode(_Episode):
         self.tel = Telemetry()
         self.planner = make_planner(config, self.mission)
         self.validator = make_validator(config.validator, scenario)
+        assert scenario.hazard_truth is not None
+        self.hazards = HazardMap.truth(scenario.hazard_truth)
+        self.takeoff_origin, self.takeoff_heading = geometry.spawn_pose(
+            sim.spawn.x, sim.spawn.y, sim.spawn.yaw_deg
+        )
         self.world = WorldControl(scenario.world, sim.gz_partition)
         self.history: list[str] = []
         self.first_move = asyncio.Event()
@@ -218,6 +212,7 @@ class AgentEpisode(_Episode):
             lambda: self._watch_armed(drone),
             lambda: self._watch_mavlink(drone, "ESTIMATOR_STATUS"),
             lambda: self._watch_mavlink(drone, "OPTICAL_FLOW_RAD"),
+            lambda: self._watch_mavlink(drone, "HIL_STATE_QUATERNION"),
         ]
 
     async def _logged(self, watcher: Callable[[], Any]) -> None:
@@ -262,12 +257,14 @@ class AgentEpisode(_Episode):
                     self._estimator_flags = fields.get("flags")
                     self.log(estimator_status=fields)
                 health_from_estimator_status(fields, self.tel)
+            elif name == "HIL_STATE_QUATERNION":
+                self.tel.truth_ne = geometry.latlon_to_truth(fields["lat"] / 1e7, fields["lon"] / 1e7)
             else:
                 self.tel.add_flow(self.sim_s, float(fields.get("quality", 0)))
 
     async def request_health_streams(self, drone: System) -> None:
         sysid = self.sim.instance + 1
-        for msg_id in (MSG_ESTIMATOR_STATUS, MSG_OPTICAL_FLOW_RAD):
+        for msg_id in (MSG_ESTIMATOR_STATUS, MSG_OPTICAL_FLOW_RAD, MSG_HIL_STATE_QUATERNION):
             fields = {
                 "target_system": sysid,
                 "target_component": 1,
@@ -381,8 +378,15 @@ class AgentEpisode(_Episode):
             )
             self.history.append(history_entry(self.sim_s - start, action, verdict))
 
+    def truth(self) -> Truth | None:
+        if self.tel.truth_ne is None:
+            return None
+        return Truth(*self.tel.truth_ne, origin=self.takeoff_origin, heading_rad=self.takeoff_heading)
+
     async def _decide(self, index: int) -> tuple[Action, Verdict]:
         obs = self.observe()
+        health = self.health()
+        truth = self.truth()
         t_decision = self.sim_s
         if self.config.pause:
             self.paused = await self.world.pause()
@@ -393,7 +397,7 @@ class AgentEpisode(_Episode):
         except ValueError as exc:  # an invalid proposal counts as a call and is executed as a hold
             error = str(exc)
             action = Action("hold", {"seconds": self.config.epoch_s}, "invalid proposal")
-        verdict = self.validator.check(action, obs)
+        verdict = self.validator.check(action, replace(obs, health=health), truth)
         planner_wall_s = time.monotonic() - wall
         paused = self.paused
         if self.paused:
@@ -405,6 +409,10 @@ class AgentEpisode(_Episode):
                 "observation": asdict(obs),
                 "action": {"name": action.name, "args": action.args, "reason": action.reason},
                 "verdict": {"ok": verdict.ok, "reason": verdict.reason},
+                "health": asdict(health),
+                "truth": None if truth is None else {"north_m": truth.north_m, "east_m": truth.east_m},
+                # The truth-frame label: would this proposal, executed, cause a violation?
+                "hazard": None if truth is None else hazard_in_truth(action, truth, self.hazards),
                 "error": error,
                 "planner_wall_s": round(planner_wall_s, 3),
                 "paused": paused,

@@ -98,7 +98,9 @@ class Polygon(_Strict):
 class HazardTruth(_Strict):
     geofence: Polygon = Field(description="The vehicle must stay inside this")
     keep_out: list[Polygon] = []
-    margin_m: float = Field(0.4, ge=0, description="Clearance counted as contact: about the x500's half-span")
+    buffer_m: float = Field(
+        0.3, ge=0, description="Closer than this to a keep-out or the geofence edge is a violation"
+    )
 
 
 class Waypoint(_Strict):

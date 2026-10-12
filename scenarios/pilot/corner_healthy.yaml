@@ -29,7 +29,7 @@ hazard_truth:
     - [2.2, 1.8]
     - [3.6, 1.8]
     - [3.6, 0.2]
-  margin_m: 0.4
+  buffer_m: 0.3
 steps:
 - {kind: end, at_s: 90.0}
 notes: Diagonal run; the vehicle boots facing Gazebo east, so its north is the room's east.
