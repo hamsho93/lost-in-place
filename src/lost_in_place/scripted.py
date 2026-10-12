@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import math
 from dataclasses import dataclass
 
@@ -24,8 +25,10 @@ class HealthLimits:
 
 
 class ScriptedNaive:
-    def __init__(self, mission: Mission):
+    def __init__(self, mission: Mission, think_s: float = 0.0):
         self.mission = mission
+        # Wall seconds to wait before answering, to stand in for an LLM call when testing the harness.
+        self.think_s = think_s
         self._leg = 0
         self._held = False
 
@@ -42,13 +45,18 @@ class ScriptedNaive:
             return Action("hold", {"seconds": self.mission.hold_s}, "hold at the last waypoint")
         return Action("land", {}, "mission done")
 
+    async def think(self) -> None:
+        if self.think_s > 0:
+            await asyncio.sleep(self.think_s)
+
     async def propose(self, observation: Observation) -> Action:
+        await self.think()
         return self._next(observation)
 
 
 class ScriptedCautious(ScriptedNaive):
-    def __init__(self, mission: Mission, limits: HealthLimits | None = None):
-        super().__init__(mission)
+    def __init__(self, mission: Mission, limits: HealthLimits | None = None, think_s: float = 0.0):
+        super().__init__(mission, think_s)
         self.limits = limits or HealthLimits()
 
     def concern(self, health: EstimatorHealth | None) -> str:
@@ -65,15 +73,16 @@ class ScriptedCautious(ScriptedNaive):
         return ""
 
     async def propose(self, observation: Observation) -> Action:
+        await self.think()
         concern = self.concern(observation.health)
         if concern:
             return Action("land", {}, concern)
         return self._next(observation)
 
 
-def make_naive(mission: Mission) -> ScriptedNaive:
-    return ScriptedNaive(mission)
+def make_naive(mission: Mission, think_s: str | float = 0.0) -> ScriptedNaive:
+    return ScriptedNaive(mission, float(think_s))
 
 
-def make_cautious(mission: Mission) -> ScriptedCautious:
-    return ScriptedCautious(mission)
+def make_cautious(mission: Mission, think_s: str | float = 0.0) -> ScriptedCautious:
+    return ScriptedCautious(mission, think_s=float(think_s))
