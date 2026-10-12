@@ -20,18 +20,39 @@ TEXTURE_PX = 4096
 
 
 @dataclass(frozen=True)
+class Room:
+    """A walled rectangle centred on the world origin. Sizes are interior metres."""
+
+    north_m: float
+    east_m: float
+    wall_height_m: float = 2.5
+    wall_thickness_m: float = 0.2
+
+    def interior_ne(self) -> list[tuple[float, float]]:
+        """The interior as a polygon of (north, east) points, the frame of PX4's ground truth."""
+        n, e = self.north_m / 2, self.east_m / 2
+        return [(-n, -e), (-n, e), (n, e), (n, -e)]
+
+
+@dataclass(frozen=True)
 class FloorSpec:
     world: str
     contrast: float | None  # None = flat colour, no texture
     patch_m: float | None = None  # textured square of this size at the origin on a flat floor
+    room: Room | None = None
 
+
+PILOT_ROOM = Room(north_m=10.0, east_m=6.0)
 
 FIXTURES = (
     FloorSpec("lip_textured", 1.0),
     FloorSpec("lip_lowtex", 0.03),
     FloorSpec("lip_flat", None),
     FloorSpec("lip_mixed", None, patch_m=6.0),
+    FloorSpec("lip_room_textured", 1.0, room=PILOT_ROOM),
+    FloorSpec("lip_room_lowtex", 0.03, room=PILOT_ROOM),
 )
+ROOMS = {spec.world: spec.room for spec in FIXTURES if spec.room is not None}
 
 
 def noise_texture(seed: int, size: int = TEXTURE_PX) -> NDArray[np.float32]:
@@ -67,8 +88,30 @@ def _visual(name: str, size_m: float, texture_uri: str | None, z: float = 0.0) -
     )
 
 
+def walls_sdf(room: Room) -> str:
+    """A static model with four box walls. Gazebo x is east and y is north."""
+    t, h = room.wall_thickness_m, room.wall_height_m
+    half_n, half_e = room.north_m / 2 + t / 2, room.east_m / 2 + t / 2
+    boxes = {
+        "north": (0.0, half_n, room.east_m + 2 * t, t),
+        "south": (0.0, -half_n, room.east_m + 2 * t, t),
+        "east": (half_e, 0.0, t, room.north_m),
+        "west": (-half_e, 0.0, t, room.north_m),
+    }
+    parts = []
+    for name, (x, y, size_x, size_y) in boxes.items():
+        geometry = f"<geometry><box><size>{size_x} {size_y} {h}</size></box></geometry>"
+        pose = f"<pose>{x} {y} {h / 2} 0 0 0</pose>"
+        parts.append(f'<collision name="{name}">{pose}{geometry}</collision>')
+        parts.append(
+            f'<visual name="{name}">{pose}{geometry}<material><ambient>0.7 0.7 0.75 1</ambient>'
+            "<diffuse>0.7 0.7 0.75 1</diffuse></material></visual>"
+        )
+    return f'<model name="room_walls"><static>true</static><link name="walls">{"".join(parts)}</link></model>'
+
+
 def build_world_sdf(template: str, spec: FloorSpec, texture_uri: str | None) -> str:
-    """Swap the ground visual of PX4's default world and rename the world. Shadows off."""
+    """Swap the ground visual of PX4's default world, add any walls and rename the world. Shadows off."""
     start = template.index('<visual name="visual">')
     end = template.index("</visual>", start) + len("</visual>")
     floor_uri = texture_uri if spec.contrast is not None else None
@@ -76,6 +119,9 @@ def build_world_sdf(template: str, spec: FloorSpec, texture_uri: str | None) -> 
     if spec.patch_m:
         visuals += _visual("patch", spec.patch_m, texture_uri, z=0.002)
     sdf = template[:start] + visuals + template[end:]
+    if spec.room is not None:
+        close = sdf.rindex("</world>")
+        sdf = sdf[:close] + walls_sdf(spec.room) + sdf[close:]
     sdf = sdf.replace('<world name="default">', f'<world name="{spec.world}">')
     return sdf.replace("<shadows>true</shadows>", "<shadows>false</shadows>")
 

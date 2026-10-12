@@ -43,3 +43,21 @@ def test_generate_writes_worlds_and_textures(tmp_path: Path) -> None:
     assert [p.name for p in out] == ["lip_a.sdf", "lip_b.sdf"]
     assert (tmp_path / "out" / "models" / "lip_a_floor" / "materials" / "textures" / "floor.png").exists()
     assert not (tmp_path / "out" / "models" / "lip_b_floor").exists()
+
+
+def test_room_adds_four_walls_with_collision() -> None:
+    import xml.etree.ElementTree as ET
+
+    from lost_in_place.worlds import Room
+
+    room = Room(north_m=10.0, east_m=6.0)
+    sdf = build_world_sdf(TEMPLATE, FloorSpec("r", 1.0, room=room), "model://x/floor.png")
+    walls = ET.fromstring(sdf).find("world/model[@name='room_walls']")
+    assert walls is not None and walls.findtext("static") == "true"
+    collisions = {c.get("name"): c for c in walls.iter("collision")}
+    assert set(collisions) == {"north", "south", "east", "west"}
+    # The north wall's inner face is at y = 5 m (Gazebo y is north).
+    x, y, *_ = map(float, (collisions["north"].findtext("pose") or "").split())
+    size_y = float((collisions["north"].findtext("geometry/box/size") or "").split()[1])
+    assert (x, y - size_y / 2) == (0.0, 5.0)
+    assert room.interior_ne() == [(-5.0, -3.0), (-5.0, 3.0), (5.0, 3.0), (5.0, -3.0)]
