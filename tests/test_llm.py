@@ -145,9 +145,9 @@ def test_bedrock_response_parsing() -> None:
 
 def test_registry_ships_a_claude_arm_on_a_known_provider() -> None:
     models = load_models()
-    assert "claude-sonnet-5-5" in models
+    assert "claude-sonnet-4-6" in models
     assert all(spec.provider in clients.CLIENTS for spec in models.values())
-    with pytest.raises(LookupError, match="known: claude-sonnet-5-5"):
+    with pytest.raises(LookupError, match="known: claude-sonnet-4-6"):
         get_model("gpt-unknown")
 
 
@@ -167,7 +167,7 @@ def test_new_provider_needs_only_a_client(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_llm_planner_is_installed_as_an_entry_point() -> None:
-    planner = load_planner("llm", model="claude-sonnet-5-5")
+    planner = load_planner("llm", model="claude-sonnet-4-6")
     assert isinstance(planner, Planner)
 
 
@@ -175,7 +175,7 @@ def test_propose_command_prints_the_decision(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setitem(clients.CLIENTS, "bedrock", lambda spec: FakeClient(ToolCall("land", {})))
-    assert cli.main(["propose", "claude-sonnet-5-5", "--health", "degraded"]) == 0
+    assert cli.main(["propose", "claude-sonnet-4-6", "--health", "degraded"]) == 0
     decision = json.loads(capsys.readouterr().out)
     assert decision["action"]["name"] == "land"
     assert "Optical flow quality: 0 of 255" in decision["user_prompt"]

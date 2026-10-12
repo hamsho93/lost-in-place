@@ -6,8 +6,10 @@
 #
 # Pin exact model identifiers: results are only comparable for the same model version.
 
-claude-sonnet-5-5:
+claude-sonnet-4-6:
   provider: bedrock
-  model_id: us.anthropic.claude-sonnet-5-5
+  model_id: us.anthropic.claude-sonnet-4-6
   temperature: 0
-  notes: Frontier arm, added 2026-10-12. Needs Bedrock model access for Claude Sonnet 5.5.
+  notes: >-
+    Frontier arm, added 2026-10-12. The newest Claude model this account can use on Bedrock;
+    the 5.x models need an agreement through AWS Sales.

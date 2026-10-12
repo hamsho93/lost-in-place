@@ -22,7 +22,7 @@ class Planner(Protocol):
 ```python
 from lost_in_place.planning import load_planner
 
-planner = load_planner("llm", model="claude-sonnet-5-5")
+planner = load_planner("llm", model="claude-sonnet-4-6")
 ```
 
 - **One request per decision.** The observation, including its history, is rendered into a single user message. At observation level O0 it shows what an as-deployed planner sees. O1 adds an estimator-health block. Each action is one tool, and the model must call exactly one.
@@ -35,7 +35,7 @@ Try a model without the simulator. This makes one real call:
 ```bash
 uv sync --extra aws
 uv run lip models                                         # what's in the registry
-uv run lip propose claude-sonnet-5-5 --health degraded    # one decision, printed as JSON
+uv run lip propose claude-sonnet-4-6 --health degraded    # one decision, printed as JSON
 ```
 
 On AWS, assume the stack's operator role and export the stack's `BedrockProfiles` output as `LIP_BEDROCK_PROFILES`, so the call goes through the tagged profile and counts against the budget.
@@ -44,7 +44,7 @@ On AWS, assume the stack's operator role and export the stack's `BedrockProfiles
 
 **On Bedrock:** add an entry to [`src/lost_in_place/llm/models.yaml`](../src/lost_in_place/llm/models.yaml) with the provider set to `bedrock` and the model's system inference profile id. Then:
 
-1. Enable model access for it in the Bedrock console.
+1. Check the account can use it: `aws bedrock get-foundation-model-availability --model-id anthropic.<model>` must show `agreementAvailability` `AVAILABLE`. `NOT_AVAILABLE` means calls fail with "not available for this account" and only AWS Sales can change it; on this account that applies to every Claude 5.x model and to Opus 4.5 to 4.8 (checked 2026-10-12). Then enable access in the Bedrock console if it asks.
 2. Redeploy the infra. The stack reads the registry and creates a tagged profile and the permissions for every Bedrock model in it.
 3. Check it with `lip propose <name>`.
 

@@ -49,6 +49,10 @@ INSTANCE_CLASSES = [
     ec2.InstanceClass.M7I,
     ec2.InstanceClass.C6I,
 ]
+# No 2-vCPU sizes: the first episode on a fresh .large failed 4 of 9 times (docs/fidelity.md).
+# Sizes above 2xlarge would start more packed episodes at once on a fresh host, which is untested.
+INSTANCE_SIZES = [ec2.InstanceSize.XLARGE, ec2.InstanceSize.XLARGE2]
+INSTANCE_TYPES = [ec2.InstanceType.of(c, s) for c in INSTANCE_CLASSES for s in INSTANCE_SIZES]
 EPISODE_VCPUS = 2  # two episodes per 4 vCPUs was reliable in testing; three was not
 EPISODE_MEMORY_MIB = 3072
 EPISODE_TIMEOUT = Duration.minutes(30)
@@ -75,7 +79,7 @@ class SimSettings:
     # Needs the account's token.actions.githubusercontent.com OIDC provider, which is shared by
     # every stack in the account and so is imported rather than created here.
     github_repo: str = ""
-    # Bedrock system inference profiles the planner may call (e.g. "us.anthropic.claude-sonnet-5-5").
+    # Bedrock system inference profiles the planner may call (e.g. "us.anthropic.claude-sonnet-4-6").
     # Each gets a tagged application inference profile, so its spend counts against the budget.
     bedrock_models: tuple[str, ...] = ()
 
@@ -156,7 +160,7 @@ class SimStack(Stack):
             vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
             spot=True,
             allocation_strategy=batch.AllocationStrategy.SPOT_PRICE_CAPACITY_OPTIMIZED,
-            instance_classes=INSTANCE_CLASSES,
+            instance_types=INSTANCE_TYPES,
             use_optimal_instance_classes=False,
             minv_cpus=0,
             maxv_cpus=settings.max_vcpus,
