@@ -23,7 +23,8 @@ What the simulator gets right, and where it differs from a real flow-and-rangefi
 | **AWS Batch forces host networking** on EC2 jobs | Episodes packed onto one instance see each other's ports. Batch does pack jobs: one smoke attempt put two on an `m7i.xlarge` | `lip run` claims the lowest free slot (PX4 instance number) on the host by default (`--instance auto`), so packed episodes get separate MAVLink, MAVSDK and Gazebo ports |
 | Episodes that crash leave no trace | The first spot `flow_off` attempt died with no artefacts | Unexpected errors become the episode outcome (`error: ...`), so `episode.json`, the console log and the ULog are still written and uploaded. `mavsdk_server.txt` keeps the MAVSDK server's own log, and its exit code is recorded if it died |
 | Retries overwrote earlier attempts | The bucket isn't versioned, and every attempt uploaded to `runs/<scenario>_s<seed>/`. A successful retry replaced a crashed attempt's files | Each attempt uploads under `<job id>-attempt<n>/` |
-| **The first episode on a fresh 2-vCPU instance is unreliable** (open) | 4 of 9 failed: two MAVSDK gRPC resets on `set_param EKF2_OF_CTRL` about 12 s into the sim, and two `no_local_position` after "Preflight Fail: no valid barometer data". A fifth needed a boot retry. Retries on an instance that had already run an episode: 4 of 4 fine. Three episodes packed on a fresh `c7a.2xlarge`: 3 of 3 fine | The compute environment now launches only `xlarge` and `2xlarge` instances. Batch's retry still covers any remaining failures. Cause not confirmed, and the fix is not yet re-measured; see the run below |
+| **The first episode on a fresh 2-vCPU instance is unreliable** | 4 of 9 failed: two MAVSDK gRPC resets on `set_param EKF2_OF_CTRL` about 12 s into the sim, and two `no_local_position` after "Preflight Fail: no valid barometer data". A fifth needed a boot retry. Retries on an instance that had already run an episode: 4 of 4 fine. Three episodes packed on a fresh `c7a.2xlarge`: 3 of 3 fine | The compute environment launches only `xlarge` and `2xlarge` instances. On those, 12 of 12 first episodes booted and connected first time (see the `xlarge` run below). Cause still not confirmed |
+| **Gazebo sometimes ignores the motors** (open) | 2 of 12 on `xlarge`: PX4 armed, detected take-off and went to full thrust, but Gazebo's ground truth never moved. The flow camera saw nothing, the estimator dead-reckoned until its position went invalid, and a blind-land failsafe fired before the fault was injected. Both runs reported `completed` | The runner checks the rangefinder 8 s after arming. If it hasn't risen 0.3 m, the outcome is `stuck_on_ground` and the sim is rebooted, up to three boots in all. Earlier boots' outcomes are kept in `episode.json` as `retried`. Cause unknown; both cases were the two episodes that booted together on one host |
 
 ## Spot smoke run (2026-10-12)
 
@@ -78,6 +79,15 @@ None hit the ground. eph at arm was 0.024 to 0.030 m.
 - MAVSDK logs "heartbeats timed out" every few seconds in every attempt, good ones included. In lockstep PX4's heartbeat follows sim time, so at 0.2x real time it misses MAVSDK's wall-clock timeout. This is noise, not the failure.
 - Every failure so far was the first episode on a freshly started 2-vCPU instance. A likely cause is CPU contention from instance start-up (ECS agent, image extraction) while Gazebo and PX4 need both cores. That isn't confirmed. A cheap test is to limit the compute environment to `xlarge` and up, or to wait for the host's load to settle before booting the sim.
 - Compute was about $0.04 (three `c7a.large` and one `c7a.2xlarge` for about 10 minutes).
+
+## Twelve `flow_off` seeds on `xlarge` only (2026-10-12)
+
+The same scenario, seeds 2 to 13, after the compute environment was limited to `xlarge` and `2xlarge`. The image was built from `4c851d3`; the episode code is unchanged since the run above. Batch started six fresh `xlarge` instances (four `m7i`, two `c7a`) and put two episodes on each.
+
+- **No cold-start failures.** All 12 jobs succeeded on their first attempt with one boot each. There were no gRPC resets and no `no_local_position`. "Preflight Fail: no valid barometer data" still appeared in 8 of the 12 consoles, all of them good runs, so on its own it is harmless.
+- **Seeds 2 to 11 behaved like the earlier runs.** Belief gap max 0.07 to 0.19 m, true excursion max 0.08 to 0.23 m, failsafe 20.1 to 20.7 s after take-off, no ground impact. Episodes took 227 to 289 s.
+- **Seeds 12 and 13 never left the ground** (see the table above). They shared a `c7a.xlarge` and were the fastest to boot (connected after 17 s; other episodes took 18 to 28 s). Their metrics say "never took off". Batch didn't retry them because the outcome was `completed`, which the runner now prevents.
+- Compute was roughly $0.08: six `xlarge` spot instances for about 10 minutes, at twice the `.large` spot prices recorded above (an estimate, not a bill).
 
 ## What not to claim
 

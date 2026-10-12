@@ -10,6 +10,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import math
 import shutil
 import time
 import traceback
@@ -33,6 +34,11 @@ ARM_TIMEOUT_WALL_S = 90.0
 LAND_TIMEOUT_WALL_S = 90.0
 EPISODE_TIMEOUT_WALL_S = 900.0
 MAX_BOOT_ATTEMPTS = 3
+# Good runs are 0.4 m or more above the floor this long after arming; every scenario's first
+# fault comes later, so a stuck vehicle is caught before it can be mistaken for a fault response.
+TAKEOFF_CHECK_SIM_S = 8.0
+TAKEOFF_MIN_RISE_M = 0.3
+RETRIED_OUTCOMES = ("boot_stall", "stuck_on_ground")
 
 
 class BootStall(RuntimeError):
@@ -41,6 +47,10 @@ class BootStall(RuntimeError):
 
 class SimStall(RuntimeError):
     pass
+
+
+class StuckOnGround(RuntimeError):
+    """PX4 commands full thrust but Gazebo's vehicle doesn't move (seen on a packed, fresh host)."""
 
 
 @dataclass
@@ -53,6 +63,7 @@ class EpisodeResult:
     outcome: str = "pending"
     failsafe: bool = False
     boot_attempts: int = 0
+    retried: list[str] = field(default_factory=list)  # outcomes of earlier boots of this episode
     wall_s: dict[str, float] = field(default_factory=dict)
     events: list[dict[str, Any]] = field(default_factory=list)
     params: dict[str, int | float] = field(default_factory=dict)
@@ -80,6 +91,7 @@ class _Episode:
         self.sim = sim
         self.result = result
         self.sim_us = 0
+        self.range_m: float | None = None
         self._t0 = time.monotonic()
 
     def log(self, **event: Any) -> None:
@@ -115,6 +127,7 @@ class _Episode:
         tasks = [
             asyncio.create_task(self._watch_status(drone)),
             asyncio.create_task(self._watch_clock(drone)),
+            asyncio.create_task(self._watch_range(drone)),
         ]
         try:
             return await self._fly(drone)
@@ -138,6 +151,21 @@ class _Episode:
         await drone.telemetry.set_rate_imu(50)
         async for imu in drone.telemetry.imu():
             self.sim_us = int(imu.timestamp_us)
+
+    async def _watch_range(self, drone: System) -> None:
+        await drone.telemetry.set_rate_distance_sensor(10)
+        async for reading in drone.telemetry.distance_sensor():
+            if math.isfinite(reading.current_distance_m):
+                self.range_m = reading.current_distance_m
+
+    def check_takeoff(self, range_at_arm: float | None) -> None:
+        if range_at_arm is None or self.range_m is None:
+            self.log(takeoff_check="no rangefinder data")
+            return
+        rise = self.range_m - range_at_arm
+        self.log(takeoff_check_rise_m=round(rise, 2))
+        if rise < TAKEOFF_MIN_RISE_M:
+            raise StuckOnGround(f"rangefinder rose {rise:.2f} m in {TAKEOFF_CHECK_SIM_S:.0f} s after arming")
 
     async def _fly(self, drone: System) -> str:
         await self.wait_sim(FLOW_ENABLE_AFTER_SIM_S)
@@ -167,8 +195,14 @@ class _Episode:
         self.mark("armed")
 
         start = self.sim_s
+        range_at_arm = self.range_m
         self.log(action="offboard_start")
+        takeoff_checked = False
         for step in self.scenario.steps:
+            if not takeoff_checked and step.at_s > TAKEOFF_CHECK_SIM_S:
+                await self.wait_sim(start + TAKEOFF_CHECK_SIM_S)
+                self.check_takeoff(range_at_arm)
+                takeoff_checked = True
             await self.wait_sim(start + step.at_s)
             await self._apply(drone, step)
             if isinstance(step, End):
@@ -232,7 +266,8 @@ def _mavsdk_server_log(path: Path) -> Iterator[None]:
 def run_episode(
     scenario: Scenario, seed: int, out_dir: Path, *, instance: int = 0, paths: Paths | None = None
 ) -> EpisodeResult:
-    """Fly one scenario; retries a wedged boot up to MAX_BOOT_ATTEMPTS times."""
+    """Fly one scenario; reboots the sim after a wedged boot or a vehicle that never left the
+    ground, up to MAX_BOOT_ATTEMPTS boots in all."""
     paths = paths or Paths.from_env()
     missing = paths.missing()
     if missing:
@@ -252,6 +287,8 @@ def run_episode(
 
     with _mavsdk_server_log(out_dir / "mavsdk_server.txt"):
         for attempt in range(1, MAX_BOOT_ATTEMPTS + 1):
+            if attempt > 1:
+                result.retried.append(result.outcome)
             result.boot_attempts = attempt
             result.events.clear()
             result.wall_s.clear()
@@ -262,6 +299,8 @@ def run_episode(
                 result.outcome = asyncio.run(asyncio.wait_for(episode.run(), EPISODE_TIMEOUT_WALL_S))
             except BootStall:
                 result.outcome = "boot_stall"
+            except StuckOnGround as exc:
+                result.outcome = f"stuck_on_ground: {exc}"
             except SimStall as exc:
                 result.outcome = f"sim_stall: {exc}"
             except TimeoutError:
@@ -275,7 +314,7 @@ def run_episode(
             finally:
                 episode.mark("stopped")
                 sim.stop()
-            if result.outcome != "boot_stall":
+            if not result.outcome.startswith(RETRIED_OUTCOMES):
                 break
 
     ulog = sim.latest_ulog()
