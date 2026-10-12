@@ -21,6 +21,7 @@ settings = SimSettings(
     alert_email=ctx("alertEmail", ""),
     image_tag=ctx("imageTag", "latest"),
     account_alarm_usd=float(ctx("accountAlarmUsd", "0")),
+    github_repo=ctx("githubRepo", ""),
 )
 SimStack(
     app,

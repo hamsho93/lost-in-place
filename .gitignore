@@ -15,6 +15,8 @@ runs/
 # CDK
 infra/cdk.out/
 infra/.venv/
+# Lookup cache keyed by account ID, which stays out of git.
+infra/cdk.context.json
 node_modules/
 
 .DS_Store
