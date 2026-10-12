@@ -51,6 +51,7 @@ EPISODE_TIMEOUT = Duration.minutes(30)
 
 PROJECT_TAG_KEY = "project"
 PROJECT_TAG_VALUE = "lost-in-place"
+GITHUB_OIDC_HOST = "token.actions.githubusercontent.com"
 
 
 @dataclass(frozen=True)
@@ -62,6 +63,10 @@ class SimSettings:
     # Account-wide EstimatedCharges alarm threshold; 0 disables it. Billing metrics cannot be
     # filtered by tag, so this alarm also counts every other workload in the account.
     account_alarm_usd: float = 0.0
+    # "owner/name" of the GitHub repository whose main branch may push images; empty disables it.
+    # Needs the account's token.actions.githubusercontent.com OIDC provider, which is shared by
+    # every stack in the account and so is imported rather than created here.
+    github_repo: str = ""
 
 
 class SimStack(Stack):
@@ -205,6 +210,31 @@ class SimStack(Stack):
         results.grant_read(operator)
         images.grant_pull_push(operator)
 
+        outputs: dict[str, str] = {}
+        if settings.github_repo:
+            github_oidc = iam.OpenIdConnectProvider.from_open_id_connect_provider_arn(
+                self,
+                "GitHubOidc",
+                f"arn:{self.partition}:iam::{self.account}:oidc-provider/{GITHUB_OIDC_HOST}",
+            )
+            image_push = iam.Role(
+                self,
+                "ImagePushRole",
+                assumed_by=iam.WebIdentityPrincipal(
+                    github_oidc.open_id_connect_provider_arn,
+                    conditions={
+                        "StringEquals": {
+                            f"{GITHUB_OIDC_HOST}:aud": "sts.amazonaws.com",
+                            f"{GITHUB_OIDC_HOST}:sub": f"repo:{settings.github_repo}:ref:refs/heads/main",
+                        }
+                    },
+                ),
+                description=f"Push lost-in-place images from {settings.github_repo} main",
+                max_session_duration=Duration.hours(1),
+            )
+            images.grant_pull_push(image_push)
+            outputs["ImagePushRoleArn"] = image_push.role_arn
+
         deny_compute = iam.ManagedPolicy(
             self,
             "BudgetStop",
@@ -295,5 +325,6 @@ class SimStack(Stack):
             "JobQueue": queue.job_queue_name,
             "JobDefinition": job.job_definition_name,
             "OperatorRoleArn": operator.role_arn,
+            **outputs,
         }.items():
             CfnOutput(self, name, value=value)

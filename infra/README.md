@@ -31,6 +31,15 @@ Before the first deploy:
 
 ## Push the image and run episodes
 
+The `image` workflow pushes `latest` and the short commit SHA to ECR when it runs on `main`. Set two repository variables from the stack outputs once (under Settings → Secrets and variables → Actions → Variables):
+
+- `AWS_IMAGE_PUSH_ROLE`: the `ImagePushRoleArn` output;
+- `ECR_IMAGE_REPOSITORY`: the `ImageRepository` output.
+
+While either variable is unset, the workflow only builds the image and runs `doctor`. The push role uses the account's GitHub OIDC provider (`token.actions.githubusercontent.com`), which must already exist; create it once per account if it does not.
+
+To push by hand instead:
+
 ```bash
 repo=$(aws cloudformation describe-stacks --stack-name LostInPlaceSim \
   --query "Stacks[0].Outputs[?OutputKey=='ImageRepository'].OutputValue" --output text)
@@ -52,6 +61,7 @@ Each episode writes `runs/<scenario>_s<seed>/` (ULog, `episode.json`, `metrics.j
 | `accountAlarmUsd` | 0 (off) | Alarm threshold for the whole account's estimated charges, across all projects |
 | `maxVcpus` | 32 | Hard cap on concurrent compute (16 episodes) |
 | `alertEmail` | none | Where budget alerts go |
+| `githubRepo` | `hamsho93/lost-in-place` (cdk.json) | Repository whose `main` branch may push images; empty skips the push role |
 | `imageTag` | latest | Image tag the job definition runs |
 | `region` | us-east-1 | Billing metrics only exist in us-east-1 |
 

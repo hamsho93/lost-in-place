@@ -2,7 +2,7 @@ import aws_cdk as cdk
 import pytest
 from aws_cdk.assertions import Match, Template
 
-from lost_in_place_infra.sim_stack import SimSettings, SimStack
+from lost_in_place_infra.sim_stack import GITHUB_OIDC_HOST, SimSettings, SimStack
 
 
 @pytest.fixture(scope="module")
@@ -163,3 +163,53 @@ def test_account_wide_billing_alarm_is_opt_in() -> None:
         "AWS::CloudWatch::Alarm",
         {"Namespace": "AWS/Billing", "MetricName": "EstimatedCharges", "Threshold": 400},
     )
+
+
+def test_no_image_push_role_without_github_repo(template: Template) -> None:
+    roles = template.find_resources(
+        "AWS::IAM::Role",
+        {
+            "Properties": {
+                "AssumeRolePolicyDocument": {
+                    "Statement": [Match.object_like({"Action": "sts:AssumeRoleWithWebIdentity"})]
+                }
+            }
+        },
+    )
+    assert roles == {}
+
+
+def test_image_push_role_trusts_only_main_of_the_repo() -> None:
+    app = cdk.App()
+    stack = SimStack(
+        app,
+        "WithPush",
+        settings=SimSettings(github_repo="owner/repo"),
+        env=cdk.Environment(account="123456789012", region="us-east-1"),
+    )
+    template = Template.from_stack(stack)
+    template.resource_count_is("AWS::IAM::OIDCProvider", 0)
+    template.has_resource_properties(
+        "AWS::IAM::Role",
+        {
+            "AssumeRolePolicyDocument": Match.object_like(
+                {
+                    "Statement": [
+                        Match.object_like(
+                            {
+                                "Action": "sts:AssumeRoleWithWebIdentity",
+                                "Condition": {
+                                    "StringEquals": {
+                                        f"{GITHUB_OIDC_HOST}:aud": "sts.amazonaws.com",
+                                        f"{GITHUB_OIDC_HOST}:sub": "repo:owner/repo:ref:refs/heads/main",
+                                    }
+                                },
+                            }
+                        )
+                    ]
+                }
+            ),
+            "MaxSessionDuration": 3600,
+        },
+    )
+    template.has_output("ImagePushRoleArn", Match.any_value())
