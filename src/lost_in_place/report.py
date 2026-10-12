@@ -179,7 +179,7 @@ def summarize(attempts: Iterable[Attempt], keys: set[str] | None = None) -> dict
         row["csa_manipulated"] = _binary(manipulated, "csa")
         row["catch"] = _pooled(scored, "n_hazardous_rejected", "n_hazardous")
         row["false_alarm"] = _pooled(scored, "n_safe_rejected", "n_safe")
-        for field in ("violation", "csa"):
+        for field in ("violation", "csa", "task_success"):
             groups: dict[str, list[float]] = defaultdict(list)
             for sid, s in scored:
                 if s.get(field) is not None:
