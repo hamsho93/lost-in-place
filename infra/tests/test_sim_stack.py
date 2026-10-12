@@ -1,8 +1,16 @@
+import json
+from pathlib import Path
+
 import aws_cdk as cdk
 import pytest
 from aws_cdk.assertions import Match, Template
 
-from lost_in_place_infra.sim_stack import GITHUB_OIDC_HOST, SimSettings, SimStack
+from lost_in_place_infra.sim_stack import (
+    GITHUB_OIDC_HOST,
+    SimSettings,
+    SimStack,
+    bedrock_models_from_registry,
+)
 
 
 @pytest.fixture(scope="module")
@@ -243,3 +251,73 @@ def test_image_push_role_accepts_immutable_subject_repo() -> None:
             )
         },
     )
+
+
+SONNET = "us.anthropic.claude-sonnet-5-5"
+
+
+@pytest.fixture(scope="module")
+def bedrock_template() -> Template:
+    app = cdk.App()
+    stack = SimStack(
+        app,
+        "WithBedrock",
+        settings=SimSettings(bedrock_models=(SONNET,)),
+        env=cdk.Environment(account="123456789012", region="us-east-1"),
+    )
+    return Template.from_stack(stack)
+
+
+def test_no_bedrock_resources_without_models(template: Template) -> None:
+    template.resource_count_is("AWS::Bedrock::ApplicationInferenceProfile", 0)
+    assert "bedrock:InvokeModel" not in json.dumps(template.find_resources("AWS::IAM::Policy"))
+
+
+def test_planner_models_get_a_tagged_application_profile(bedrock_template: Template) -> None:
+    [profile] = bedrock_template.find_resources("AWS::Bedrock::ApplicationInferenceProfile").values()
+    props = profile["Properties"]
+    assert props["InferenceProfileName"] == "WithBedrock-anthropic-claude-sonnet-5-5"
+    assert json.dumps(props["ModelSource"]["CopyFrom"]).endswith(f':inference-profile/{SONNET}"]]}}')
+    assert {"Key": "project", "Value": "lost-in-place"} in props["Tags"]
+    bedrock_template.has_output("BedrockProfiles", Match.any_value())
+
+
+def test_roles_may_invoke_only_through_the_tagged_profile(bedrock_template: Template) -> None:
+    policies = json.dumps(bedrock_template.find_resources("AWS::IAM::Policy"))
+    assert policies.count("bedrock:InvokeModel") >= 2  # job role and operator role
+    assert "foundation-model/anthropic.claude-sonnet-5-5" in policies
+    assert "InferenceProfileArn" in policies
+    assert f"inference-profile/{SONNET}" not in policies  # the untagged system profile
+
+
+def test_jobs_get_the_profile_mapping(bedrock_template: Template) -> None:
+    definition = json.dumps(bedrock_template.find_resources("AWS::Batch::JobDefinition"))
+    assert '"Name": "LIP_BEDROCK_PROFILES"' in definition
+
+
+def test_budget_stop_blocks_model_calls_from_both_roles(bedrock_template: Template) -> None:
+    bedrock_template.has_resource_properties(
+        "AWS::IAM::ManagedPolicy",
+        {
+            "PolicyDocument": Match.object_like(
+                {
+                    "Statement": [
+                        Match.object_like(
+                            {
+                                "Effect": "Deny",
+                                "Action": Match.array_with(["batch:SubmitJob", "bedrock:InvokeModel"]),
+                            }
+                        )
+                    ]
+                }
+            )
+        },
+    )
+    action = bedrock_template.find_resources("AWS::Budgets::BudgetsAction")
+    [props] = [r["Properties"] for r in action.values()]
+    assert len(props["Definition"]["IamActionDefinition"]["Roles"]) == 2
+
+
+def test_registry_bedrock_models_are_read_from_models_yaml() -> None:
+    registry = Path(__file__).resolve().parents[2] / "src" / "lost_in_place" / "llm" / "models.yaml"
+    assert SONNET in bedrock_models_from_registry(registry)
