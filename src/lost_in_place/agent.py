@@ -29,7 +29,6 @@ from dataclasses import asdict, dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Literal
 
 from mavsdk_grpc import System
-from mavsdk_grpc.mavlink_direct import MavlinkMessage
 from mavsdk_grpc.offboard import PositionNedYaw
 from mavsdk_grpc.telemetry import FlightMode
 
@@ -60,7 +59,6 @@ ESTIMATOR_POS_HORIZ_REL = 8
 MSG_ESTIMATOR_STATUS = 230
 MSG_OPTICAL_FLOW_RAD = 106
 MSG_HIL_STATE_QUATERNION = 115  # PX4 fills it from its ground-truth topics in SITL
-MAV_CMD_SET_MESSAGE_INTERVAL = 511
 
 
 @dataclass(frozen=True)
@@ -263,22 +261,8 @@ class AgentEpisode(_Episode):
                 self.tel.add_flow(self.sim_s, float(fields.get("quality", 0)))
 
     async def request_health_streams(self, drone: System) -> None:
-        sysid = self.sim.instance + 1
         for msg_id in (MSG_ESTIMATOR_STATUS, MSG_OPTICAL_FLOW_RAD, MSG_HIL_STATE_QUATERNION):
-            fields = {
-                "target_system": sysid,
-                "target_component": 1,
-                "command": MAV_CMD_SET_MESSAGE_INTERVAL,
-                "confirmation": 0,
-                "param1": msg_id,
-                "param2": 100_000,  # 10 Hz
-                **{f"param{i}": 0 for i in range(3, 8)},
-            }
-            message = MavlinkMessage("COMMAND_LONG", 0, 0, sysid, 1, json.dumps(fields))
-            try:
-                await drone.mavlink_direct.send_message(message)
-            except Exception as exc:
-                self.log(error=f"message interval {msg_id}: {exc}")
+            await self.set_message_interval(drone, msg_id, 100_000)  # 10 Hz
 
     def health(self) -> EstimatorHealth:
         return EstimatorHealth(

@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 
 from mavsdk_grpc import System
 from mavsdk_grpc.failure import FailureType, FailureUnit
+from mavsdk_grpc.mavlink_direct import MavlinkMessage
 from mavsdk_grpc.offboard import OffboardError, PositionNedYaw
 
 from lost_in_place import provenance
@@ -49,6 +50,12 @@ MAX_BOOT_ATTEMPTS = 3
 TAKEOFF_CHECK_SIM_S = 8.0
 TAKEOFF_MIN_RISE_M = 0.3
 RETRIED_OUTCOMES = ("boot_stall", "stuck_on_ground")
+MAV_CMD_SET_MESSAGE_INTERVAL = 511
+MSG_HEARTBEAT = 0
+# PX4's heartbeat follows sim time in lockstep. At 1 Hz it misses MAVSDK's 3 s wall-clock timeout
+# below about 0.33x real time (Batch runs at 0.17-0.24x), and mavsdk_server has aborted on a
+# command sent while it considered the vehicle lost. 5 Hz holds down to about 0.07x.
+HEARTBEAT_INTERVAL_US = 200_000
 
 
 class BootStall(RuntimeError):
@@ -153,6 +160,7 @@ class _Episode:
             if state.is_connected:
                 break
         self.mark("connected")
+        await self.set_message_interval(drone, MSG_HEARTBEAT, HEARTBEAT_INTERVAL_US)
         tasks = [
             asyncio.create_task(self._watch_status(drone)),
             asyncio.create_task(self._watch_clock(drone)),
@@ -168,6 +176,23 @@ class _Episode:
                 self.log(mavsdk_server_exit=server.returncode)
             # The mavsdk_server child otherwise outlives the episode and keeps the process alive.
             drone._stop_mavsdk_server()
+
+    async def set_message_interval(self, drone: System, msg_id: int, interval_us: int) -> None:
+        sysid = self.sim.instance + 1
+        fields = {
+            "target_system": sysid,
+            "target_component": 1,
+            "command": MAV_CMD_SET_MESSAGE_INTERVAL,
+            "confirmation": 0,
+            "param1": msg_id,
+            "param2": interval_us,
+            **{f"param{i}": 0 for i in range(3, 8)},
+        }
+        message = MavlinkMessage("COMMAND_LONG", 0, 0, sysid, 1, json.dumps(fields))
+        try:
+            await drone.mavlink_direct.send_message(message)
+        except Exception as exc:
+            self.log(error=f"message interval {msg_id}: {exc}")
 
     async def _watch_status(self, drone: System) -> None:
         async for text in drone.telemetry.status_text():
