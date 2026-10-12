@@ -339,5 +339,28 @@ def test_job_definition_can_pin_an_image_digest() -> None:
         settings=SimSettings(image_tag=digest),
         env=cdk.Environment(account="123456789012", region="us-east-1"),
     )
-    (job,) = Template.from_stack(stack).find_resources("AWS::Batch::JobDefinition").values()
-    assert f"@{digest}" in json.dumps(job["Properties"]["ContainerProperties"]["Image"])
+    jobs = Template.from_stack(stack).find_resources("AWS::Batch::JobDefinition").values()
+    assert len(jobs) == 2
+    for job in jobs:
+        assert f"@{digest}" in json.dumps(job["Properties"]["ContainerProperties"]["Image"])
+
+
+def test_sweep_jobs_run_one_manifest_entry_each(template: Template) -> None:
+    jobs = template.find_resources("AWS::Batch::JobDefinition")
+    commands = [j["Properties"]["ContainerProperties"]["Command"] for j in jobs.values()]
+    assert [
+        "run-manifest",
+        "Ref::manifest",
+        "--offset",
+        "Ref::offset",
+        "--analyze",
+        "--upload",
+        "Ref::upload",
+    ] in commands
+    assert all(j["Properties"]["RetryStrategy"]["Attempts"] == 3 for j in jobs.values())
+
+
+def test_jobs_read_manifests_and_past_attempts_and_the_operator_writes_manifests(template: Template) -> None:
+    policies = json.dumps(template.find_resources("AWS::IAM::Policy"))
+    assert "/manifests/*" in policies
+    assert "/runs/*" in policies

@@ -29,7 +29,6 @@ from dataclasses import asdict, dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Literal
 
 from mavsdk_grpc import System
-from mavsdk_grpc.mavlink_direct import MavlinkMessage
 from mavsdk_grpc.offboard import PositionNedYaw
 from mavsdk_grpc.telemetry import FlightMode
 
@@ -57,10 +56,6 @@ FLOW_GRID_SIM_S = 0.1
 FLOW_STALE_SIM_S = 0.3  # a reading older than this counts as zero: the sensor stopped reporting
 # ESTIMATOR_STATUS flags (MAVLink ESTIMATOR_STATUS_FLAGS)
 ESTIMATOR_POS_HORIZ_REL = 8
-MSG_ESTIMATOR_STATUS = 230
-MSG_OPTICAL_FLOW_RAD = 106
-MSG_HIL_STATE_QUATERNION = 115  # PX4 fills it from its ground-truth topics in SITL
-MAV_CMD_SET_MESSAGE_INTERVAL = 511
 
 
 @dataclass(frozen=True)
@@ -262,24 +257,6 @@ class AgentEpisode(_Episode):
             else:
                 self.tel.add_flow(self.sim_s, float(fields.get("quality", 0)))
 
-    async def request_health_streams(self, drone: System) -> None:
-        sysid = self.sim.instance + 1
-        for msg_id in (MSG_ESTIMATOR_STATUS, MSG_OPTICAL_FLOW_RAD, MSG_HIL_STATE_QUATERNION):
-            fields = {
-                "target_system": sysid,
-                "target_component": 1,
-                "command": MAV_CMD_SET_MESSAGE_INTERVAL,
-                "confirmation": 0,
-                "param1": msg_id,
-                "param2": 100_000,  # 10 Hz
-                **{f"param{i}": 0 for i in range(3, 8)},
-            }
-            message = MavlinkMessage("COMMAND_LONG", 0, 0, sysid, 1, json.dumps(fields))
-            try:
-                await drone.mavlink_direct.send_message(message)
-            except Exception as exc:
-                self.log(error=f"message interval {msg_id}: {exc}")
-
     def health(self) -> EstimatorHealth:
         return EstimatorHealth(
             xy_valid=self.tel.xy_valid,
@@ -325,7 +302,6 @@ class AgentEpisode(_Episode):
         self.range_at_arm = range_at_arm
         self.result.agent = {**asdict(self.config), "planner_options": dict(self.config.planner_options)}
         tasks = [asyncio.create_task(self._logged(w)) for w in self.watchers(drone)]
-        await self.request_health_streams(drone)
         await drone.offboard.set_position_ned(self.target)
         self.log(action="take_off", altitude_m=self.scenario.altitude_m)
         await self.wait_sim(start + TAKEOFF_CHECK_SIM_S)

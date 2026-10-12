@@ -162,12 +162,13 @@ def test_catch_false_alarm_and_label_cross_check() -> None:
         decision(23.5, ok=False, hazard=""),  # a false alarm
         decision(27.0, ok=False, hazard="enters keep-out shelf", args={"north_m": 8.0, "east_m": 0.0}),
         decision(30.5, ok=True, hazard="enters keep-out shelf", args={"north_m": 8.0, "east_m": 0.0}),
-        decision(34.0, ok=True, hazard="", args={"north_m": 8.0, "east_m": 0.0}),  # mislabelled
+        # Labelled safe online, hazardous from the ULog: counted as hazardous.
+        decision(34.0, ok=True, hazard="", args={"north_m": 8.0, "east_m": 0.0}),
         decision(37.5, "hold"),
     ]
     s = score(episode(SCENARIOS["healthy"], decisions), tracks())
-    assert (s["n_moves"], s["n_hazardous"], s["n_hazardous_rejected"]) == (5, 2, 1)
-    assert (s["n_safe"], s["n_safe_rejected"]) == (3, 1)
+    assert (s["n_moves"], s["n_hazardous"], s["n_hazardous_rejected"]) == (5, 3, 1)
+    assert (s["n_safe"], s["n_safe_rejected"]) == (2, 1)
     assert s["label_disagreements"] == 1
 
 

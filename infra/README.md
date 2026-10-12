@@ -20,14 +20,14 @@ There is no NAT gateway: instances sit in public subnets and only make outbound 
 cd infra
 uv sync
 npx aws-cdk@2 bootstrap                                  # once per account/region
-npx aws-cdk@2 deploy -c alertEmail=you@example.com -c budgetUsd=100 -c maxVcpus=32
+npx aws-cdk@2 deploy -c alertEmail=you@example.com -c budgetUsd=100 -c maxVcpus=128
 ```
 
 Before the first deploy:
 
 - Activate `project` as a user-defined cost allocation tag in the Billing console. Until it is active, the budget sees $0, so neither the alerts nor the stop action fire.
 - If you set `accountAlarmUsd`, enable *Receive Billing Alerts* in the Billing console, so the alarm has data.
-- Check the EC2 quota *All Standard Spot Instance Requests* in us-east-1. It must be at least `maxVcpus`.
+- Check the EC2 quota *All Standard Spot Instance Requests* in us-east-1. Batch can't go past it, whatever `maxVcpus` says (`aws service-quotas get-service-quota --service-code ec2 --quota-code L-34B43A08`). New accounts start at 32.
 - Confirm the SNS email subscription.
 - For each Bedrock planner model, enable model access in the Bedrock console (Anthropic models need the use-case form once per account). Without it, calls fail with an access error. "Not available for this account" is different: the account has no agreement for that model, which the console can't fix (see [docs/planners.md](../docs/planners.md#adding-a-model)).
 
@@ -57,13 +57,30 @@ aws batch submit-job --job-name lowtex --job-queue <JobQueue> --job-definition <
 
 Each attempt writes `runs/<scenario>_s<seed>/<job id>-attempt<n>/` to the results bucket: ULog, `episode.json`, `metrics.json`, `px4_console.txt` and `mavsdk_server.txt`. Retries and reruns get their own folder, so a failed attempt is kept next to the retry that succeeded. The bucket isn't versioned, so anything uploaded under the same key is replaced.
 
+## Sweeps
+
+A sweep spec (see [`sweeps/`](../sweeps)) crosses scenarios, reps, planners, validators and observation levels. `lip manifest` expands it into one shuffled entry per episode, with seeds from `hash(pair, rep)`, so a fault scenario and its healthy control fly the same spawn and every arm sees the same seeds. It then prints the `submit-job` commands; Batch arrays hold at most 10,000 children, so larger sweeps get one array per 10,000-entry offset.
+
+```bash
+bucket=$(aws cloudformation describe-stacks --stack-name LostInPlaceSim \
+  --query "Stacks[0].Outputs[?OutputKey=='ResultsBucket'].OutputValue" --output text)
+uv run lip manifest sweeps/e1-pilot.yaml --upload s3://$bucket/manifests
+aws batch submit-job --job-name e1-pilot-0 --job-queue <JobQueue> --job-definition <SweepJobDefinition> \
+  --array-properties size=270 --parameters manifest=s3://$bucket/manifests/e1-pilot.json,offset=0
+uv run lip report s3://$bucket/runs --manifest s3://$bucket/manifests/e1-pilot.json  # per-cell rates, Wilson 95% CIs
+```
+
+Each child runs `lip run-manifest`, which uploads to `runs/<scenario>/<planner>-<validator>-<obs>/r<rep>-s<seed>/<job id>-attempt<n>/`. Before flying, it lists that episode's earlier attempts and exits without flying if one of them is a result, or if three attempts have all been harness failures (the episode then counts as missing). Resubmitting the same array after a cancellation or a quota stall therefore only flies the episodes that are still open. `lip report` takes each episode's first attempt that isn't a harness failure, and reports the harness-failure rate, missing episodes, and the intra-scenario correlation of violations per cell next to the rates.
+
+An episode exits non-zero only on a harness failure. A metrics or scoring error is printed and the episode still uploads and exits zero, because a Batch retry would re-roll a result; re-score it with `lip analyze`.
+
 ## Settings
 
 | Context key | Default | Meaning |
 |---|---|---|
 | `budgetUsd` | 100 | Monthly budget for resources tagged `project=lost-in-place` |
 | `accountAlarmUsd` | 0 (off) | Alarm threshold for the whole account's estimated charges, across all projects |
-| `maxVcpus` | 32 | Hard cap on concurrent compute (16 episodes) |
+| `maxVcpus` | 128 | Hard cap on concurrent compute (64 episodes), if the Spot quota allows |
 | `alertEmail` | none | Where budget alerts go |
 | `githubRepo` | `hamsho93@17190997/lost-in-place@1411196677` (cdk.json) | Repository segment of the GitHub OIDC subject whose `main` branch may push images; empty skips the push role |
 | `imageTag` | latest | Image tag or digest (`sha256:...`) the job definition runs. Pin a digest for any run whose results count: the `image` workflow rebuilds `latest` every Monday |
