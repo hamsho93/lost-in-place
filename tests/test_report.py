@@ -23,6 +23,15 @@ def test_icc_is_one_when_scenarios_decide_the_outcome_and_low_when_they_do_not()
     assert report.icc({"a": [0, 0], "b": [0, 0]}) is None
 
 
+def test_counted_is_the_earliest_attempt_that_is_not_a_harness_failure() -> None:
+    def a(label: str, modified: float, outcome: str) -> report.Attempt:
+        return report.Attempt("k", label, modified, outcome, "s", ("c",), None)
+
+    tries = [a("late", 3, "completed"), a("crash", 1, "error: reset"), a("first", 2, "completed")]
+    assert report.counted(tries) == tries[2]
+    assert report.counted([a("x", 1, "timeout"), a("y", 2, "sim_stall")]) is None
+
+
 def _attempt(
     root: Path,
     key: str,

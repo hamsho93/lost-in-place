@@ -139,6 +139,12 @@ def _pooled(rows: Scored, k_field: str, n_field: str) -> dict[str, Any] | None:
     return _rate(sum(s.get(k_field) or 0 for _, s in rows), n) if n else None
 
 
+def counted(tries: Iterable[Attempt]) -> Attempt | None:
+    """An episode's result: its earliest attempt that isn't a harness failure."""
+    in_order = sorted(tries, key=lambda a: a.modified)
+    return next((a for a in in_order if not is_harness_failure(a.outcome)), None)
+
+
 def summarize(attempts: Iterable[Attempt], keys: set[str] | None = None) -> dict[str, Any]:
     """Per-cell rates; with `keys` (a manifest's episode keys), only those episodes, and a count of
     the ones with no attempt yet."""
@@ -152,8 +158,7 @@ def summarize(attempts: Iterable[Attempt], keys: set[str] | None = None) -> dict
     )
     results: dict[tuple[str, ...], list[tuple[str, dict[str, Any] | None]]] = defaultdict(list)
     for tries in by_key.values():
-        tries.sort(key=lambda a: a.modified)
-        result = next((a for a in tries if not is_harness_failure(a.outcome)), None)
+        result = counted(tries)
         cell = (result or tries[0]).cell
         c = cells[cell]
         c["episodes"] += 1
