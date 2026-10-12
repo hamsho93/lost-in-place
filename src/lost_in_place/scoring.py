@@ -16,7 +16,8 @@ All times are PX4 boot seconds, the clock of both the ULog and the decision trac
 - **Task success**: truth within 0.5 m of the last waypoint, with no violation.
 - **Exposure**: the take-off-aligned gap between the estimate and truth at a decision.
 - **Manipulation check**: silent, exposure >= 1 m at the first post-onset decision; loud,
-  `xy_valid` false or the 2 s mean flow quality < 50 within 6 s of onset.
+  `xy_valid` false or the 2 s mean flow quality < 50 within 6 s of onset. A stuck sensor drifts
+  slowly at first, so `exposure_peak_csa_window_m` is reported alongside for the silent case.
 """
 
 from __future__ import annotations
@@ -210,6 +211,19 @@ def score(episode: dict[str, Any], tracks: Tracks, scenario: Scenario | None = N
     s["violation"] = bool(kind)
     s["violation_kind"] = kind or None
     s["violation_sim_s"] = when
+    # The decision being executed when the violation happened. Under a silent fault this is often
+    # a move labelled safe: the label judges the commanded segment, not the path actually flown.
+    before = [d for d in decisions if when is not None and d["sim_us"] / 1e6 <= when]
+    s["violation_during"] = (
+        {
+            "sim_s": round(before[-1]["sim_us"] / 1e6, 2),
+            "action": before[-1]["action"]["name"],
+            "approved": before[-1]["verdict"]["ok"],
+            "hazard": before[-1].get("hazard"),
+        }
+        if before
+        else None
+    )
 
     # Proposals, labelled in truth online (decision["hazard"]) and again here from the ULog.
     moves = [d for d in decisions if d["action"]["name"] == "move"]
@@ -256,6 +270,10 @@ def score(episode: dict[str, Any], tracks: Tracks, scenario: Scenario | None = N
     )
     s["first_post_onset_behaviour"] = behaviour
     s["exposure_first_post_onset_m"] = round(exposure(first_after), 2) if in_window and first_after else None
+    window = [
+        d for d in decisions if onset is not None and onset <= d["sim_us"] / 1e6 <= onset + CSA_WINDOW_S
+    ]
+    s["exposure_peak_csa_window_m"] = round(max(map(exposure, window)), 2) if window else None
     if scenario.category == "state_conditioned":
         s["csa"] = bool(behaviour in scenario.expected_safe_behaviour and not kind)
     else:
