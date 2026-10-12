@@ -1,4 +1,5 @@
-"""Command line: `lip worlds`, `lip run`, `lip analyze`, `lip doctor`, `lip models`, `lip propose`."""
+"""Command line: `lip worlds`, `lip run`, `lip analyze`, `lip manifest`, `lip run-manifest`, `lip report`,
+`lip doctor`, `lip models`, `lip propose`."""
 
 from __future__ import annotations
 
@@ -28,27 +29,56 @@ def _cmd_worlds(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_run(args: argparse.Namespace) -> int:
+def _fly(
+    scenario_path: Path,
+    seed: int,
+    out: Path,
+    agent: AgentConfig,
+    *,
+    instance: int | None,
+    analyze: bool,
+    upload: str | None,
+    upload_name: str | None = None,
+) -> int:
+    """Fly, analyze and upload one episode. Exits non-zero only on a harness failure, which Batch
+    retries; an analysis error never does, because a retry would re-roll a result."""
     from lost_in_place.episode import run_episode
     from lost_in_place.scenario import load_scenario
     from lost_in_place.slots import claim_slot
 
-    scenario = load_scenario(args.scenario)
-    seed = args.seed + int(os.environ.get("AWS_BATCH_JOB_ARRAY_INDEX", "0"))
-    out = args.out or Path("runs") / f"{scenario.id}_s{seed}"
-    agent = _agent_config(args) if scenario.mission is not None else None
-    with claim_slot(args.instance) as instance:
-        result = run_episode(scenario, seed, out, instance=instance, agent=agent)
+    scenario = load_scenario(scenario_path)
+    with claim_slot(instance) as slot:
+        result = run_episode(
+            scenario, seed, out, instance=slot, agent=agent if scenario.mission is not None else None
+        )
     summary = {"scenario": scenario.id, "seed": seed, "outcome": result.outcome, "failsafe": result.failsafe}
     print(json.dumps({**summary, "out": str(out)}))
-    status = 0 if result.outcome == "completed" else 1
-    if args.analyze and (out / "flight.ulg").exists():
-        status = max(status, _analyze([out]))
-    if args.upload:
+    if analyze and (out / "flight.ulg").exists():
+        try:
+            _analyze([out])
+        except Exception as exc:  # the episode stands; re-score it offline
+            print(f"{out}: analysis failed: {exc!r}", file=sys.stderr)
+    if upload:
         from lost_in_place.storage import attempt_label, upload_dir
 
-        print(f"uploaded {out} to {upload_dir(out, args.upload, attempt_label())}")
-    return status
+        print(f"uploaded {out} to {upload_dir(out, upload, attempt_label(), upload_name)}")
+    return 0 if result.outcome == "completed" else 1
+
+
+def _cmd_run(args: argparse.Namespace) -> int:
+    from lost_in_place.scenario import load_scenario
+
+    seed = args.seed + int(os.environ.get("AWS_BATCH_JOB_ARRAY_INDEX", "0"))
+    out = args.out or Path("runs") / f"{load_scenario(args.scenario).id}_s{seed}"
+    return _fly(
+        args.scenario,
+        seed,
+        out,
+        _agent_config(args),
+        instance=args.instance,
+        analyze=args.analyze,
+        upload=args.upload,
+    )
 
 
 def _agent_config(args: argparse.Namespace) -> AgentConfig:
@@ -63,6 +93,85 @@ def _agent_config(args: argparse.Namespace) -> AgentConfig:
         latency_s=args.latency,
         pause=not args.no_pause,
     )
+
+
+def _cmd_manifest(args: argparse.Namespace) -> int:
+    from lost_in_place import manifest
+
+    spec = manifest.SweepSpec.load(args.spec)
+    entries = manifest.build(spec, args.root)
+    text = manifest.dumps(spec, entries)
+    out = args.out or Path("manifests") / f"{spec.name}.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(text)
+    target = str(out)
+    if args.upload:
+        import boto3
+
+        from lost_in_place.storage import parse_s3_uri
+
+        bucket, prefix = parse_s3_uri(args.upload)
+        key = "/".join(p for p in (prefix, f"{spec.name}.json") if p)
+        boto3.client("s3").put_object(Bucket=bucket, Key=key, Body=text.encode())
+        target = f"s3://{bucket}/{key}"
+    cells = len({(e.scenario_id, e.cell) for e in entries})
+    print(json.dumps({"manifest": target, "episodes": len(entries), "scenario_cells": cells}))
+    for offset, size in manifest.array_chunks(len(entries)):
+        print(
+            f"aws batch submit-job --job-name {spec.name}-{offset} --job-queue <JobQueue> "
+            f"--job-definition <SweepJobDefinition> --array-properties size={size} "
+            f"--parameters manifest={target},offset={offset}"
+        )
+    return 0
+
+
+def _cmd_run_manifest(args: argparse.Namespace) -> int:
+    from lost_in_place import manifest
+    from lost_in_place.agent import AgentConfig
+
+    index = args.offset + (
+        args.index if args.index is not None else int(os.environ.get("AWS_BATCH_JOB_ARRAY_INDEX", "0"))
+    )
+    entries = manifest.read(args.manifest)
+    if not 0 <= index < len(entries):
+        print(f"index {index} is outside the manifest ({len(entries)} entries)", file=sys.stderr)
+        return 2
+    entry = entries[index]
+    print(json.dumps({"index": index, "key": entry.key}))
+    if args.upload and not args.force:
+        from lost_in_place.storage import attempt_outcomes
+
+        outcomes = attempt_outcomes(args.upload, entry.key)
+        if manifest.settled(outcomes):
+            print(json.dumps({"skipped": entry.key, "attempts": outcomes}))
+            return 0
+    agent = AgentConfig(
+        planner=entry.planner,
+        planner_options=entry.planner_options,
+        validator=entry.validator,
+        observation=entry.observation,
+        latency_s=entry.latency_s,
+    )
+    return _fly(
+        Path(entry.scenario),
+        entry.seed,
+        Path("runs") / entry.key,
+        agent,
+        instance=None,
+        analyze=args.analyze,
+        upload=args.upload,
+        upload_name=entry.key,
+    )
+
+
+def _cmd_report(args: argparse.Namespace) -> int:
+    from lost_in_place import report
+
+    runs: str = args.runs
+    attempts = report.s3_attempts(runs) if runs.startswith("s3://") else report.local_attempts(Path(runs))
+    summary = report.summarize(attempts)
+    print(json.dumps(summary, indent=1) if args.json else report.markdown(summary))
+    return 0
 
 
 def _analyze(run_dirs: list[Path]) -> int:
@@ -212,6 +321,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     analyze.add_argument("run_dirs", type=Path, nargs="+")
     analyze.set_defaults(func=lambda a: _analyze(a.run_dirs))
+
+    man = sub.add_parser("manifest", help="expand a sweep spec into a shuffled episode manifest")
+    man.add_argument("spec", type=Path, help="sweep YAML, e.g. sweeps/e1-pilot.yaml")
+    man.add_argument("--root", type=Path, default=Path(), help="repo root the scenario globs are under")
+    man.add_argument("--out", type=Path, help="default: manifests/<name>.json")
+    man.add_argument("--upload", metavar="S3_URI", help="also put it here, e.g. s3://bucket/manifests")
+    man.set_defaults(func=_cmd_manifest)
+
+    rm = sub.add_parser("run-manifest", help="fly one manifest entry (a Batch array child)")
+    rm.add_argument("manifest", help="manifest path or s3:// URI")
+    rm.add_argument("--offset", type=int, default=0, help="added to the index (arrays hold 10,000)")
+    rm.add_argument("--index", type=int, help="default: AWS_BATCH_JOB_ARRAY_INDEX")
+    rm.add_argument("--analyze", action="store_true", help="compute metrics and scores after the episode")
+    rm.add_argument("--upload", metavar="S3_URI", help="runs root, e.g. s3://bucket/runs")
+    rm.add_argument("--force", action="store_true", help="fly even if the episode already has a result there")
+    rm.set_defaults(func=_cmd_run_manifest)
+
+    rep = sub.add_parser("report", help="per-cell rates with Wilson 95%% intervals")
+    rep.add_argument("runs", help="runs root: a local directory or s3://bucket/runs")
+    rep.add_argument("--json", action="store_true", help="full summary as JSON instead of a table")
+    rep.set_defaults(func=_cmd_report)
 
     doctor = sub.add_parser("doctor", help="check that PX4 and Gazebo are where we expect")
     doctor.set_defaults(func=_cmd_doctor)
