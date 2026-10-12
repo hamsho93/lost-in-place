@@ -9,9 +9,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import shutil
 import time
 import traceback
+from collections.abc import Iterator
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -119,6 +121,9 @@ class _Episode:
         finally:
             for task in tasks:
                 task.cancel()
+            server = drone._server_process
+            if server is not None and server.poll() is not None:
+                self.log(mavsdk_server_exit=server.returncode)
             # The mavsdk_server child otherwise outlives the episode and keeps the process alive.
             drone._stop_mavsdk_server()
 
@@ -201,6 +206,29 @@ class _Episode:
             self.log(action="end")
 
 
+def _error_text(exc: Exception) -> str:
+    # gRPC errors render as a multi-line repr; details() is the server's actual message.
+    details = getattr(exc, "details", None)
+    return str(details() or "") if callable(details) else str(exc)
+
+
+@contextlib.contextmanager
+def _mavsdk_server_log(path: Path) -> Iterator[None]:
+    """Write mavsdk_server's output to `path`; MAVSDK otherwise drops everything below warnings."""
+    logger = logging.getLogger("mavsdk_server")
+    handler = logging.FileHandler(path, mode="w")
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    previous = logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+    try:
+        yield
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(previous)
+        handler.close()
+
+
 def run_episode(
     scenario: Scenario, seed: int, out_dir: Path, *, instance: int = 0, paths: Paths | None = None
 ) -> EpisodeResult:
@@ -222,32 +250,33 @@ def run_episode(
     )
     sim = SimInstance(paths=paths, world=scenario.world, spawn=spawn, params=params, instance=instance)
 
-    for attempt in range(1, MAX_BOOT_ATTEMPTS + 1):
-        result.boot_attempts = attempt
-        result.events.clear()
-        result.wall_s.clear()
-        result.failsafe = False
-        episode = _Episode(scenario, seed, sim, result)
-        sim.start(out_dir / "px4_console.txt")
-        try:
-            result.outcome = asyncio.run(asyncio.wait_for(episode.run(), EPISODE_TIMEOUT_WALL_S))
-        except BootStall:
-            result.outcome = "boot_stall"
-        except SimStall as exc:
-            result.outcome = f"sim_stall: {exc}"
-        except TimeoutError:
-            result.outcome = "timeout"
-        except Exception as exc:
-            # Recorded rather than raised, so episode.json, the console log and the ULog are still
-            # written (and uploaded) for a crashed episode.
-            traceback.print_exc()
-            first_line = next(iter(str(exc).strip().splitlines()), "")
-            result.outcome = f"error: {type(exc).__name__}" + (f": {first_line}" if first_line else "")
-        finally:
-            episode.mark("stopped")
-            sim.stop()
-        if result.outcome != "boot_stall":
-            break
+    with _mavsdk_server_log(out_dir / "mavsdk_server.txt"):
+        for attempt in range(1, MAX_BOOT_ATTEMPTS + 1):
+            result.boot_attempts = attempt
+            result.events.clear()
+            result.wall_s.clear()
+            result.failsafe = False
+            episode = _Episode(scenario, seed, sim, result)
+            sim.start(out_dir / "px4_console.txt")
+            try:
+                result.outcome = asyncio.run(asyncio.wait_for(episode.run(), EPISODE_TIMEOUT_WALL_S))
+            except BootStall:
+                result.outcome = "boot_stall"
+            except SimStall as exc:
+                result.outcome = f"sim_stall: {exc}"
+            except TimeoutError:
+                result.outcome = "timeout"
+            except Exception as exc:
+                # Recorded rather than raised, so episode.json, the console log and the ULog are still
+                # written (and uploaded) for a crashed episode.
+                traceback.print_exc()
+                first_line = next(iter(_error_text(exc).strip().splitlines()), "")
+                result.outcome = f"error: {type(exc).__name__}" + (f": {first_line}" if first_line else "")
+            finally:
+                episode.mark("stopped")
+                sim.stop()
+            if result.outcome != "boot_stall":
+                break
 
     ulog = sim.latest_ulog()
     if ulog is not None:
