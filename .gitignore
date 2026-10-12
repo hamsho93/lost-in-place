@@ -10,6 +10,7 @@ build/
 
 # Benchmark output (results go to S3, not git)
 runs/
+manifests/
 *.ulg
 
 # CDK
