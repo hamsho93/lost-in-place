@@ -25,6 +25,18 @@ make synth     # cdk synth
 
 Run `make check` before every commit; CI runs the same steps. Use `uv run ...`, not bare `python`.
 
+## Skills
+
+Workflows that have gone wrong before are written up as skills in `.cursor/skills/`. Read the matching one before starting:
+
+| Skill | Use it to |
+|---|---|
+| [`run-sweep`](.cursor/skills/run-sweep/SKILL.md) | Deploy, canary, submit, monitor, cancel, quarantine and resume a Batch sweep |
+| [`triage-harness-failures`](.cursor/skills/triage-harness-failures/SKILL.md) | Diagnose `boot_stall`, `inject_failed`, `error: ...` and other harness failures from an attempt's files |
+| [`review-sweep`](.cursor/skills/review-sweep/SKILL.md) | Mirror, re-score and break down results, and check them before anyone quotes a number |
+
+When a workflow costs you a detour that the next agent could avoid, add it to the matching skill. If no skill fits, write a new one. Skills hold procedures; facts about the simulator go in `docs/fidelity.md`.
+
 ## Conventions
 
 - Python 3.11+, fully typed (mypy strict on `src/`), `ruff format`, line length 110.
@@ -38,6 +50,7 @@ Run `make check` before every commit; CI runs the same steps. Use `uv run ...`, 
 
 - **The AWS account ID never goes into git**, including commit messages and PR text. `infra/cdk.context.json` is gitignored for this reason. Workflows read account-specific values from repository variables.
 - **Mission timing is sim time.** PX4 runs in lockstep with Gazebo at about 0.2 to 0.4 times real time. Use `wait_sim`, never wall-clock sleeps, for anything in a scenario.
+- **MAVLink stream rates are set at boot by `docker/4021_gz_x500_flow.post`, never by the runner.** PX4's heartbeat follows sim time. Any MAVSDK command sent while MAVSDK thinks the vehicle has timed out can abort `mavsdk_server`, so a new message the runner reads gets its rate in that file. See [the E1 pilot](docs/pilot.md#harness-failures).
 - **Parallel episodes need separate slots.** Each slot (PX4 instance number) has its own MAVLink, MAVSDK and Gazebo partition ports. `lip run` claims a free one by default. AWS Batch uses host networking, so slots must stay unique per host, not just per container.
 - **Every episode starts clean.** The PX4 work dir under `/tmp/lost-in-place` is wiped on start, because parameters persist there.
 - **x86-64 only** until the flow-quality fix (`px4/patches/0001`) is upstream: the bug it fixes is undefined behaviour that can differ on ARM.
