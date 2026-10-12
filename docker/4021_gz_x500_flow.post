@@ -10,4 +10,5 @@ mavlink stream -r 5 -s HEARTBEAT -u $udp_offboard_port_local
 # than with SET_MESSAGE_INTERVAL over MAVSDK, which hung or aborted mavsdk_server on Batch.
 mavlink stream -r 10 -s ESTIMATOR_STATUS -u $udp_offboard_port_local
 mavlink stream -r 10 -s OPTICAL_FLOW_RAD -u $udp_offboard_port_local
-mavlink stream -r 10 -s HIL_STATE_QUATERNION -u $udp_offboard_port_local
+# Truth at 50 Hz: at 10 Hz the online hazard label lagged truth by up to 0.8 m in a runaway.
+mavlink stream -r 50 -s HIL_STATE_QUATERNION -u $udp_offboard_port_local
