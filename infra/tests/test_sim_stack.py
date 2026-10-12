@@ -35,10 +35,17 @@ def test_compute_is_spot_x86_and_capped(template: Template) -> None:
                     "AllocationStrategy": "SPOT_PRICE_CAPACITY_OPTIMIZED",
                     "MinvCpus": 0,
                     "MaxvCpus": 16,
-                    "InstanceTypes": ["c7i", "c7a", "m7i", "c6i"],
                 }
             )
         },
+    )
+
+
+def test_compute_has_no_two_vcpu_instances(template: Template) -> None:
+    (compute,) = template.find_resources("AWS::Batch::ComputeEnvironment").values()
+    types = compute["Properties"]["ComputeResources"]["InstanceTypes"]
+    assert sorted(types) == sorted(
+        f"{family}.{size}" for family in ("c7i", "c7a", "m7i", "c6i") for size in ("xlarge", "2xlarge")
     )
 
 
@@ -253,7 +260,7 @@ def test_image_push_role_accepts_immutable_subject_repo() -> None:
     )
 
 
-SONNET = "us.anthropic.claude-sonnet-5-5"
+SONNET = "us.anthropic.claude-sonnet-4-6"
 
 
 @pytest.fixture(scope="module")
@@ -276,7 +283,7 @@ def test_no_bedrock_resources_without_models(template: Template) -> None:
 def test_planner_models_get_a_tagged_application_profile(bedrock_template: Template) -> None:
     [profile] = bedrock_template.find_resources("AWS::Bedrock::ApplicationInferenceProfile").values()
     props = profile["Properties"]
-    assert props["InferenceProfileName"] == "WithBedrock-anthropic-claude-sonnet-5-5"
+    assert props["InferenceProfileName"] == "WithBedrock-anthropic-claude-sonnet-4-6"
     assert json.dumps(props["ModelSource"]["CopyFrom"]).endswith(f':inference-profile/{SONNET}"]]}}')
     assert {"Key": "project", "Value": "lost-in-place"} in props["Tags"]
     bedrock_template.has_output("BedrockProfiles", Match.any_value())
@@ -285,7 +292,7 @@ def test_planner_models_get_a_tagged_application_profile(bedrock_template: Templ
 def test_roles_may_invoke_only_through_the_tagged_profile(bedrock_template: Template) -> None:
     policies = json.dumps(bedrock_template.find_resources("AWS::IAM::Policy"))
     assert policies.count("bedrock:InvokeModel") >= 2  # job role and operator role
-    assert "foundation-model/anthropic.claude-sonnet-5-5" in policies
+    assert "foundation-model/anthropic.claude-sonnet-4-6" in policies
     assert "InferenceProfileArn" in policies
     assert f"inference-profile/{SONNET}" not in policies  # the untagged system profile
 
