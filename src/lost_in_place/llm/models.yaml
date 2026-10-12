@@ -1,0 +1,13 @@
+# Models available as planner arms. The key is the arm's name in results and on the command line.
+#
+# provider   which client calls it (see lost_in_place/llm/clients.py: CLIENTS)
+# model_id   the provider's identifier; for Bedrock, a system inference profile such as us.anthropic.*
+# Optional:  region, max_tokens, temperature (omit to use the provider default), tool_choice (any|auto)
+#
+# Pin exact model identifiers: results are only comparable for the same model version.
+
+claude-sonnet-5-5:
+  provider: bedrock
+  model_id: us.anthropic.claude-sonnet-5-5
+  temperature: 0
+  notes: Frontier arm, added 2026-10-12. Needs Bedrock model access for Claude Sonnet 5.5.

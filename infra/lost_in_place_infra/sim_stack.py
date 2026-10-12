@@ -2,8 +2,8 @@
 
 Cost controls, strongest first:
 1. `max_vcpus` on the compute environment caps how much can run at once.
-2. An AWS Budgets action attaches a deny policy to the operator role at 100% of the budget,
-   so no new jobs can be submitted through it.
+2. An AWS Budgets action attaches a deny policy to the operator and job roles at 100% of the
+   budget, so no new jobs can be submitted and no more planner model calls can be made.
 3. Budget emails at 50/80/100% actual and 100% forecast.
 
 The budget counts only costs tagged `project=lost-in-place`, so other workloads in a shared account
@@ -13,8 +13,11 @@ allocation tag in the Billing console; until then the budget sees $0.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
+from pathlib import Path
 
+import yaml
 from aws_cdk import (
     Annotations,
     CfnOutput,
@@ -25,6 +28,7 @@ from aws_cdk import (
     Tags,
 )
 from aws_cdk import aws_batch as batch
+from aws_cdk import aws_bedrock as bedrock
 from aws_cdk import aws_budgets as budgets
 from aws_cdk import aws_cloudwatch as cloudwatch
 from aws_cdk import aws_cloudwatch_actions as cw_actions
@@ -52,6 +56,7 @@ EPISODE_TIMEOUT = Duration.minutes(30)
 PROJECT_TAG_KEY = "project"
 PROJECT_TAG_VALUE = "lost-in-place"
 GITHUB_OIDC_HOST = "token.actions.githubusercontent.com"
+BEDROCK_PROFILES_ENV = "LIP_BEDROCK_PROFILES"  # read by lost_in_place.llm.clients
 
 
 @dataclass(frozen=True)
@@ -70,6 +75,15 @@ class SimSettings:
     # Needs the account's token.actions.githubusercontent.com OIDC provider, which is shared by
     # every stack in the account and so is imported rather than created here.
     github_repo: str = ""
+    # Bedrock system inference profiles the planner may call (e.g. "us.anthropic.claude-sonnet-5-5").
+    # Each gets a tagged application inference profile, so its spend counts against the budget.
+    bedrock_models: tuple[str, ...] = ()
+
+
+def bedrock_models_from_registry(path: Path) -> tuple[str, ...]:
+    """The Bedrock model ids in the planner registry (`src/lost_in_place/llm/models.yaml`)."""
+    entries = yaml.safe_load(path.read_text()) or {}
+    return tuple(sorted({e["model_id"] for e in entries.values() if e.get("provider") == "bedrock"}))
 
 
 class SimStack(Stack):
@@ -154,6 +168,41 @@ class SimStack(Stack):
         results.grant_put(job_role, "runs/*")
         log_group = logs.LogGroup(self, "JobLogs", retention=logs.RetentionDays.ONE_MONTH)
 
+        # Planner calls go through tagged application inference profiles; the system profiles they
+        # copy are not granted, so untagged (unbudgeted) model spend isn't possible from these roles.
+        bedrock_profiles: dict[str, str] = {}
+        foundation_models: list[str] = []
+        for model in settings.bedrock_models:
+            foundation_model = model.split(".", 1)[1]  # "us.anthropic.x" -> "anthropic.x"
+            profile = bedrock.CfnApplicationInferenceProfile(
+                self,
+                f"Bedrock-{foundation_model}",
+                inference_profile_name=f"{self.stack_name}-{re.sub('[^0-9a-zA-Z]+', '-', foundation_model)}",
+                description=f"lost-in-place planner calls to {model}",
+                model_source=bedrock.CfnApplicationInferenceProfile.InferenceProfileModelSourceProperty(
+                    copy_from=f"arn:{self.partition}:bedrock:{self.region}:{self.account}:inference-profile/{model}"
+                ),
+            )
+            bedrock_profiles[model] = profile.attr_inference_profile_arn
+            foundation_models.append(f"arn:{self.partition}:bedrock:*::foundation-model/{foundation_model}")
+        bedrock_invoke = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
+
+        def grant_bedrock(role: iam.Role) -> None:
+            if not bedrock_profiles:
+                return
+            profiles = list(bedrock_profiles.values())
+            role.add_to_policy(iam.PolicyStatement(actions=bedrock_invoke, resources=profiles))
+            # A profile routes to the model in several regions; allow that only through our profiles.
+            role.add_to_policy(
+                iam.PolicyStatement(
+                    actions=bedrock_invoke,
+                    resources=foundation_models,
+                    conditions={"StringEquals": {"bedrock:InferenceProfileArn": profiles}},
+                )
+            )
+
+        grant_bedrock(job_role)
+
         job = batch.EcsJobDefinition(
             self,
             "Episode",
@@ -165,6 +214,9 @@ class SimStack(Stack):
                 memory=Size.mebibytes(EPISODE_MEMORY_MIB),
                 job_role=job_role,
                 logging=ecs.LogDriver.aws_logs(stream_prefix="episode", log_group=log_group),
+                environment={BEDROCK_PROFILES_ENV: self.to_json_string(bedrock_profiles)}
+                if bedrock_profiles
+                else None,
                 command=[
                     "run",
                     "Ref::scenario",
@@ -212,6 +264,8 @@ class SimStack(Stack):
         )
         results.grant_read(operator)
         images.grant_pull_push(operator)
+        # For `lip propose` and planner checks outside Batch; the budget stop covers this too.
+        grant_bedrock(operator)
 
         outputs: dict[str, str] = {}
         if settings.github_repo:
@@ -243,7 +297,9 @@ class SimStack(Stack):
             "BudgetStop",
             description="Attached by AWS Budgets when lost-in-place spending reaches the budget",
             statements=[
-                iam.PolicyStatement(effect=iam.Effect.DENY, actions=["batch:SubmitJob"], resources=["*"])
+                iam.PolicyStatement(
+                    effect=iam.Effect.DENY, actions=["batch:SubmitJob", *bedrock_invoke], resources=["*"]
+                )
             ],
         )
         budget_executor = iam.Role(
@@ -295,7 +351,7 @@ class SimStack(Stack):
             action_threshold=budgets.CfnBudgetsAction.ActionThresholdProperty(type="PERCENTAGE", value=100),
             definition=budgets.CfnBudgetsAction.DefinitionProperty(
                 iam_action_definition=budgets.CfnBudgetsAction.IamActionDefinitionProperty(
-                    policy_arn=deny_compute.managed_policy_arn, roles=[operator.role_name]
+                    policy_arn=deny_compute.managed_policy_arn, roles=[operator.role_name, job_role.role_name]
                 )
             ),
             execution_role_arn=budget_executor.role_arn,
@@ -331,3 +387,10 @@ class SimStack(Stack):
             **outputs,
         }.items():
             CfnOutput(self, name, value=value)
+        if bedrock_profiles:
+            CfnOutput(
+                self,
+                "BedrockProfiles",
+                value=self.to_json_string(bedrock_profiles),
+                description=f"Export as {BEDROCK_PROFILES_ENV} to call the planner models outside Batch",
+            )

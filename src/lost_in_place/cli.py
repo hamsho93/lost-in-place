@@ -1,4 +1,4 @@
-"""Command line: `lip worlds`, `lip run`, `lip analyze`, `lip doctor`."""
+"""Command line: `lip worlds`, `lip run`, `lip analyze`, `lip doctor`, `lip models`, `lip propose`."""
 
 from __future__ import annotations
 
@@ -77,6 +77,49 @@ def _cmd_doctor(_: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
+def _cmd_models(_: argparse.Namespace) -> int:
+    from lost_in_place.llm.registry import load_models
+
+    for spec in load_models().values():
+        print(f"{spec.name}\t{spec.provider}\t{spec.model_id}")
+    return 0
+
+
+def _cmd_propose(args: argparse.Namespace) -> int:
+    import asyncio
+    from dataclasses import asdict
+
+    from lost_in_place.llm.planner import LLMPlanner
+    from lost_in_place.llm.prompt import InvalidProposal
+    from lost_in_place.llm.registry import get_model
+    from lost_in_place.planning import EstimatorHealth, Observation
+
+    # "degraded" is the silent case: PX4 still reports a valid, precise position while flow is gone.
+    sample_health = {
+        "none": None,
+        "healthy": EstimatorHealth(True, 0.05, 180, innovation_check_failing=False, heading_reference=False),
+        "degraded": EstimatorHealth(True, 0.05, 0, innovation_check_failing=False, heading_reference=False),
+    }
+    observation = Observation(
+        goal=args.goal,
+        north_m=0.0,
+        east_m=0.0,
+        altitude_m=1.5,
+        heading_deg=0.0,
+        battery_pct=90.0,
+        history=("take_off altitude_m=1.5: done",),
+        health=sample_health[args.health],
+    )
+    planner = LLMPlanner(get_model(args.model))
+    status = 0
+    try:
+        asyncio.run(planner.propose(observation))
+    except InvalidProposal:
+        status = 1
+    print(json.dumps(asdict(planner.decisions[-1]), indent=1))
+    return status
+
+
 def _instance_arg(value: str) -> int | None:
     if value == "auto":
         return None
@@ -125,6 +168,22 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor = sub.add_parser("doctor", help="check that PX4 and Gazebo are where we expect")
     doctor.set_defaults(func=_cmd_doctor)
+
+    models = sub.add_parser("models", help="list the planner models in models.yaml")
+    models.set_defaults(func=_cmd_models)
+
+    propose = sub.add_parser(
+        "propose", help="ask a model for one decision on a sample observation (no simulator; checks access)"
+    )
+    propose.add_argument("model", help="a name from `lip models`")
+    propose.add_argument("--goal", default="Hover over the take-off point for a minute, then land.")
+    propose.add_argument(
+        "--health",
+        choices=["none", "healthy", "degraded"],
+        default="none",
+        help="estimator-health block: none (as deployed) or a sample healthy/degraded one",
+    )
+    propose.set_defaults(func=_cmd_propose)
     return parser
 
 

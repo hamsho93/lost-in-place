@@ -17,6 +17,9 @@ The account also runs unrelated production stacks. Anything account-wide affects
 - Jobs are submitted through `OperatorRole`. At 100% of the budget, the `StopAtBudget` action attaches a deny on `batch:SubmitJob` to that role. Never grant `batch:SubmitJob` to any other principal (users, CI roles), or the stop is bypassed.
 - `maxVcpus` caps concurrent compute, and the compute environment scales to 0 when idle. Keep `minv_cpus=0`.
 
+- Planner model calls (Bedrock) count against the budget only through the tagged application inference profiles this stack creates. Never grant `bedrock:InvokeModel` on a system inference profile (`us.*`, `global.*`) or on foundation models without the `bedrock:InferenceProfileArn` condition; that spend would be untagged and unbudgeted.
+- Models from other providers (e.g. OpenAI) aren't covered by the AWS budget at all. Give them a spending cap on the provider's side before running them at scale.
+
 ## Details that have bitten before
 
 - AWS managed policy ARNs vary in path. `AWSBudgetsActionsWithAWSResourceControlAccess` is at `policy/`, not `policy/service-role/`. Check the [AWS managed policy reference](https://docs.aws.amazon.com/aws-managed-policy/latest/reference/) before referencing one.

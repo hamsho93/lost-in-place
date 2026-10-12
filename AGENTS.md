@@ -6,7 +6,8 @@ Lost in Place is a PX4 + Gazebo benchmark. It checks whether an LLM drone planne
 
 | Path | What it is |
 |---|---|
-| `src/lost_in_place/` | The `lip` CLI (`cli.py`), episode runner (`episode.py`, `sim.py`, `slots.py`), scenarios, metrics, worlds, planner interfaces |
+| `src/lost_in_place/` | The `lip` CLI (`cli.py`), episode runner (`episode.py`, `sim.py`, `slots.py`), scenarios, metrics, worlds, planner interfaces (`planning.py`) |
+| `src/lost_in_place/llm/` | LLM planner: model registry (`models.yaml`), provider clients, prompt and tools, `LLMPlanner` |
 | `tests/` | Unit tests. They need neither PX4 nor Gazebo |
 | `scenarios/fixtures/` | One YAML per scenario. New faults need a fixture here |
 | `px4/` | Pinned PX4 commit (`PX4_COMMIT`) and the patches applied to it (`apply.sh`) |
@@ -42,4 +43,6 @@ Run `make check` before every commit; CI runs the same steps. Use `uv run ...`, 
 - **x86-64 only** until the flow-quality fix (`px4/patches/0001`) is upstream: the bug it fixes is undefined behaviour that can differ on ARM.
 - **`lip doctor` writes nothing**, so it can't catch permission problems in the image. The `image` workflow also checks that `runs/` is writable.
 - **PX4 changes go in `px4/patches/`** as numbered patch files that `git apply` accepts, applied in order by `px4/apply.sh`, each with a row in `px4/README.md`. Never rely on edits to a local PX4 checkout.
+- **Planner models are pinned.** Each arm in `llm/models.yaml` names an exact model version; never point an existing arm at a different model, add a new arm instead. Any change to the prompt, the rendering or the tools bumps `PROMPT_VERSION` in `llm/prompt.py`.
+- **Tests never call a real model.** Use a fake client (see `tests/test_llm.py`). `lip propose <model>` makes one real call and costs real money.
 - **A container image build takes about 11 minutes** on GitHub (PX4 compiles from source). Test Dockerfile changes by dispatching the `image` workflow on your branch; it only pushes from `main`.

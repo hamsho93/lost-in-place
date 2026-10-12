@@ -2,10 +2,13 @@
 """CDK entry point. Settings come from cdk.json context or `-c key=value`."""
 
 import os
+from pathlib import Path
 
 import aws_cdk as cdk
 
-from lost_in_place_infra.sim_stack import SimSettings, SimStack
+from lost_in_place_infra.sim_stack import SimSettings, SimStack, bedrock_models_from_registry
+
+MODEL_REGISTRY = Path(__file__).resolve().parent.parent / "src" / "lost_in_place" / "llm" / "models.yaml"
 
 app = cdk.App()
 
@@ -22,6 +25,7 @@ settings = SimSettings(
     image_tag=ctx("imageTag", "latest"),
     account_alarm_usd=float(ctx("accountAlarmUsd", "0")),
     github_repo=ctx("githubRepo", ""),
+    bedrock_models=bedrock_models_from_registry(MODEL_REGISTRY),
 )
 SimStack(
     app,

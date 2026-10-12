@@ -7,9 +7,10 @@ One stack, `LostInPlaceSim`, in us-east-1. It contains:
 - **S3 bucket** for results: private, encrypted, TLS only. Runs move to Glacier Instant Retrieval after 30 days.
 - **Cost guard:**
   - a monthly AWS Budget that counts only resources tagged `project=lost-in-place`, with alerts at 50, 80 and 100% of actual spend and 100% of forecast spend;
-  - a budget action that blocks job submission through the operator role at 100%;
+  - a budget action that, at 100%, blocks job submission and planner model calls from the operator and job roles;
   - optionally, a CloudWatch alarm on the whole account's estimated charges (`accountAlarmUsd`). It is off by default, because billing metrics can't be filtered by tag.
-- **Operator role** for submitting jobs and reading results.
+- **Bedrock planner models.** For each Bedrock model in [`src/lost_in_place/llm/models.yaml`](../src/lost_in_place/llm/models.yaml), an application inference profile tagged `project=lost-in-place`, so model spend counts against the budget. Jobs get the mapping in `LIP_BEDROCK_PROFILES`, and the `BedrockProfiles` output has it for use elsewhere. The roles can call the models only through these profiles.
+- **Operator role** for submitting jobs, reading results and calling the planner models.
 
 There is no NAT gateway: instances sit in public subnets and only make outbound connections.
 
@@ -28,6 +29,7 @@ Before the first deploy:
 - If you set `accountAlarmUsd`, enable *Receive Billing Alerts* in the Billing console, so the alarm has data.
 - Check the EC2 quota *All Standard Spot Instance Requests* in us-east-1. It must be at least `maxVcpus`.
 - Confirm the SNS email subscription.
+- For each Bedrock planner model, enable model access in the Bedrock console (Anthropic models need the use-case form once per account). Without it, calls fail with an access error.
 
 ## Push the image and run episodes
 
