@@ -60,6 +60,18 @@ def test_episode_key_names_the_cell_and_seed() -> None:
     assert e.key == "cross_loud/scripted-naive-geometric-O0/r007-s123"
 
 
+def test_llm_arms_are_named_by_their_model(tmp_path: Path) -> None:
+    models = ROOT / "src" / "lost_in_place" / "llm" / "models.yaml"
+    model = next(iter(manifest.yaml.safe_load(models.read_text())))
+    entries = manifest.build(_spec(planners=["scripted-naive", model], validators=["none"]), ROOT)
+    llm = [e for e in entries if e.planner == "llm"]
+    assert len(llm) == len(entries) // 2 and all(e.planner_options == {"model": model} for e in llm)
+    assert {e.cell for e in entries} == {"scripted-naive-none-O0", f"{model}-none-O0"}
+    assert len({e.key for e in entries}) == len(entries)
+    with pytest.raises(LookupError, match="no model 'gpt-nope'"):
+        manifest.build(_spec(planners=["gpt-nope"]), ROOT)
+
+
 def test_unknown_sweep_keys_and_empty_globs_are_rejected() -> None:
     with pytest.raises(ValueError, match="unknown"):
         _spec(seeds=3)

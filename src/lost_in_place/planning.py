@@ -19,6 +19,15 @@ from typing import Any, Literal, Protocol, runtime_checkable
 
 ActionName = Literal["take_off", "move", "rotate", "hold", "land", "refuse"]
 ENTRY_POINT_GROUP = "lost_in_place.planners"
+LLM_PLANNER = "llm"
+
+
+def arm_name(planner: str, options: dict[str, str] | None = None) -> str:
+    """The planner arm in episode keys and results. An LLM arm is named by its model (`llm/models.yaml`),
+    so two models in one sweep never share a key or a cell."""
+    if planner == LLM_PLANNER and options and options.get("model"):
+        return options["model"]
+    return planner
 
 
 @dataclass(frozen=True)

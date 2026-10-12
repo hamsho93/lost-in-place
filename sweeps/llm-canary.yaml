@@ -1,0 +1,10 @@
+# First live LLM episodes: does the closed loop hold up with real planner latency (paused world,
+# MAVSDK reconnects, tool calls)? Six episodes; excluded from confirmatory analysis.
+name: llm-canary
+scenarios: [scenarios/pilot/cross_*.yaml]
+reps: 2
+planners: [claude-sonnet-4-6]
+validators: [none]
+observations: [O0]
+latency_s: 2.0
+shuffle_seed: 0

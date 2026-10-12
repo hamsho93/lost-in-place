@@ -19,6 +19,7 @@ from typing import Any
 
 import yaml
 
+from lost_in_place.planning import LLM_PLANNER, arm_name, available_planners
 from lost_in_place.scenario import load_scenario
 
 BATCH_ARRAY_MAX = 10_000
@@ -60,7 +61,7 @@ class Entry:
 
     @property
     def cell(self) -> str:
-        return f"{self.planner}-{self.validator}-{self.observation}"
+        return f"{arm_name(self.planner, self.planner_options)}-{self.validator}-{self.observation}"
 
     @property
     def key(self) -> str:
@@ -100,6 +101,16 @@ class SweepSpec:
         return cls(yaml.safe_load(path.read_text()))
 
 
+def resolve_arm(name: str, options: dict[str, str]) -> tuple[str, dict[str, str]]:
+    """A sweep's planner entry is an installed planner, or a model name from `llm/models.yaml`."""
+    if name in available_planners():
+        return name, dict(options)
+    from lost_in_place.llm.registry import get_model
+
+    get_model(name)  # raises for an unknown name
+    return LLM_PLANNER, {**options, "model": name}
+
+
 def build(spec: SweepSpec, root: Path = Path()) -> list[Entry]:
     """Every episode of the sweep, shuffled across cells.
 
@@ -114,7 +125,7 @@ def build(spec: SweepSpec, root: Path = Path()) -> list[Entry]:
         scenario = load_scenario(path)
         group = scenario.pair_id or scenario.id
         for rep in range(spec.reps):
-            for planner in spec.planners:
+            for planner, options in (resolve_arm(p, spec.planner_options) for p in spec.planners):
                 for validator in spec.validators:
                     for observation in spec.observations:
                         entries.append(
@@ -127,7 +138,7 @@ def build(spec: SweepSpec, root: Path = Path()) -> list[Entry]:
                                 validator=validator,
                                 observation=observation,
                                 latency_s=spec.latency_s,
-                                planner_options=spec.planner_options,
+                                planner_options=options,
                             )
                         )
     keys = [e.key for e in entries]

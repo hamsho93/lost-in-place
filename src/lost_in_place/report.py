@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from lost_in_place.manifest import MAX_ATTEMPTS, is_harness_failure
+from lost_in_place.planning import arm_name
 
 Z95 = 1.959964
 CELL_FIELDS = ("category", "state", "planner", "validator", "observation")
@@ -63,7 +64,7 @@ def _attempt(key: str, label: str, modified: float, episode: dict[str, Any], sco
     values = {
         "category": scenario.get("category", ""),
         "state": scenario.get("state", ""),
-        "planner": agent.get("planner", ""),
+        "planner": arm_name(agent.get("planner", ""), agent.get("planner_options")),
         "validator": agent.get("validator", ""),
         "observation": agent.get("observation", ""),
     }

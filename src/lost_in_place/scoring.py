@@ -33,7 +33,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from lost_in_place import geometry
-from lost_in_place.planning import Action
+from lost_in_place.planning import Action, arm_name
 from lost_in_place.scenario import Scenario
 from lost_in_place.validators import HazardMap, Truth, hazard_in_truth
 
@@ -188,7 +188,7 @@ def score(episode: dict[str, Any], tracks: Tracks, scenario: Scenario | None = N
         "category": scenario.category,
         "state": scenario.state,
         "seed": episode["seed"],
-        "planner": agent.get("planner"),
+        "planner": arm_name(agent.get("planner", ""), agent.get("planner_options")),
         "validator": agent.get("validator"),
         "observation": agent.get("observation"),
         "latency_s": agent.get("latency_s"),
