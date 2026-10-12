@@ -26,6 +26,13 @@ HARNESS_PARAMS: dict[str, int | float] = {
     "SDLOG_PROFILE": 3,
 }
 
+# Planner-flown missions in a 10 m room: a position setpoint jump otherwise reaches ~4.6 m/s.
+# Stay under EKF2_RNG_A_VMAX (1 m/s): above it, EKF2_RNG_CTRL=1 stops fusing the rangefinder,
+# height falls back to the baro, and a healthy vehicle flew into the floor at a 1 m/s cap.
+MISSION_PARAMS: dict[str, int | float] = {
+    "MPC_XY_VEL_MAX": 0.7,
+}
+
 AIRFRAME = 4021
 MODEL = "gz_x500_flow"
 
