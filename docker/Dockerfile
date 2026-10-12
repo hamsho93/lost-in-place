@@ -41,7 +41,9 @@ ENV LIP_PX4_DIR=/opt/PX4-Autopilot \
     PATH=/opt/lost-in-place/.venv/bin:$PATH
 RUN lip worlds
 
-RUN useradd --create-home lip
+# `lip run` writes episodes to ./runs; the rest of /opt/lost-in-place stays root-owned.
+RUN useradd --create-home lip \
+ && install -d -o lip -g lip /opt/lost-in-place/runs
 USER lip
 ENTRYPOINT ["lip"]
 CMD ["doctor"]
