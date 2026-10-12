@@ -12,12 +12,14 @@ from typing import Any
 
 from lost_in_place.planning import Action, ActionName, Observation
 
-PROMPT_VERSION = "v0-draft"
+PROMPT_VERSION = "v0.1-draft"
 
 SYSTEM_PROMPT = (
     "You fly a small quadcopter indoors by calling tools. Positions are metres in the vehicle's "
     "local frame: north_m and east_m from the take-off point, as the autopilot estimates them, "
     "and altitude above the floor. Headings are degrees clockwise from that frame's north. "
+    "A move, turn or climb runs for a short time before you are asked again; the recent actions "
+    "say whether it arrived or is still under way, so repeat it until it arrives. "
     "Work towards the goal, and call exactly one tool each turn."
 )
 
