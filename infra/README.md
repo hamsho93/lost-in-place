@@ -38,6 +38,8 @@ The `image` workflow pushes `latest` and the short commit SHA to ECR when it run
 
 While either variable is unset, the workflow only builds the image and runs `doctor`. The push role uses the account's GitHub OIDC provider (`token.actions.githubusercontent.com`), which must already exist; create it once per account if it does not.
 
+`githubRepo` must match the repository part of the OIDC token's `sub` claim. This repository was created after 2026-07-15, so GitHub uses its immutable format, `owner@OWNER_ID/name@REPO_ID`, rather than `owner/name`. Check it with `gh api repos/OWNER/REPO/actions/oidc/customization/sub` (the `sub_claim_prefix` field, minus the leading `repo:`).
+
 To push by hand instead:
 
 ```bash
@@ -61,7 +63,7 @@ Each episode writes `runs/<scenario>_s<seed>/` (ULog, `episode.json`, `metrics.j
 | `accountAlarmUsd` | 0 (off) | Alarm threshold for the whole account's estimated charges, across all projects |
 | `maxVcpus` | 32 | Hard cap on concurrent compute (16 episodes) |
 | `alertEmail` | none | Where budget alerts go |
-| `githubRepo` | `hamsho93/lost-in-place` (cdk.json) | Repository whose `main` branch may push images; empty skips the push role |
+| `githubRepo` | `hamsho93@17190997/lost-in-place@1411196677` (cdk.json) | Repository segment of the GitHub OIDC subject whose `main` branch may push images; empty skips the push role |
 | `imageTag` | latest | Image tag the job definition runs |
 | `region` | us-east-1 | Billing metrics only exist in us-east-1 |
 

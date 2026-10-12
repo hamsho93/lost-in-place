@@ -63,7 +63,10 @@ class SimSettings:
     # Account-wide EstimatedCharges alarm threshold; 0 disables it. Billing metrics cannot be
     # filtered by tag, so this alarm also counts every other workload in the account.
     account_alarm_usd: float = 0.0
-    # "owner/name" of the GitHub repository whose main branch may push images; empty disables it.
+    # Repository segment of the GitHub OIDC `sub` claim whose main branch may push images; empty
+    # disables it. Repositories with immutable subjects (every repo created after 2026-07-15) use
+    # "owner@OWNER_ID/name@REPO_ID", not "owner/name"; GitHub's
+    # GET /repos/{owner}/{repo}/actions/oidc/customization/sub returns it as sub_claim_prefix.
     # Needs the account's token.actions.githubusercontent.com OIDC provider, which is shared by
     # every stack in the account and so is imported rather than created here.
     github_repo: str = ""

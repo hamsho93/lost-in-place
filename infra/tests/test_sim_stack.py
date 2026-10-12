@@ -213,3 +213,33 @@ def test_image_push_role_trusts_only_main_of_the_repo() -> None:
         },
     )
     template.has_output("ImagePushRoleArn", Match.any_value())
+
+
+def test_image_push_role_accepts_immutable_subject_repo() -> None:
+    app = cdk.App()
+    stack = SimStack(
+        app,
+        "WithImmutablePush",
+        settings=SimSettings(github_repo="owner@1/repo@2"),
+        env=cdk.Environment(account="123456789012", region="us-east-1"),
+    )
+    Template.from_stack(stack).has_resource_properties(
+        "AWS::IAM::Role",
+        {
+            "AssumeRolePolicyDocument": Match.object_like(
+                {
+                    "Statement": [
+                        Match.object_like(
+                            {
+                                "Condition": {
+                                    "StringEquals": Match.object_like(
+                                        {f"{GITHUB_OIDC_HOST}:sub": "repo:owner@1/repo@2:ref:refs/heads/main"}
+                                    )
+                                }
+                            }
+                        )
+                    ]
+                }
+            )
+        },
+    )
