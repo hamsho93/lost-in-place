@@ -1,4 +1,5 @@
 import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -48,7 +49,8 @@ def test_crashed_episode_is_recorded_not_raised(tmp_path: Path, monkeypatch: pyt
             pass
 
         async def run(self) -> str:
-            raise RuntimeError("Stream removed\n(recvmsg: Connection reset by peer)")
+            logging.getLogger("mavsdk_server").info("System discovered")
+            raise FakeRpcError()
 
     class FakePaths:
         def missing(self) -> list[Path]:
@@ -60,9 +62,25 @@ def test_crashed_episode_is_recorded_not_raised(tmp_path: Path, monkeypatch: pyt
 
     result = episode.run_episode(scenario, 0, tmp_path / "out", paths=FakePaths())  # type: ignore[arg-type]
 
-    assert result.outcome == "error: RuntimeError: Stream removed"
+    assert result.outcome == "error: FakeRpcError: Stream removed (recvmsg:Connection reset by peer (104))"
     assert result.boot_attempts == 1
     saved = json.loads((tmp_path / "out" / "episode.json").read_text())
     assert saved["outcome"] == result.outcome
     assert (tmp_path / "out" / "flight.ulg").read_bytes() == b"ULog"
     assert (tmp_path / "out" / "px4_console.txt").exists()
+    assert "INFO System discovered" in (tmp_path / "out" / "mavsdk_server.txt").read_text()
+    assert not logging.getLogger("mavsdk_server").handlers
+
+
+class FakeRpcError(Exception):
+    """Shaped like grpc.aio.AioRpcError: a multi-line str() and the real message in details()."""
+
+    def __str__(self) -> str:
+        return "<AioRpcError of RPC that terminated with:\n\tstatus = StatusCode.UNAVAILABLE\n>"
+
+    def details(self) -> str:
+        return "Stream removed (recvmsg:Connection reset by peer (104))"
+
+
+def test_plain_errors_keep_their_first_line() -> None:
+    assert episode._error_text(RuntimeError("first\nsecond")) == "first\nsecond"

@@ -24,6 +24,8 @@ The account also runs unrelated production stacks. Anything account-wide affects
 - `ImagePushRole` trusts only `main`, so pushes from other branches fail by design.
 - The ECR repository and the results bucket are `RETAIN`. A failed first deploy leaves them behind, and a redeploy creates new ones under new names. Delete the leftovers by hand.
 - Batch EC2 jobs always use host networking. See the slots note in the root [AGENTS.md](../AGENTS.md).
+- The `SPOT_INSTANCE_RECLAIMED` retry rule doesn't limit retries to reclaims. When no `evaluateOnExit` rule matches, Batch retries anyway, so a failing episode runs up to 3 times. To stop that, add an `EXIT` rule for `onExitCode: "*"`.
+- The results bucket isn't versioned. Uploads must not reuse keys; the runner nests each attempt under `<job id>-attempt<n>/`.
 
 ## Checks
 

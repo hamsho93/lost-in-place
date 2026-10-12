@@ -40,9 +40,9 @@ def _cmd_run(args: argparse.Namespace) -> int:
     if args.analyze and (out / "flight.ulg").exists():
         status = max(status, _analyze([out]))
     if args.upload:
-        from lost_in_place.storage import upload_dir
+        from lost_in_place.storage import attempt_label, upload_dir
 
-        print(f"uploaded {upload_dir(out, args.upload)} files to {args.upload}")
+        print(f"uploaded {out} to {upload_dir(out, args.upload, attempt_label())}")
     return status
 
 
