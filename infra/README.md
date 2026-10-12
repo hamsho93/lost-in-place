@@ -2,7 +2,7 @@
 
 One stack, `LostInPlaceSim`, in us-east-1. It contains:
 
-- **Spot AWS Batch.** x86 instances (c7i, c7a, m7i, c6i), 2 vCPU and 3 GB per episode, up to `maxVcpus`. Jobs retry automatically when a spot instance is reclaimed.
+- **Spot AWS Batch.** x86 instances (c7i, c7a, m7i, c6i), 2 vCPU and 3 GB per episode, up to `maxVcpus`. A job gets up to 3 attempts. Batch retries when a spot instance is reclaimed, and also when the episode exits non-zero, because Batch retries whenever no `evaluateOnExit` rule matches.
 - **ECR repository** for the image built from `docker/Dockerfile`.
 - **S3 bucket** for results: private, encrypted, TLS only. Runs move to Glacier Instant Retrieval after 30 days.
 - **Cost guard:**
@@ -53,7 +53,7 @@ aws batch submit-job --job-name lowtex --job-queue <JobQueue> --job-definition <
   --array-properties size=20 --parameters scenario=scenarios/fixtures/lowtex_hover.yaml,seed=100
 ```
 
-Each episode writes `runs/<scenario>_s<seed>/` (ULog, `episode.json`, `metrics.json`) to the results bucket.
+Each attempt writes `runs/<scenario>_s<seed>/<job id>-attempt<n>/` to the results bucket: ULog, `episode.json`, `metrics.json`, `px4_console.txt` and `mavsdk_server.txt`. Retries and reruns get their own folder, so a failed attempt is kept next to the retry that succeeded. The bucket isn't versioned, so anything uploaded under the same key is replaced.
 
 ## Settings
 

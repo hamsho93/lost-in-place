@@ -21,7 +21,9 @@ What the simulator gets right, and where it differs from a real flow-and-rangefi
 | Runaways can crash Gazebo | The episode hangs | The runner watches the sim clock and aborts |
 | No wind, IMU noise or lighting changes by default | Real vehicles are noisier | Treated as future fault models, not assumed |
 | **AWS Batch forces host networking** on EC2 jobs | Episodes packed onto one instance see each other's ports. Batch does pack jobs: one smoke attempt put two on an `m7i.xlarge` | `lip run` claims the lowest free slot (PX4 instance number) on the host by default (`--instance auto`), so packed episodes get separate MAVLink, MAVSDK and Gazebo ports |
-| Episodes that crash leave no trace | The first spot `flow_off` attempt died with no artefacts | Unexpected errors become the episode outcome (`error: ...`), so `episode.json`, the console log and the ULog are still written and uploaded |
+| Episodes that crash leave no trace | The first spot `flow_off` attempt died with no artefacts | Unexpected errors become the episode outcome (`error: ...`), so `episode.json`, the console log and the ULog are still written and uploaded. `mavsdk_server.txt` keeps the MAVSDK server's own log, and its exit code is recorded if it died |
+| Retries overwrote earlier attempts | The bucket isn't versioned, and every attempt uploaded to `runs/<scenario>_s<seed>/`. A successful retry replaced a crashed attempt's files | Each attempt uploads under `<job id>-attempt<n>/` |
+| **MAVSDK gRPC reset at the first parameter set** (open) | 2 of 5 spot `flow_off` attempts died with `Stream removed (Connection reset by peer)` on `set_param EKF2_OF_CTRL`, about 12 s into the sim. Both were alone on their instance. 0 of 3 `textured_hover` attempts on the same code path | Batch's retry recovered both times. The next occurrence will include the MAVSDK server log |
 
 ## Spot smoke run (2026-10-12)
 
@@ -39,6 +41,23 @@ The week-1 check: run one healthy and one faulty episode from the container on s
 
 - The first `flow_off` attempt crashed about 12 s into the sim. MAVSDK's gRPC stream was reset during `set_param EKF2_OF_CTRL`. The automatic retry on the same instance succeeded. The cause is unknown, because the runner uploads nothing when an episode crashes. It was alone on its instance, so it was not a port collision.
 - Three episodes per 4 vCPUs was not tested. Batch sizes instances to the 2-vCPU job, and at the time packed episodes would have shared ports (fixed since, see the table above).
+- The episode files from this run were overwritten by the four-episode run below, which reused seed 0. The numbers above are from the original files.
+
+## Four episodes at once (2026-10-12)
+
+`textured_hover` and `flow_off`, seeds 0 and 1, submitted together with the image from `6128221` (per-host slots). All four completed.
+
+| | `textured_hover` s0 / s1 | `flow_off` s0 / s1 |
+|---|---|---|
+| Belief gap, max | 0.14 m / 0.13 m | 0.21 m / 0.18 m |
+| True excursion, max | 0.17 m / 0.17 m | 0.22 m / 0.21 m |
+| Failsafe after take-off | none | 20.7 s / 20.6 s, no ground impact |
+| eph at arm | 0.028 m / 0.029 m | 0.026 m / 0.025 m |
+| Wall time, last attempt | 10.4 min / 5.6 min | 8.6 min / 4.0 min |
+
+- Batch didn't pack them. It started four 2-vCPU spot instances (two `c7a.large`, a `c7i.large`, a `c6i.large`), one job each, so the slots weren't exercised on Batch. Packing only happens when Batch picks a larger instance.
+- `flow_off` s1 hit the MAVSDK gRPC reset again on its first attempt, at the same call. The crash was recorded as an `error:` outcome and uploaded, then Batch retried it and the retry replaced those files. That led to the per-attempt upload folders.
+- Compute was about $0.03 (four `.large` spot instances for about 13 minutes).
 
 ## What not to claim
 
