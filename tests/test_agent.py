@@ -202,6 +202,28 @@ def test_commands_wait_for_the_heartbeat_after_a_pause(monkeypatch: pytest.Monke
     asyncio.run(scenario())
 
 
+def test_history_says_whether_a_move_arrived() -> None:
+    ep = _agent_episode("cross_healthy.yaml")
+    drone = FakeDrone()
+    move = Action("move", {"north_m": 6.0, "east_m": 0.0})
+
+    async def execute() -> str:
+        clock = _advance_clock(ep, rate_s=0.05)
+        try:
+            return await ep._execute(drone, move)  # type: ignore[arg-type]
+        finally:
+            clock.cancel()
+
+    ep.sim_us = 20_000_000
+    status = asyncio.run(execute())
+    assert status == "still under way after 1.5 s, 6.0 m from the target"
+    assert agent.history_entry(21.5, move, Verdict(True), status).endswith(
+        "move (north_m 6.00, east_m 0.00) - still under way after 1.5 s, 6.0 m from the target"
+    )
+    ep.tel.north_m = 5.9
+    assert asyncio.run(execute()) == "arrived"
+
+
 def test_o1_shows_the_2s_mean_flow_quality_and_a_dead_sensor_reads_zero() -> None:
     ep = _agent_episode("cross_healthy.yaml", AgentConfig(observation="O1"))
     for i in range(50):  # 10 Hz from 0 to 4.9 s: 200 until 4 s, then 100

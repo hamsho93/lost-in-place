@@ -165,10 +165,12 @@ def health_from_estimator_status(fields: dict[str, Any], tel: Telemetry) -> None
     )
 
 
-def history_entry(sim_s: float, action: Action, verdict: Verdict) -> str:
+def history_entry(sim_s: float, action: Action, verdict: Verdict, status: str = "done") -> str:
+    """One line of the planner's history. `status` says what executing the action achieved: a move
+    cut off by the epoch must not read as done, or a planner that trusts its history stops short."""
     args = ", ".join(f"{k} {v:.2f}" if isinstance(v, float) else f"{k} {v}" for k, v in action.args.items())
     head = f"t={sim_s:.0f}s {action.name}" + (f" ({args})" if args else "")
-    return head + (" - done" if verdict.ok else f" - rejected: {verdict.reason}")
+    return head + (f" - {status}" if verdict.ok else f" - rejected: {verdict.reason}")
 
 
 class AgentEpisode(_Episode):
@@ -349,10 +351,10 @@ class AgentEpisode(_Episode):
                 self.history.append(history_entry(self.sim_s - start, action, verdict))
                 self.log(loop_end=action.name)
                 return
-            await self._execute(
+            status = await self._execute(
                 drone, action if verdict.ok else Action("hold", {"seconds": self.config.epoch_s})
             )
-            self.history.append(history_entry(self.sim_s - start, action, verdict))
+            self.history.append(history_entry(self.sim_s - start, action, verdict, status))
 
     def truth(self) -> Truth | None:
         if self.tel.truth_ne is None:
@@ -407,7 +409,8 @@ class AgentEpisode(_Episode):
         while self.sim_s < deadline_s and self.in_control and not done():
             await self.wait_sim(min(self.sim_s + 0.1, deadline_s))
 
-    async def _execute(self, drone: System, action: Action) -> None:
+    async def _execute(self, drone: System, action: Action) -> str:
+        """Run one action for up to an epoch; returns how far it got, for the planner's history."""
         t = self.target
         epoch_end = self.sim_s + self.config.epoch_s
         if action.name == "move":
@@ -419,6 +422,8 @@ class AgentEpisode(_Episode):
             await self._run_until(
                 epoch_end, lambda: math.hypot(n - self.tel.north_m, e - self.tel.east_m) < ARRIVED_M
             )
+            left = math.hypot(n - self.tel.north_m, e - self.tel.east_m)
+            return "arrived" if left < ARRIVED_M else self._unfinished(f"{left:.1f} m from the target")
         elif action.name == "rotate":
             heading = float(action.args["heading_deg"]) % 360.0
             await self._setpoint(drone, PositionNedYaw(t.north_m, t.east_m, t.down_m, heading))
@@ -426,17 +431,27 @@ class AgentEpisode(_Episode):
             await self._run_until(
                 epoch_end, lambda: abs((self.tel.yaw_deg - heading + 180.0) % 360.0 - 180.0) < ARRIVED_DEG
             )
+            off = abs((self.tel.yaw_deg - heading + 180.0) % 360.0 - 180.0)
+            return "arrived" if off < ARRIVED_DEG else self._unfinished(f"{off:.0f} deg from the target")
         elif action.name == "take_off":
             altitude = float(action.args.get("altitude_m", self.scenario.altitude_m))
             await self._setpoint(drone, PositionNedYaw(t.north_m, t.east_m, -altitude, t.yaw_deg))
             self.log(action="take_off", altitude_m=altitude)
             await self._run_until(epoch_end, lambda: abs(altitude + self.tel.down_m) < ARRIVED_M)
+            off = abs(altitude + self.tel.down_m)
+            return "arrived" if off < ARRIVED_M else self._unfinished(f"{off:.1f} m from the target")
         else:  # hold, and anything rejected
             seconds = min(max(float(action.args.get("seconds", self.config.epoch_s)), 0.5), MAX_HOLD_S)
             here = PositionNedYaw(self.tel.north_m, self.tel.east_m, t.down_m, t.yaw_deg)
             await self._setpoint(drone, here)
             self.log(action="hold", seconds=seconds)
             await self._run_until(self.sim_s + seconds, lambda: False)
+            return "done" if self.in_control else "interrupted: the autopilot took control"
+
+    def _unfinished(self, where: str) -> str:
+        if not self.in_control:
+            return f"interrupted: the autopilot took control, {where}"
+        return f"still under way after {self.config.epoch_s:.1f} s, {where}"
 
     async def _fault_schedule(self, drone: System) -> None:
         if self.mission.fault_anchor == "first_move":
