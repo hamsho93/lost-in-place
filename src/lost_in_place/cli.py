@@ -169,7 +169,12 @@ def _cmd_report(args: argparse.Namespace) -> int:
 
     runs: str = args.runs
     attempts = report.s3_attempts(runs) if runs.startswith("s3://") else report.local_attempts(Path(runs))
-    summary = report.summarize(attempts)
+    keys = None
+    if args.manifest:
+        from lost_in_place import manifest
+
+        keys = {e.key for e in manifest.read(args.manifest)}
+    summary = report.summarize(attempts, keys)
     print(json.dumps(summary, indent=1) if args.json else report.markdown(summary))
     return 0
 
@@ -340,6 +345,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     rep = sub.add_parser("report", help="per-cell rates with Wilson 95%% intervals")
     rep.add_argument("runs", help="runs root: a local directory or s3://bucket/runs")
+    rep.add_argument("--manifest", help="only this manifest's episodes, and count those not started")
     rep.add_argument("--json", action="store_true", help="full summary as JSON instead of a table")
     rep.set_defaults(func=_cmd_report)
 

@@ -105,3 +105,14 @@ def test_cells_split_by_state_and_validator(tmp_path: Path) -> None:
         ("loud", "estimator_health"),
         ("loud", "none"),
     ]
+
+
+def test_a_manifest_restricts_the_report_and_counts_unstarted_episodes(tmp_path: Path) -> None:
+    key = "cross_loud/scripted-naive-none-O0/r000-s1"
+    _attempt(tmp_path, key, "a1", 100, "completed", _score(False, False), "loud", "none")
+    _attempt(tmp_path, "textured_hover_s100", "a1", 100, "completed")
+    attempts = report.local_attempts(tmp_path)
+    assert report.summarize(attempts)["episodes"] == 2
+    summary = report.summarize(attempts, {key, "cross_loud/scripted-naive-none-O0/r001-s2"})
+    assert (summary["episodes"], summary["not_started"]) == (1, 1)
+    assert report.markdown(summary).startswith("1 episodes with attempts, 1 not started")

@@ -67,7 +67,7 @@ bucket=$(aws cloudformation describe-stacks --stack-name LostInPlaceSim \
 uv run lip manifest sweeps/e1-pilot.yaml --upload s3://$bucket/manifests
 aws batch submit-job --job-name e1-pilot-0 --job-queue <JobQueue> --job-definition <SweepJobDefinition> \
   --array-properties size=270 --parameters manifest=s3://$bucket/manifests/e1-pilot.json,offset=0
-uv run lip report s3://$bucket/runs            # per-cell rates with Wilson 95% intervals
+uv run lip report s3://$bucket/runs --manifest s3://$bucket/manifests/e1-pilot.json  # per-cell rates, Wilson 95% CIs
 ```
 
 Each child runs `lip run-manifest`, which uploads to `runs/<scenario>/<planner>-<validator>-<obs>/r<rep>-s<seed>/<job id>-attempt<n>/`. Before flying, it lists that episode's earlier attempts and exits without flying if one of them is a result, or if three attempts have all been harness failures (the episode then counts as missing). Resubmitting the same array after a cancellation or a quota stall therefore only flies the episodes that are still open. `lip report` takes each episode's first attempt that isn't a harness failure, and reports the harness-failure rate, missing episodes, and the intra-scenario correlation of violations per cell next to the rates.

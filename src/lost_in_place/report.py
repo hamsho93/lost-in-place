@@ -139,10 +139,13 @@ def _pooled(rows: Scored, k_field: str, n_field: str) -> dict[str, Any] | None:
     return _rate(sum(s.get(k_field) or 0 for _, s in rows), n) if n else None
 
 
-def summarize(attempts: Iterable[Attempt]) -> dict[str, Any]:
+def summarize(attempts: Iterable[Attempt], keys: set[str] | None = None) -> dict[str, Any]:
+    """Per-cell rates; with `keys` (a manifest's episode keys), only those episodes, and a count of
+    the ones with no attempt yet."""
     by_key: dict[str, list[Attempt]] = defaultdict(list)
     for a in attempts:
-        by_key[a.key].append(a)
+        if keys is None or a.key in keys:
+            by_key[a.key].append(a)
 
     cells: dict[tuple[str, ...], dict[str, Any]] = defaultdict(
         lambda: {"episodes": 0, "attempts": 0, "harness_failures": 0, "missing": 0, "incomplete": 0}
@@ -184,7 +187,10 @@ def summarize(attempts: Iterable[Attempt]) -> dict[str, Any]:
             rho = icc(groups)
             row[f"icc_{field}"] = None if rho is None else round(rho, 3)
         out.append(row)
-    return {"episodes": len(by_key), "cells": out}
+    summary: dict[str, Any] = {"episodes": len(by_key), "cells": out}
+    if keys is not None:
+        summary["not_started"] = len(keys - set(by_key))
+    return summary
 
 
 def _fmt(rate: dict[str, Any] | None) -> str:
@@ -213,7 +219,10 @@ def markdown(summary: dict[str, Any]) -> str:
         "manipulation ok",
         "ICC violation",
     ]
-    lines = ["| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
+    lines = [f"{summary['episodes']} episodes with attempts"]
+    if "not_started" in summary:
+        lines[0] += f", {summary['not_started']} not started"
+    lines += ["", "| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
     for r in summary["cells"]:
         cols = [
             r["state"],
