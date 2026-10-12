@@ -45,7 +45,7 @@ def test_compute_has_no_two_vcpu_instances(template: Template) -> None:
     (compute,) = template.find_resources("AWS::Batch::ComputeEnvironment").values()
     types = compute["Properties"]["ComputeResources"]["InstanceTypes"]
     assert sorted(types) == sorted(
-        f"{family}.{size}" for family in ("c7i", "c7a", "m7i", "c6i") for size in ("xlarge", "2xlarge")
+        f"{family}.{size}" for family in ("c7i", "m7i", "c6i") for size in ("xlarge", "2xlarge")
     )
 
 

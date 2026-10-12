@@ -2,7 +2,7 @@
 
 One stack, `LostInPlaceSim`, in us-east-1. It contains:
 
-- **Spot AWS Batch.** x86 instances (c7i, c7a, m7i, c6i; `xlarge` and `2xlarge` only, so two to four episodes share a host and no episode starts on a fresh 2-vCPU instance), 2 vCPU and 3 GB per episode, up to `maxVcpus`. A job gets up to 3 attempts. Batch retries when a spot instance is reclaimed, and also when the episode exits non-zero, because Batch retries whenever no `evaluateOnExit` rule matches.
+- **Spot AWS Batch.** Intel x86 instances (c7i, m7i, c6i; `xlarge` and `2xlarge` only, so two to four episodes share a host and no episode starts on a fresh 2-vCPU instance; AMD `c7a` is excluded, see [fidelity notes](../docs/fidelity.md)), 2 vCPU and 3 GB per episode, up to `maxVcpus`. A job gets up to 3 attempts. Batch retries when a spot instance is reclaimed, and also when the episode exits non-zero, because Batch retries whenever no `evaluateOnExit` rule matches.
 - **ECR repository** for the image built from `docker/Dockerfile`.
 - **S3 bucket** for results: private, encrypted, TLS only. Runs move to Glacier Instant Retrieval after 30 days.
 - **Cost guard:**
