@@ -9,6 +9,8 @@ make setup        # uv sync for the package and infra/
 make check        # ruff, mypy (strict), pytest, infra tests
 ```
 
+Coding agents (and humans in a hurry): read [AGENTS.md](AGENTS.md) first.
+
 The unit tests don't need PX4 or Gazebo. To fly episodes locally, build PX4 with the patches in `px4/` (see [px4/README.md](px4/README.md)) and set `LIP_PX4_DIR`.
 
 ## Conventions

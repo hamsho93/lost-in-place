@@ -11,6 +11,7 @@ import contextlib
 import json
 import shutil
 import time
+import traceback
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -236,6 +237,12 @@ def run_episode(
             result.outcome = f"sim_stall: {exc}"
         except TimeoutError:
             result.outcome = "timeout"
+        except Exception as exc:
+            # Recorded rather than raised, so episode.json, the console log and the ULog are still
+            # written (and uploaded) for a crashed episode.
+            traceback.print_exc()
+            first_line = next(iter(str(exc).strip().splitlines()), "")
+            result.outcome = f"error: {type(exc).__name__}" + (f": {first_line}" if first_line else "")
         finally:
             episode.mark("stopped")
             sim.stop()
