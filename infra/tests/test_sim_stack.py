@@ -81,6 +81,29 @@ def test_budget_alerts_and_stop_action(template: Template) -> None:
     )
 
 
+def test_budget_action_role_uses_the_managed_policy_path(template: Template) -> None:
+    template.has_resource_properties(
+        "AWS::IAM::Role",
+        {
+            "AssumeRolePolicyDocument": Match.object_like(
+                {"Statement": [Match.object_like({"Principal": {"Service": "budgets.amazonaws.com"}})]}
+            ),
+            "ManagedPolicyArns": [
+                {
+                    "Fn::Join": [
+                        "",
+                        [
+                            "arn:",
+                            {"Ref": "AWS::Partition"},
+                            ":iam::aws:policy/AWSBudgetsActionsWithAWSResourceControlAccess",
+                        ],
+                    ]
+                }
+            ],
+        },
+    )
+
+
 def test_results_bucket_is_private_and_encrypted(template: Template) -> None:
     template.has_resource_properties(
         "AWS::S3::Bucket",

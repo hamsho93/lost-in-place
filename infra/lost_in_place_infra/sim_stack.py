@@ -219,7 +219,7 @@ class SimStack(Stack):
             assumed_by=iam.ServicePrincipal("budgets.amazonaws.com"),
             managed_policies=[
                 iam.ManagedPolicy.from_aws_managed_policy_name(
-                    "service-role/AWSBudgetsActionsWithAWSResourceControlAccess"
+                    "AWSBudgetsActionsWithAWSResourceControlAccess"
                 )
             ],
         )
