@@ -67,7 +67,7 @@ BEDROCK_PROFILES_ENV = "LIP_BEDROCK_PROFILES"  # read by lost_in_place.llm.clien
 @dataclass(frozen=True)
 class SimSettings:
     budget_usd: float = 100.0
-    max_vcpus: int = 32
+    max_vcpus: int = 128
     alert_email: str = ""
     image_tag: str = "latest"
     # Account-wide EstimatedCharges alarm threshold; 0 disables it. Billing metrics cannot be
@@ -208,41 +208,57 @@ class SimStack(Stack):
 
         grant_bedrock(job_role)
 
-        job = batch.EcsJobDefinition(
-            self,
-            "Episode",
-            container=batch.EcsEc2ContainerDefinition(
+        def episode_job(name: str, command: list[str], parameters: dict[str, str]) -> batch.EcsJobDefinition:
+            return batch.EcsJobDefinition(
                 self,
-                "EpisodeContainer",
-                image=ecs.ContainerImage.from_ecr_repository(images, settings.image_tag),
-                cpu=EPISODE_VCPUS,
-                memory=Size.mebibytes(EPISODE_MEMORY_MIB),
-                job_role=job_role,
-                logging=ecs.LogDriver.aws_logs(stream_prefix="episode", log_group=log_group),
-                environment={BEDROCK_PROFILES_ENV: self.to_json_string(bedrock_profiles)}
-                if bedrock_profiles
-                else None,
-                command=[
-                    "run",
-                    "Ref::scenario",
-                    "--seed",
-                    "Ref::seed",
-                    "--analyze",
-                    "--upload",
-                    "Ref::upload",
+                name,
+                container=batch.EcsEc2ContainerDefinition(
+                    self,
+                    f"{name}Container",
+                    image=ecs.ContainerImage.from_ecr_repository(images, settings.image_tag),
+                    cpu=EPISODE_VCPUS,
+                    memory=Size.mebibytes(EPISODE_MEMORY_MIB),
+                    job_role=job_role,
+                    logging=ecs.LogDriver.aws_logs(stream_prefix="episode", log_group=log_group),
+                    environment={BEDROCK_PROFILES_ENV: self.to_json_string(bedrock_profiles)}
+                    if bedrock_profiles
+                    else None,
+                    command=command,
+                ),
+                parameters=parameters,
+                retry_attempts=3,
+                retry_strategies=[
+                    batch.RetryStrategy.of(batch.Action.RETRY, batch.Reason.SPOT_INSTANCE_RECLAIMED)
                 ],
-            ),
-            parameters={
-                "scenario": "scenarios/fixtures/textured_hover.yaml",
-                "seed": "0",
-                "upload": f"s3://{results.bucket_name}/runs",
-            },
-            retry_attempts=3,
-            retry_strategies=[
-                batch.RetryStrategy.of(batch.Action.RETRY, batch.Reason.SPOT_INSTANCE_RECLAIMED)
-            ],
-            timeout=EPISODE_TIMEOUT,
+                timeout=EPISODE_TIMEOUT,
+            )
+
+        runs_uri = f"s3://{results.bucket_name}/runs"
+        job = episode_job(
+            "Episode",
+            ["run", "Ref::scenario", "--seed", "Ref::seed", "--analyze", "--upload", "Ref::upload"],
+            {"scenario": "scenarios/fixtures/textured_hover.yaml", "seed": "0", "upload": runs_uri},
         )
+        # One manifest entry per array child (`lip manifest`); skips episodes that already have a result.
+        sweep_job = episode_job(
+            "SweepEpisode",
+            [
+                "run-manifest",
+                "Ref::manifest",
+                "--offset",
+                "Ref::offset",
+                "--analyze",
+                "--upload",
+                "Ref::upload",
+            ],
+            {
+                "manifest": f"s3://{results.bucket_name}/manifests/sweep.json",
+                "offset": "0",
+                "upload": runs_uri,
+            },
+        )
+        results.grant_read(job_role, "manifests/*")
+        results.grant_read(job_role, "runs/*")  # to see which episodes already have a result
 
         # The role used to submit jobs and read results. The budget action blocks it at 100%.
         operator = iam.Role(
@@ -268,6 +284,7 @@ class SimStack(Stack):
             )
         )
         results.grant_read(operator)
+        results.grant_put(operator, "manifests/*")
         images.grant_pull_push(operator)
         # For `lip propose` and planner checks outside Batch; the budget stop covers this too.
         grant_bedrock(operator)
@@ -388,6 +405,7 @@ class SimStack(Stack):
             "ImageRepository": images.repository_uri,
             "JobQueue": queue.job_queue_name,
             "JobDefinition": job.job_definition_name,
+            "SweepJobDefinition": sweep_job.job_definition_name,
             "OperatorRoleArn": operator.role_arn,
             **outputs,
         }.items():

@@ -20,7 +20,7 @@ def ctx(key: str, default: str) -> str:
 
 settings = SimSettings(
     budget_usd=float(ctx("budgetUsd", "100")),
-    max_vcpus=int(ctx("maxVcpus", "32")),
+    max_vcpus=int(ctx("maxVcpus", "128")),
     alert_email=ctx("alertEmail", ""),
     image_tag=ctx("imageTag", "latest"),
     account_alarm_usd=float(ctx("accountAlarmUsd", "0")),
