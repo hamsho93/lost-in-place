@@ -32,7 +32,8 @@ What the simulator gets right, and where it differs from a real flow-and-rangefi
 Retries exist to get past harness failures, never to re-roll a result. The rule, fixed before any counted run:
 
 - **Harness failures** are outcomes the vehicle and planner didn't cause: `boot_stall`, `stuck_on_ground`, `sim_stall`, `inject_failed`, `no_local_position`, `arming_denied`, `timeout`, `error: ...`, and spot reclaims (no files, Batch status "Host EC2 ... terminated"). They exit non-zero, so Batch retries them.
-- **Every other outcome is a result**, including failsafes, crashes and refusals. It exits zero and is never retried.
+- **Every other outcome is a result**, including failsafes, crashes and refusals. It exits zero and is never retried. A metrics or scoring error doesn't change the exit code either; the episode is re-scored offline.
+- `lip run-manifest` skips an episode that already has a result, or has three harness failures, so resubmitting a sweep never re-rolls one (see [infra/README.md](../infra/README.md#sweeps)).
 - An episode's result is its **first attempt that isn't a harness failure**. Every attempt is kept under its own `<job id>-attempt<n>/` folder. Reports give the harness-failure rate per cell next to the results, so a cell whose failures cluster can't hide them.
 - An episode with no valid attempt after Batch's 3 attempts counts as missing, and is reported as such, never re-run until it passes.
 
