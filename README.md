@@ -24,6 +24,8 @@ uv run lip run scenarios/fixtures/textured_hover.yaml --seed 1 --analyze
 
 Or use the container: `docker build -f docker/Dockerfile -t lost-in-place .`, then `docker run --rm lost-in-place run scenarios/fixtures/lowtex_hover.yaml --analyze`.
 
+To run episodes on spot AWS Batch, see [`infra/`](infra/README.md). The first smoke run there matched the local numbers, at about 5 minutes and well under a cent of compute per episode. See the [fidelity notes](docs/fidelity.md#spot-smoke-run-2026-10-12) for the numbers and the one-episode-per-instance limit.
+
 ## Repository
 
 | Path | What it is |
