@@ -328,3 +328,16 @@ def test_budget_stop_blocks_model_calls_from_both_roles(bedrock_template: Templa
 def test_registry_bedrock_models_are_read_from_models_yaml() -> None:
     registry = Path(__file__).resolve().parents[2] / "src" / "lost_in_place" / "llm" / "models.yaml"
     assert SONNET in bedrock_models_from_registry(registry)
+
+
+def test_job_definition_can_pin_an_image_digest() -> None:
+    digest = "sha256:" + "a" * 64
+    app = cdk.App()
+    stack = SimStack(
+        app,
+        "Pinned",
+        settings=SimSettings(image_tag=digest),
+        env=cdk.Environment(account="123456789012", region="us-east-1"),
+    )
+    (job,) = Template.from_stack(stack).find_resources("AWS::Batch::JobDefinition").values()
+    assert f"@{digest}" in json.dumps(job["Properties"]["ContainerProperties"]["Image"])

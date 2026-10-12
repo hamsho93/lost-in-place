@@ -32,7 +32,7 @@ To run episodes on spot AWS Batch, see [`infra/`](infra/README.md). The first sm
 |---|---|
 | `src/lost_in_place/` | Episode runner, scenario schema, metrics, world generator, planner and validator interfaces |
 | `src/lost_in_place/llm/` | LLM planner and its model registry ([`models.yaml`](src/lost_in_place/llm/models.yaml)) |
-| `scenarios/` | Scenario files (YAML) |
+| `scenarios/` | Scenario files (YAML): scripted fixtures, and pilot benchmark items. See `docs/scenarios.md` |
 | `px4/` | Pinned PX4 commit and the patches we apply to it |
 | `docker/` | Headless image with PX4, Gazebo and the runner |
 | `infra/` | AWS CDK app: spot Batch queue, results bucket, budget guard |

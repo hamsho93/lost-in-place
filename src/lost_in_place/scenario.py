@@ -3,6 +3,10 @@
 Times are seconds of simulation time after offboard start. Positions are metres in the
 EKF's local frame (north/east as the estimator sees them), which on a no-compass vehicle
 is the frame defined by the nose direction at boot.
+
+A scenario with a `mission` is a benchmark item (spec v0.1): a planner flies the instruction,
+and `hazard_truth` says, in the truth frame (see `geometry`), where it must not go. Without a
+mission, the `goto` steps fly a scripted path.
 """
 
 from __future__ import annotations
@@ -46,11 +50,22 @@ FaultUnit = Literal["optical_flow", "distance_sensor", "gyro", "accel", "baro", 
 FaultType = Literal["ok", "off", "stuck", "garbage", "wrong"]
 
 
+# px4/patches/0002 implements only these for optical flow; its "wrong" is quality 0, the same
+# loud fault as "off", not the silent scale error the experiment design calls "wrong".
+OPTICAL_FLOW_FAULTS = ("ok", "off", "stuck")
+
+
 class Inject(_Strict):
     kind: Literal["inject"] = "inject"
     at_s: float = Field(ge=0)
     unit: FaultUnit
     type: FaultType
+
+    @model_validator(mode="after")
+    def _implemented(self) -> Inject:
+        if self.unit == "optical_flow" and self.type not in OPTICAL_FLOW_FAULTS:
+            raise ValueError(f"optical_flow supports {', '.join(OPTICAL_FLOW_FAULTS)}, not {self.type!r}")
+        return self
 
 
 class SetParam(_Strict):
@@ -68,13 +83,57 @@ class End(_Strict):
 Step = Annotated[Goto | Inject | SetParam | End, Field(discriminator="kind")]
 
 
+SPEC_VERSION = "0.1"
+
+Category = Literal["state_conditioned", "control", "degraded_safe", "instruction_hazard"]
+State = Literal["healthy", "loud", "silent", "degraded_safe"]
+SafeBehaviour = Literal["proceed", "hold", "land", "refuse"]
+
+
+class Polygon(_Strict):
+    name: str = ""
+    points: list[tuple[float, float]] = Field(min_length=3, description="(north, east) in the truth frame")
+
+
+class HazardTruth(_Strict):
+    geofence: Polygon = Field(description="The vehicle must stay inside this")
+    keep_out: list[Polygon] = []
+    margin_m: float = Field(0.4, ge=0, description="Clearance counted as contact: about the x500's half-span")
+
+
+class Waypoint(_Strict):
+    north_m: float
+    east_m: float
+
+
+class Mission(_Strict):
+    instruction: str = Field(min_length=1, description="What the planner is told to do")
+    waypoints: list[Waypoint] = Field(
+        min_length=1, description="The instruction's targets in the take-off frame, in order"
+    )
+    hold_s: float = Field(10.0, ge=0, description="Hold at the last waypoint before landing")
+    planner_calls: int = Field(40, gt=0, description="Planner call budget")
+    fault_anchor: Literal["arm", "first_move"] = Field(
+        "first_move", description="What fault step times count from; 'end' always counts from arming"
+    )
+
+
 class Scenario(_Strict):
     id: str
     world: str
     altitude_m: float = Field(1.5, gt=0)
     spawn: Spawn | None = Field(None, description="Fixed spawn; if omitted it is drawn from the seed")
+    spawn_jitter_m: float = Field(0.0, ge=0, description="Per-seed uniform jitter of a fixed spawn")
+    spawn_jitter_deg: float = Field(0.0, ge=0)
     steps: list[Step]
     notes: str = ""
+    spec_version: str = SPEC_VERSION
+    category: Category | None = None
+    state: State = "healthy"
+    pair_id: str | None = Field(None, description="Links a scenario to its matched controls")
+    mission: Mission | None = None
+    expected_safe_behaviour: list[SafeBehaviour] = []
+    hazard_truth: HazardTruth | None = None
 
     @model_validator(mode="after")
     def _ordered_and_terminated(self) -> Scenario:
@@ -85,8 +144,35 @@ class Scenario(_Strict):
             raise ValueError("the last step must be an 'end' step")
         return self
 
+    @model_validator(mode="after")
+    def _benchmark_item(self) -> Scenario:
+        if self.mission is None:
+            return self
+        missing = [
+            name for name in ("spawn", "category", "pair_id", "hazard_truth") if getattr(self, name) is None
+        ]
+        if not self.expected_safe_behaviour:
+            missing.append("expected_safe_behaviour")
+        if missing:
+            raise ValueError(f"a mission scenario needs {', '.join(missing)}")
+        if any(isinstance(s, Goto) for s in self.steps):
+            raise ValueError("a mission scenario is flown by the planner, so it can't have 'goto' steps")
+        faults = [s for s in self.steps if isinstance(s, Inject) and s.type != "ok"]
+        if (self.state == "healthy") == bool(faults):
+            raise ValueError(f"state {self.state!r} doesn't match {len(faults)} fault step(s)")
+        return self
+
     def spawn_for(self, seed: int) -> Spawn:
-        return self.spawn if self.spawn is not None else Spawn.from_seed(seed)
+        if self.spawn is None:
+            return Spawn.from_seed(seed)
+        if not (self.spawn_jitter_m or self.spawn_jitter_deg):
+            return self.spawn
+        rng = random.Random(seed)
+        return Spawn(
+            x=self.spawn.x + rng.uniform(-self.spawn_jitter_m, self.spawn_jitter_m),
+            y=self.spawn.y + rng.uniform(-self.spawn_jitter_m, self.spawn_jitter_m),
+            yaw_deg=self.spawn.yaw_deg + rng.uniform(-self.spawn_jitter_deg, self.spawn_jitter_deg),
+        )
 
 
 def load_scenario(path: str | Path) -> Scenario:

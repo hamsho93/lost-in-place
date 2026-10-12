@@ -48,6 +48,9 @@ def test_crashed_episode_is_recorded_not_raised(tmp_path: Path, monkeypatch: pyt
         def mark(self, name: str) -> None:
             pass
 
+        def real_time_factor(self) -> float:
+            return 0.3
+
         async def run(self) -> str:
             logging.getLogger("mavsdk_server").info("System discovered")
             raise FakeRpcError()
@@ -133,6 +136,9 @@ def test_stuck_vehicle_reboots_the_sim(tmp_path: Path, monkeypatch: pytest.Monke
         def mark(self, name: str) -> None:
             pass
 
+        def real_time_factor(self) -> float:
+            return 0.3
+
         async def run(self) -> str:
             if next(runs) == "stuck":
                 raise episode.StuckOnGround("rangefinder rose 0.00 m in 8 s after arming")
@@ -155,3 +161,29 @@ def test_stuck_vehicle_reboots_the_sim(tmp_path: Path, monkeypatch: pytest.Monke
 
 def test_plain_errors_keep_their_first_line() -> None:
     assert episode._error_text(RuntimeError("first\nsecond")) == "first\nsecond"
+
+
+def test_rejected_fault_ends_the_episode() -> None:
+    import asyncio
+
+    ep = _episode_at_rest(None)
+
+    class Failure:
+        async def inject(self, *args: object) -> None:
+            raise RuntimeError("UNSUPPORTED: 'Unsupported'")
+
+    class Drone:
+        failure = Failure()
+
+    with pytest.raises(episode.InjectFailed, match="optical_flow off: UNSUPPORTED"):
+        asyncio.run(ep._apply(Drone(), Inject(at_s=20, unit="optical_flow", type="off")))  # type: ignore[arg-type]
+    assert ep.result.events[-1]["ack"] == "UNSUPPORTED: 'Unsupported'"
+
+
+def test_provenance_is_recorded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LIP_GIT_SHA", "abc123")
+    prov = episode.provenance.collect('{"id": "x"}')
+    assert prov["git_sha"] == "abc123"
+    assert prov["px4"]["commit"] != "unknown"
+    assert set(prov["px4"]["patches"]) >= {"0001-gz-optical-flow-skip-rate-limited-frames.patch"}
+    assert len(prov["scenario_sha256"]) == 16
