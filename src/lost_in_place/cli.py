@@ -257,6 +257,16 @@ def _cmd_propose(args: argparse.Namespace) -> int:
     return status
 
 
+def _cmd_families(args: argparse.Namespace) -> int:
+    from lost_in_place.families import generate
+
+    for i in range(args.start, args.start + args.count):
+        family = generate(f"{args.prefix}{i:02d}", args.seed)
+        for path in family.write(args.out):
+            print(path)
+    return 0
+
+
 def _instance_arg(value: str) -> int | None:
     if value == "auto":
         return None
@@ -278,6 +288,14 @@ def build_parser() -> argparse.ArgumentParser:
     worlds.add_argument("--out", type=Path, help="output directory (default: $LIP_WORLDS_DIR)")
     worlds.add_argument("--seed", type=int, default=0)
     worlds.set_defaults(func=_cmd_worlds)
+
+    fam = sub.add_parser("families", help="generate E1 scenario families (four matched states each)")
+    fam.add_argument("--count", type=int, required=True, help="how many families")
+    fam.add_argument("--start", type=int, default=0, help="number of the first family (default: 0)")
+    fam.add_argument("--prefix", default="g", help="family names are <prefix><number> (default: g)")
+    fam.add_argument("--seed", type=int, default=0, help="the same seed and names give the same families")
+    fam.add_argument("--out", type=Path, default=Path("scenarios/e1"))
+    fam.set_defaults(func=_cmd_families)
 
     run = sub.add_parser("run", help="fly one scenario")
     run.add_argument("scenario", type=Path)
