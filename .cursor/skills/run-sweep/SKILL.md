@@ -74,7 +74,7 @@ Never quarantine results (non-harness outcomes). The attempt rule forbids re-rol
 
 ## 7. Resume
 
-Resubmit the same manifest and offsets. `lip run-manifest` skips episodes that already have a result or three harness failures, so only open episodes fly. `lip report --manifest` counts `not_started` and `missing` separately; a sweep is finished when `not_started` is 0.
+Resubmit the same manifest and offsets. Results live under `runs/<sweep name>/`, so the same name resumes, and a new name (a smoke test of a new image, a confirmatory re-run) flies every episode afresh. `lip run-manifest` skips episodes that already have a result or three harness failures, so only open episodes fly. `lip report --manifest` counts `not_started` and `missing` separately; a sweep is finished when `not_started` is 0.
 
 ## 8. Record
 

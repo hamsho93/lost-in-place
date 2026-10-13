@@ -204,4 +204,6 @@ lip manifest sweeps/e1-pilot.yaml   # writes manifests/e1-pilot.json (pilot 2: s
 lip report s3://<results bucket>/runs --manifest manifests/e1-pilot.json
 ```
 
+A rebuilt manifest puts a new run under `runs/e1-pilot/`. The pilots' own results predate per-sweep prefixes and sit directly under `runs/`, so to report on them, pass the manifest uploaded at the time (`s3://<results bucket>/manifests/e1-pilot.json`), which has no prefix.
+
 `lip report` uses the scores written on Batch. To re-score with the current scorer, re-run `lip analyze` on each counted attempt's folder first.

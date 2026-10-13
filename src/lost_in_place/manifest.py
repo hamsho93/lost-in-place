@@ -3,8 +3,8 @@
 A sweep spec crosses scenarios x reps x planner x validator x observation. The manifest lists
 every episode once, in a shuffled order, and a Batch array job runs entry `offset + index`.
 Each episode has a key, `<scenario>/<planner>-<validator>-<obs>/r<rep>-s<seed>`, and every attempt
-uploads to its own folder under it, so a resubmitted array skips episodes that already have a
-result (see `docs/fidelity.md`, "Which attempt counts").
+uploads to its own folder under `<runs>/<sweep name>/<key>/`, so a resubmitted array skips episodes
+that already have a result (see `docs/fidelity.md`, "Which attempt counts").
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ import glob
 import hashlib
 import json
 import random
+import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -86,6 +87,8 @@ class SweepSpec:
         if unknown:
             raise ValueError(f"unknown sweep keys: {sorted(unknown)}")
         self.name: str = data["name"]
+        if not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", self.name):
+            raise ValueError(f"sweep name {self.name!r}: use lower case, digits, '.', '_' and '-'")
         self.scenarios: list[str] = list(data["scenarios"])
         self.reps: int = int(data["reps"])
         self.planners: list[str] = list(data.get("planners", ["scripted-naive"]))
@@ -153,6 +156,7 @@ def dumps(spec: SweepSpec, entries: list[Entry]) -> str:
     return json.dumps(
         {
             "name": spec.name,
+            "runs_prefix": spec.name,
             "spec": spec.data,
             "spec_sha256": hashlib.sha256(spec_text.encode()).hexdigest()[:16],
             "entries": [asdict(e) for e in entries],
@@ -165,7 +169,7 @@ def loads(text: str) -> list[Entry]:
     return [Entry(**e) for e in json.loads(text)["entries"]]
 
 
-def read(uri: str) -> list[Entry]:
+def read_document(uri: str) -> dict[str, Any]:
     if uri.startswith("s3://"):
         import boto3
 
@@ -173,8 +177,23 @@ def read(uri: str) -> list[Entry]:
 
         bucket, key = parse_s3_uri(uri)
         body = boto3.client("s3").get_object(Bucket=bucket, Key=key)["Body"].read()
-        return loads(body.decode())
-    return loads(Path(uri).read_text())
+        return dict(json.loads(body.decode()))
+    return dict(json.loads(Path(uri).read_text()))
+
+
+def read(uri: str) -> list[Entry]:
+    return [Entry(**e) for e in read_document(uri)["entries"]]
+
+
+def runs_root(runs: str, document: dict[str, Any]) -> str:
+    """Where a manifest's episodes live in the results bucket: `<runs>/<sweep name>`.
+
+    Episode keys don't name the sweep, so without the prefix a sweep over the same scenarios and
+    arms as an earlier one would skip those episodes and count the earlier results as its own.
+    Manifests built before the prefix existed (the pilots) have none and stay at the root.
+    """
+    prefix = document.get("runs_prefix")
+    return f"{runs.rstrip('/')}/{prefix}" if prefix else runs
 
 
 def array_chunks(n: int) -> list[tuple[int, int]]:

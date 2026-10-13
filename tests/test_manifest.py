@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -77,6 +78,45 @@ def test_unknown_sweep_keys_and_empty_globs_are_rejected() -> None:
         _spec(seeds=3)
     with pytest.raises(ValueError, match="no scenarios"):
         manifest.build(_spec(scenarios=["nope/*.yaml"]), ROOT)
+
+
+def test_sweep_names_must_be_safe_path_segments() -> None:
+    for bad in ("", "E1", "a/b", "../x", "-x"):
+        with pytest.raises(ValueError, match="sweep name"):
+            _spec(name=bad)
+
+
+def test_each_sweep_has_its_own_results_prefix() -> None:
+    entries = manifest.build(_spec(), ROOT)
+    a = json.loads(manifest.dumps(_spec(name="pilot"), entries))
+    b = json.loads(manifest.dumps(_spec(name="confirmatory"), entries))
+    assert manifest.runs_root("s3://bucket/runs/", a) == "s3://bucket/runs/pilot"
+    assert manifest.runs_root("s3://bucket/runs", b) == "s3://bucket/runs/confirmatory"
+    del a["runs_prefix"]  # a manifest built before the prefix existed
+    assert manifest.runs_root("s3://bucket/runs", a) == "s3://bucket/runs"
+
+
+def test_run_manifest_skips_only_results_from_its_own_sweep(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from lost_in_place import cli, storage
+
+    spec = _spec(name="second")
+    path = tmp_path / "second.json"
+    path.write_text(manifest.dumps(spec, manifest.build(spec, ROOT)))
+    entry = manifest.read(str(path))[0]
+    earlier = {f"s3://bucket/runs/{entry.key}": ["completed"]}  # the same episode, from another sweep
+    mine = {f"s3://bucket/runs/second/{entry.key}": ["completed"]}
+    seen: list[str] = []
+
+    def outcomes(uri: str, key: str) -> list[str]:
+        seen.append(f"{uri}/{key}")
+        return {**earlier, **mine}.get(f"{uri}/{key}", [])
+
+    monkeypatch.setattr(storage, "attempt_outcomes", outcomes)
+    assert cli.main(["run-manifest", str(path), "--index", "0", "--upload", "s3://bucket/runs"]) == 0
+    assert seen == [f"s3://bucket/runs/second/{entry.key}"]
+    assert '"skipped"' in capsys.readouterr().out
 
 
 def test_arrays_are_split_at_the_batch_limit() -> None:

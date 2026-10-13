@@ -132,16 +132,18 @@ def _cmd_run_manifest(args: argparse.Namespace) -> int:
     index = args.offset + (
         args.index if args.index is not None else int(os.environ.get("AWS_BATCH_JOB_ARRAY_INDEX", "0"))
     )
-    entries = manifest.read(args.manifest)
+    document = manifest.read_document(args.manifest)
+    entries = [manifest.Entry(**e) for e in document["entries"]]
     if not 0 <= index < len(entries):
         print(f"index {index} is outside the manifest ({len(entries)} entries)", file=sys.stderr)
         return 2
     entry = entries[index]
-    print(json.dumps({"index": index, "key": entry.key}))
-    if args.upload and not args.force:
+    upload = manifest.runs_root(args.upload, document) if args.upload else None
+    print(json.dumps({"index": index, "key": entry.key, "runs": upload}))
+    if upload and not args.force:
         from lost_in_place.storage import attempt_outcomes
 
-        outcomes = attempt_outcomes(args.upload, entry.key)
+        outcomes = attempt_outcomes(upload, entry.key)
         if manifest.settled(outcomes):
             print(json.dumps({"skipped": entry.key, "attempts": outcomes}))
             return 0
@@ -159,7 +161,7 @@ def _cmd_run_manifest(args: argparse.Namespace) -> int:
         agent,
         instance=None,
         analyze=args.analyze,
-        upload=args.upload,
+        upload=upload,
         upload_name=entry.key,
     )
 
@@ -168,12 +170,15 @@ def _cmd_report(args: argparse.Namespace) -> int:
     from lost_in_place import report
 
     runs: str = args.runs
-    attempts = report.s3_attempts(runs) if runs.startswith("s3://") else report.local_attempts(Path(runs))
     keys = None
     if args.manifest:
         from lost_in_place import manifest
 
-        keys = {e.key for e in manifest.read(args.manifest)}
+        document = manifest.read_document(args.manifest)
+        keys = {manifest.Entry(**e).key for e in document["entries"]}
+        if runs.startswith("s3://"):
+            runs = manifest.runs_root(runs, document)
+    attempts = report.s3_attempts(runs) if runs.startswith("s3://") else report.local_attempts(Path(runs))
     summary = report.summarize(attempts, keys)
     print(json.dumps(summary, indent=1) if args.json else report.markdown(summary))
     return 0
@@ -339,12 +344,19 @@ def build_parser() -> argparse.ArgumentParser:
     rm.add_argument("--offset", type=int, default=0, help="added to the index (arrays hold 10,000)")
     rm.add_argument("--index", type=int, help="default: AWS_BATCH_JOB_ARRAY_INDEX")
     rm.add_argument("--analyze", action="store_true", help="compute metrics and scores after the episode")
-    rm.add_argument("--upload", metavar="S3_URI", help="runs root, e.g. s3://bucket/runs")
+    rm.add_argument(
+        "--upload",
+        metavar="S3_URI",
+        help="runs root, e.g. s3://bucket/runs; results go under <root>/<sweep name>",
+    )
     rm.add_argument("--force", action="store_true", help="fly even if the episode already has a result there")
     rm.set_defaults(func=_cmd_run_manifest)
 
     rep = sub.add_parser("report", help="per-cell rates with Wilson 95%% intervals")
-    rep.add_argument("runs", help="runs root: a local directory or s3://bucket/runs")
+    rep.add_argument(
+        "runs",
+        help="runs root: a local directory, or s3://bucket/runs (with --manifest, plus its sweep's prefix)",
+    )
     rep.add_argument("--manifest", help="only this manifest's episodes, and count those not started")
     rep.add_argument("--json", action="store_true", help="full summary as JSON instead of a table")
     rep.set_defaults(func=_cmd_report)
