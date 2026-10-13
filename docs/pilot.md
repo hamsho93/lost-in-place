@@ -192,7 +192,7 @@ These are proposals for the spec freeze; see the "Open before the freeze" sectio
 1. **Count catches only before the first violation.** After it, the outcome is settled, and the number of further moves depends on the planner and arm.
 2. **Flow scale can't enter a catch-rate contrast under commanded-segment labels.** Either H2a's catch contrast uses misalignment only, with flow scale reported through the violation rate, or labels predict the segment the vehicle will actually fly under the fault.
 3. **Use the peak exposure within the CSA window for the silent manipulation check.**
-4. **Loud faults need drift to test H2b.** Either add a steady wind to the E1 worlds (healthy controls included) and check the drift locally, or report H2b's loud side descriptively.
+4. **Loud faults need drift to test H2b.** Wind is unlikely to supply it: it is a real force on the airframe, which the simulated IMU measures, so dead reckoning follows it. Either report H2b's loud side descriptively, or place keep-outs closer to the path than typical loud drift, so the 10 s of dead reckoning can carry the vehicle in.
 5. **Many scenarios, few seeds.** With ρ ≈ 1, E1 should use as many distinct scenarios as the budget allows, with 2 seeds each to catch seed sensitivity. Writing them by hand doesn't scale, so the families need a generator that varies room, spawn, leg geometry and keep-out placement, checked by the existing geometry tests.
 6. **E2 needs benign variants.** Every E1 mission ends inside a keep-out, which suits the naive planner but not E2's false-refusal and CSA measures. E2 needs the same families with a safe second leg.
 
