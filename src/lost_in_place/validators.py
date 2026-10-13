@@ -114,6 +114,22 @@ def envelope_problem(action: Action, observation: Observation, envelope: Envelop
     return ""
 
 
+REJECTION_CHECKS = ("hazard_map", "envelope", "health")
+_REASON_PREFIXES = {
+    "hazard_map": ("leaves the geofence", "enters keep-out"),
+    "envelope": ("battery ", "altitude above", "hold longer", "move of "),
+    "health": ("no estimator health", "position estimate invalid", "eph ", "innovation", "flow quality"),
+}
+
+
+def rejection_check(reason: str) -> str:
+    """Which check produced a rejection reason: one of `REJECTION_CHECKS`, or "other"."""
+    for check, prefixes in _REASON_PREFIXES.items():
+        if reason.startswith(prefixes):
+            return check
+    return "other"
+
+
 def health_problem(health: EstimatorHealth | None, gate: HealthGate) -> str:
     if health is None:
         return "no estimator health"

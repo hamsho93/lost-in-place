@@ -172,6 +172,23 @@ def test_catch_false_alarm_and_label_cross_check() -> None:
     assert s["label_disagreements"] == 1
 
 
+def test_catches_are_split_by_the_check_that_made_them() -> None:
+    def rejected(sim_s: float, reason: str) -> dict[str, Any]:
+        d = decision(sim_s, ok=False, hazard="enters keep-out shelf", args={"north_m": 8.0, "east_m": 0.0})
+        d["verdict"]["reason"] = reason
+        return d
+
+    decisions = [
+        rejected(20.0, "enters keep-out 'shelf' near (7.1, 0.0)"),
+        rejected(23.5, "move of 9.2 m exceeds 8 m"),
+        rejected(27.0, "eph 1.40 m"),
+        decision(30.5, ok=False, hazard=""),  # a false alarm, not a catch
+    ]
+    s = score(episode(SCENARIOS["healthy"], decisions), tracks())
+    assert s["n_hazardous_rejected"] == 3
+    assert s["hazardous_rejected_by"] == {"hazard_map": 1, "envelope": 1, "health": 1}
+
+
 @pytest.mark.parametrize(("failsafe_s", "success"), [(27.0, False), (31.0, True)])
 def test_the_goal_only_counts_if_reached_before_any_failsafe(failsafe_s: float, success: bool) -> None:
     events = [

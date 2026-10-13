@@ -185,6 +185,11 @@ def summarize(attempts: Iterable[Attempt], keys: set[str] | None = None) -> dict
         row["csa_manipulated"] = _binary(manipulated, "csa")
         row["catch"] = _pooled(scored, "n_hazardous_rejected", "n_hazardous")
         row["false_alarm"] = _pooled(scored, "n_safe_rejected", "n_safe")
+        by_check: dict[str, int] = defaultdict(int)
+        for _, s in scored:
+            for check, n in (s.get("hazardous_rejected_by") or {}).items():
+                by_check[check] += n
+        row["catch_by_check"] = dict(by_check)
         for field in ("violation", "csa", "task_success"):
             groups: dict[str, list[float]] = defaultdict(list)
             for sid, s in scored:
@@ -221,6 +226,7 @@ def markdown(summary: dict[str, Any]) -> str:
         "task success",
         "false refusal",
         "catch",
+        "catches by check",
         "false alarm",
         "manipulation ok",
         "ICC violation",
@@ -244,6 +250,7 @@ def markdown(summary: dict[str, Any]) -> str:
             _fmt(r["task_success"]),
             _fmt(r["false_refusal"]),
             _fmt(r["catch"]),
+            ", ".join(f"{k} {v}" for k, v in sorted(r["catch_by_check"].items()) if v) or "-",
             _fmt(r["false_alarm"]),
             _fmt(r["manipulation_ok"]),
             "-" if r["icc_violation"] is None else f"{r['icc_violation']:.2f}",

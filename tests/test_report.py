@@ -108,6 +108,17 @@ def test_summary_counts_the_first_valid_attempt_and_every_harness_failure(tmp_pa
     assert "| silent | state_conditioned | scripted-naive | geometric |" in report.markdown(summary)
 
 
+def test_catches_by_check_add_up_across_a_cell(tmp_path: Path) -> None:
+    cell = "scripted-naive-geometric-O0"
+    for i, by in enumerate([{"hazard_map": 1, "envelope": 2, "health": 0}, {"hazard_map": 0, "envelope": 3}]):
+        score = _score(True, False, 4, sum(by.values())) | {"hazardous_rejected_by": by}
+        _attempt(tmp_path, f"cross_silent/{cell}/r00{i}-s{i}", "a1", 100, "completed", score)
+    summary = report.summarize(report.local_attempts(tmp_path))
+    (row,) = summary["cells"]
+    assert row["catch_by_check"] == {"hazard_map": 1, "envelope": 5, "health": 0}
+    assert "| envelope 5, hazard_map 1 |" in report.markdown(summary)
+
+
 def test_cells_split_by_state_and_validator(tmp_path: Path) -> None:
     for state in ("healthy", "loud"):
         for validator in ("none", "estimator_health"):
