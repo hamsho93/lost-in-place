@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from importlib.resources import files
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
@@ -20,6 +20,11 @@ class ModelSpec(BaseModel):
     max_tokens: int = Field(512, gt=0)
     temperature: float | None = None
     tool_choice: Literal["any", "auto"] = "any"
+    # OpenAI-compatible servers only: where the server is, the environment variable holding its
+    # key (local servers need none), and extra request fields such as chat_template_kwargs.
+    base_url: str | None = None
+    api_key_env: str | None = None
+    extra_body: dict[str, Any] = Field(default_factory=dict)
     notes: str = ""
 
 
