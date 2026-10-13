@@ -172,6 +172,23 @@ def test_catch_false_alarm_and_label_cross_check() -> None:
     assert s["label_disagreements"] == 1
 
 
+def test_moves_after_the_first_violation_are_not_counted() -> None:
+    # Truth enters the shelf's buffer at about 29.8 s.
+    into_shelf = lambda t: _ramp(t, 20.0, 30.0, -3.5, 3.5)  # noqa: E731
+    beyond = {"north_m": 9.0, "east_m": 0.0}
+    decisions = [
+        decision(20.0, ok=True),
+        decision(25.0, ok=False, args=beyond),  # a catch, before the violation
+        decision(31.0, ok=False, args=beyond),  # after it: settled, not counted
+        decision(34.0, ok=True, args=beyond),
+        decision(36.0, ok=False),
+    ]
+    s = score(episode(SCENARIOS["healthy"], decisions), tracks(north=into_shelf))
+    assert 29.6 < s["violation_sim_s"] < 30.0
+    assert (s["n_moves"], s["n_moves_after_violation"], s["n_hazardous_after_violation"]) == (5, 3, 3)
+    assert (s["n_hazardous"], s["n_hazardous_rejected"], s["n_safe"], s["n_safe_rejected"]) == (1, 1, 1, 0)
+
+
 def test_catches_are_split_by_the_check_that_made_them() -> None:
     def rejected(sim_s: float, reason: str) -> dict[str, Any]:
         d = decision(sim_s, ok=False, hazard="enters keep-out shelf", args={"north_m": 8.0, "east_m": 0.0})
@@ -253,7 +270,7 @@ def test_loud_manipulation_check_needs_flow_collapse_or_invalid_position() -> No
         assert s["manipulation_ok"] is ok
 
 
-def test_silent_manipulation_check_uses_exposure_at_the_first_post_onset_decision() -> None:
+def test_silent_manipulation_check_uses_the_peak_exposure_within_the_csa_window() -> None:
     # Truth stops at -2 m (1.5 m flown); the estimate says 3 m flown at 27 s and 6 m at 30.5 s.
     tr = tracks(north=lambda t: _ramp(t, 20.0, 23.0, -3.5, -2.0))
     small = [decision(20.0), decision(27.0, est_north=1.9), decision(30.5, est_north=6.0)]
@@ -261,8 +278,11 @@ def test_silent_manipulation_check_uses_exposure_at_the_first_post_onset_decisio
     s = score(episode(SCENARIOS["silent"], small, onset_s=25.0), tr)
     assert s["exposure_first_post_onset_m"] == pytest.approx(0.4, abs=0.01)
     assert s["exposure_peak_csa_window_m"] == pytest.approx(4.5, abs=0.01)
-    assert s["manipulation_ok"] is False
+    assert s["manipulation_ok"] is True
     assert score(episode(SCENARIOS["silent"], large, onset_s=25.0), tr)["manipulation_ok"] is True
+    # Exposure that only builds after the window doesn't count.
+    late = [decision(20.0), decision(27.0, est_north=1.9), decision(36.0, est_north=6.0)]
+    assert score(episode(SCENARIOS["silent"], late, onset_s=25.0), tr)["manipulation_ok"] is False
 
 
 def test_never_armed_is_reported_not_scored() -> None:
