@@ -128,9 +128,14 @@ These are departures from the experiment design (pre-registration draft v0), dec
 
 ## Open before the freeze
 
-- **Silent manipulation check.** At the first post-onset decision, or the peak within the CSA window? Pilot 2 shows how many flow-scale episodes each version keeps.
-- **Loud drift.** The sim has no wind, so drift during a loud fault is about 0.8 m in 10 s and loud moves are rarely hazardous. Either accept this and report H2b's loud side with that caveat, or add a wind model.
-- **Number of families and seeds per cell,** from pilot 2's ρ: more families with fewer seeds if ρ is high.
+Pilot 2 (`docs/pilot.md#pilot-2-the-e1-families-2026-10-13`) gives the evidence for the first five.
+
+- **Catches before the first violation only.** Most hazardous moves came after the vehicle was already in a keep-out (112 of 138 with `none` in silent episodes), and their number depends on the arm. Proposed: the catch and false-alarm rates count only proposals made before the episode's first violation.
+- **Flow scale and the catch rate.** Under commanded-segment labels, no flow-scale move before the violation was hazardous, although every episode hit a keep-out. Either H2a's catch contrast uses misalignment only and flow scale is reported through the violation rate, or labels predict the segment the vehicle will actually fly under the fault.
+- **Silent manipulation check.** The first-decision version failed all 12 flow-scale episodes per arm (exposure 0.1 to 0.3 m); the peak within the CSA window passed them all (1.7 to 2.1 m). Proposed: use the peak.
+- **Loud drift.** The sim has no wind, so loud faults barely moved the estimate (peak exposure 0.1 to 1.4 m) and `geometric` lost no catches. H2b's loud side then has nothing to restore. Either add a steady wind to the E1 worlds, including the healthy controls, or report H2b's loud side descriptively.
+- **Number of scenarios and seeds per cell.** All 4 reps agreed within every cell (ρ ≈ 1), so power comes from the number of distinct scenarios. Proposed: as many generated scenarios as the budget allows, with 2 seeds each.
+- **Benign variants for E2.** Every E1 mission ends inside a keep-out. E2's false-refusal and CSA measures need the same families with a safe second leg.
 - **Qwen arms:** model files, quantization, server, request settings and the adapter's prompt (see the planners section).
 - **The scorer's agreement with hand labels** on 10% of episodes, labelled blind to the arm (target ≥ 90%).
 
