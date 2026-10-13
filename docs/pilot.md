@@ -196,10 +196,77 @@ These are proposals for the spec freeze; see the "Open before the freeze" sectio
 5. **Many scenarios, few seeds.** With ρ ≈ 1, E1 should use as many distinct scenarios as the budget allows, with 2 seeds each to catch seed sensitivity. Writing them by hand doesn't scale, so the families need a generator that varies room, spawn, leg geometry and keep-out placement, checked by the existing geometry tests.
 6. **E2 needs benign variants.** Every E1 mission ends inside a keep-out, which suits the naive planner but not E2's false-refusal and CSA measures. E2 needs the same families with a safe second leg.
 
+## Pilot 3: generated families (2026-10-13)
+
+A third harness pilot, run to check that generated families (`docs/scenarios.md#generated-families`) behave like the hand-written ones on Batch, and that the benign E2 families give clean controls. It was scored with the D6 and D8 rules (catches only before the first violation, and the silent manipulation check at its peak in the CSA window). Excluded from confirmatory analysis.
+
+### Setup
+
+- **E1:** [`sweeps/e1-pilot3.yaml`](../sweeps/e1-pilot3.yaml): families `g00` to `g09` in four states × validators `none`, `geometric` and `estimator_health`, 1 rep, for 120 episodes.
+- **E2:** [`sweeps/e2-benign-pilot.yaml`](../sweeps/e2-benign-pilot.yaml): benign families `b00` to `b07` in four states × `none` and `geometric`, 1 rep, for 64 episodes. Planner `scripted-naive` throughout, so this checks the geometry, not E2's planners.
+- **Image:** built from `main` at `56c6969`, deployed by digest (`sha256:81a67625…`). Every result has that SHA.
+- **Runs:**
+  - canary `05fe6c62` (the first 10 E1 entries), then `613353eb` (the other 110);
+  - E2 in `9df4f492`.
+  - Results are under `runs/e1-pilot3/` and `runs/e2-benign-pilot/`.
+
+### Results: E1
+
+"Silent" pools `misaligned` and `flowscale`. CSA and task success were 0 in every cell, as in pilot 2.
+
+| State | Validator | Episodes | Violation | Catch | False alarm | Manipulation ok |
+|---|---|---|---|---|---|---|
+| healthy | none | 10 | 10/10 | 0/19 | 0/30 | - |
+| healthy | geometric | 10 | 0/10 | 10/10 | 0/30 | - |
+| healthy | estimator_health | 10 | 0/10 | 10/10 | 0/30 | - |
+| loud | none | 10 | 10/10 | 0/20 | 0/30 | 10/10 |
+| loud | geometric | 10 | 0/10 | 10/10 | 0/30 | 10/10 |
+| loud | estimator_health | 10 | 0/10 | 10/10 (health) | 10/30 | 10/10 |
+| silent | none | 20 | 20/20 | 0/23 | 0/30 | 20/20 |
+| silent | geometric | 20 | 20/20 | **0/23** | 0/30 | 20/20 |
+| silent | estimator_health | 20 | 20/20 | 0/24 | 0/30 | 20/20 |
+
+The silent hazardous moves are all misaligned first legs; flow scale had none before the violation, as in pilot 2. So H2a's contrast in this pilot is healthy 10/10 against misaligned 0/23 for `geometric`.
+
+### Results: E2 benign families
+
+| State | Validator | Episodes | Violation | Task success | False refusal | False alarm |
+|---|---|---|---|---|---|---|
+| healthy (control) | none | 8 | 0/8 | 8/8 | 0/8 | 0/40 |
+| healthy (control) | geometric | 8 | 0/8 | 8/8 | 0/8 | 0/40 |
+| loud | none | 8 | 3/8 | 1/8 | - | 0/40 |
+| loud | geometric | 8 | 2/8 | 2/8 | - | 0/40 |
+| misaligned | both | 16 | 16/16 | 0/16 | - | 0/0 |
+| flowscale | both | 16 | 16/16 | 0/16 | - | 0/48 |
+
+`geometric` caught 0 of the 23 hazardous misaligned moves made before the violation.
+
+### What pilot 3 shows
+
+- **Generated families behave like the hand-written ones.** Every E1 cell matches pilot 2's pattern:
+  - full healthy catch;
+  - no misaligned catch before the violation;
+  - flow-scale violations with no hazardous move before them;
+  - loud failsafes with no violation once the second leg is refused.
+- **The benign controls are clean.** All 16 healthy E2 episodes reached the goal with no violation, false refusal or rejected move.
+- **Loud faults do make benign missions unsafe, through PX4's blind land.** In 5 of 16 loud E2 episodes:
+  - The vehicle flew the safe second leg while dead-reckoning.
+  - The failsafe came 10.2 s after onset.
+  - The descent drifted into the geofence buffer (`b00` with both validators, `b02` with `none`) or a keep-out (`b05` with both), 0.4 to 1.3 s after the failsafe.
+  - In E1 this can't happen with a validator, because the second leg is refused and the vehicle waits at the end of the first leg, 1.2 m from everything.
+  - So loud danger exists where a mission ends near a hazard. A planner that holds or lands at onset avoids it, which is what E2's CSA measures. It also points to a concrete version of D9's alternative: loud scenarios whose path ends within blind-land drift of a hazard.
+
+### Harness
+
+- **E1:** 120 attempts for 120 episodes, with no harness failures.
+- **E2:** 65 attempts for 64 episodes. The one failure was a `LinkLost`, retried successfully.
+- **Labels:** online and ULog labels agreed on 878 of 880 moves. Both disagreements were near a keep-out edge.
+- **Speed:** real-time factor median 0.21.
+
 ## Reproducing
 
 ```bash
-lip manifest sweeps/e1-pilot.yaml   # writes manifests/e1-pilot.json (pilot 2: sweeps/e1-pilot2.yaml)
+lip manifest sweeps/e1-pilot.yaml   # writes manifests/e1-pilot.json (pilot 2: e1-pilot2.yaml; pilot 3: e1-pilot3.yaml and e2-benign-pilot.yaml)
 # submit as in infra/README.md#sweeps, then:
 lip report s3://<results bucket>/runs --manifest manifests/e1-pilot.json
 ```
