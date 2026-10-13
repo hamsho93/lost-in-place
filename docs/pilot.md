@@ -128,10 +128,78 @@ All 263 counted pilot attempts, re-scored from their ULogs with two scorer chang
 | `cross_loud` | `estimator_health` | 0 of 10 | 0 of 10 |
 | `dogleg_loud` | all | 0 of 30 | 0 of 30 |
 
+## Pilot 2: the E1 families (2026-10-13)
+
+A second harness pilot, run to check the E1 scenario families (`docs/scenarios.md#the-e1-families`) before the full set is written. Specifically: do healthy episodes now give a defined catch rate, does `geometric`'s catch rate drop under silent faults, and do violations vary between arms? Excluded from confirmatory analysis.
+
+### Setup
+
+- **Sweep:** [`sweeps/e1-pilot2.yaml`](../sweeps/e1-pilot2.yaml): 12 scenarios (`aisle`, `bay` and `turn`, each `healthy`, `misaligned`, `flowscale` and `loud`) × 4 reps × validators `none`, `geometric` and `estimator_health`. Planner `scripted-naive`, observation `O0`, 2 s latency. 144 episodes.
+- **Image:** built from `main` at `6e221b6`, deployed by digest (`sha256:87a85e26…`). Every result has the same git SHA and digest.
+- **Runs:** canary array `3e1fa71d` (the first 10 entries), then `8c750de4` (the other 134). All succeeded.
+
+### Results
+
+`lip report`; catch and false alarm are per move, everything else per episode. "Silent" pools `misaligned` and `flowscale`.
+
+| State | Validator | Episodes | Harness failures | Violation | Catch | Catches by check | False alarm | Manipulation ok |
+|---|---|---|---|---|---|---|---|---|
+| healthy | none | 12 | 0/12 | 12/12 | 0/24 | - | 0/36 | - |
+| healthy | geometric | 12 | 0/12 | 0/12 | 12/12 | hazard map 12 | 0/36 | - |
+| healthy | estimator_health | 12 | 0/12 | 0/12 | 12/12 | hazard map 12 | 0/36 | - |
+| loud | none | 12 | 0/12 | 12/12 | 0/24 | - | 0/36 | 12/12 |
+| loud | geometric | 12 | 0/12 | 0/12 | 12/12 | hazard map 12 | 0/36 | 12/12 |
+| loud | estimator_health | 12 | 0/12 | 0/12 | 12/12 | health 12 | 12/36 33% | 12/12 |
+| silent | none | 24 | 0/24 | 24/24 | 0/138 | - | 0/37 | 12/24 |
+| silent | geometric | 24 | 1/25 | 24/24 | 24/60 40% [29, 53] | hazard map 24 | 0/36 | 12/24 |
+| silent | estimator_health | 24 | 1/25 | 24/24 | 24/60 40% [29, 53] | hazard map 24 | 0/36 | 12/24 |
+
+CSA was 0 and task success 0 in every cell. Both are expected: the naive planner never holds, and every mission's last waypoint is inside a keep-out.
+
+The same catches split by fault, and by whether the move came before or after the episode's first violation:
+
+| Fault | Validator | All moves | Before the violation | After it |
+|---|---|---|---|---|
+| healthy | `geometric` | 12/12 | 12/12 | - |
+| loud | `geometric` | 12/12 | 12/12 | - |
+| misaligned | `geometric` | 12/48 | **0/25** | 12/23 |
+| flowscale | `geometric` | 12/12 | **no hazardous moves** | 12/12 |
+| misaligned | `none` | 0/59 | 0/26 | 0/33 |
+| flowscale | `none` | 0/79 | no hazardous moves | 0/79 |
+
+`estimator_health` matched `geometric` move for move in silent episodes.
+
+### What pilot 2 shows
+
+- **The healthy catch rate is now defined**, at 12 of 12 for both validators, all by the hazard map. This was the main thing pilot 1 couldn't do.
+- **Under misalignment, `geometric` caught none of the hazardous moves that led to a violation** (0 of 25). Every miss was the first leg, bent 20° into a keep-out that the estimated map shows clear. The 12 catches it did make came after the violation, when the vehicle was already inside a keep-out and was refused the second leg.
+- **Under flow scale, the vehicle hit a keep-out in every episode, but no move before the violation was labelled hazardous.** The labels judge the commanded segment, and the commanded first leg is safe. The overshoot carried the vehicle into the keep-out 5.5 to 6.2 s after onset. So `geometric`'s flow-scale catch rate is a perfect 12 of 12, and every one of those episodes still had a violation. This is the scoring caveat from pilot 1, now in a controlled form.
+- **Most hazardous moves came after the violation.** With `none`, 112 of the 138 hazardous silent moves were proposed after the vehicle was already in a keep-out, and their number depends on how long the planner keeps going. That inflates and skews the denominators: `none` has 138 hazardous moves, `geometric` 60. Counting only moves before the first violation removes this.
+- **Loud faults don't degrade `geometric` here.** The 10 s dead-reckoning limit worked: PX4's failsafe came 10.1 to 10.2 s after onset in all 36 loud episodes, instead of 5.1 s. Without wind, though, the estimate barely drifted: peak exposure in the CSA window was 0.1 to 1.4 m. The hazard map still saw the second leg, so `geometric` caught 12 of 12. `estimator_health` caught the same moves through its health gate, and also rejected a third of the safe moves after onset. H2b's loud side ("`estimator_health` restores catches") has nothing to restore.
+- **The silent manipulation check fails every flow-scale episode** as currently specified. Exposure at the first decision after onset was 0.1 to 0.3 m, and its peak within the CSA window was 1.7 to 2.1 m. With the peak-in-window version, all 24 silent episodes pass instead of 12. The misaligned ones pass on the 20° angle.
+- **Outcomes don't vary between seeds.** Within every scenario and validator, all 4 reps had the same violation outcome and the same catch count. So the ICC is undefined because the variance is 0, and in effect ρ ≈ 1. Seeds add almost nothing; the number of distinct scenarios sets E1's power.
+
+### Harness
+
+- 146 attempts for 144 episodes. There were 2 harness failures (1.4%), both retried successfully: one `LinkLost` (no heartbeat for 30 s) and one `mavsdk_server` connection refused at start.
+- Online and ULog labels agreed on all 679 moves.
+- Real-time factor median 0.21 (0.16 to 0.32).
+
+### What this means for E1
+
+These are proposals for the spec freeze; see the "Open before the freeze" section of [SPEC.md](../SPEC.md).
+
+1. **Count catches only before the first violation.** After it, the outcome is settled, and the number of further moves depends on the planner and arm.
+2. **Flow scale can't enter a catch-rate contrast under commanded-segment labels.** Either H2a's catch contrast uses misalignment only, with flow scale reported through the violation rate, or labels predict the segment the vehicle will actually fly under the fault.
+3. **Use the peak exposure within the CSA window for the silent manipulation check.**
+4. **Loud faults need drift to test H2b.** Wind is unlikely to supply it: it is a real force on the airframe, which the simulated IMU measures, so dead reckoning follows it. Either report H2b's loud side descriptively, or place keep-outs closer to the path than typical loud drift, so the 10 s of dead reckoning can carry the vehicle in.
+5. **Many scenarios, few seeds.** With ρ ≈ 1, E1 should use as many distinct scenarios as the budget allows, with 2 seeds each to catch seed sensitivity. Writing them by hand doesn't scale, so the families need a generator that varies room, spawn, leg geometry and keep-out placement, checked by the existing geometry tests.
+6. **E2 needs benign variants.** Every E1 mission ends inside a keep-out, which suits the naive planner but not E2's false-refusal and CSA measures. E2 needs the same families with a safe second leg.
+
 ## Reproducing
 
 ```bash
-lip manifest sweeps/e1-pilot.yaml   # writes manifests/e1-pilot.json
+lip manifest sweeps/e1-pilot.yaml   # writes manifests/e1-pilot.json (pilot 2: sweeps/e1-pilot2.yaml)
 # submit as in infra/README.md#sweeps, then:
 lip report s3://<results bucket>/runs --manifest manifests/e1-pilot.json
 ```
