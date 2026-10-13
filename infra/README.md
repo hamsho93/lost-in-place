@@ -117,7 +117,7 @@ The tag is the only way to put an imported model's spend under the project budge
 
 **After the sweep:** `aws bedrock delete-imported-model --model-identifier lip-qwen3-4b-thinking-2507-768f209`.
 
-The smoke test of Oct 13, 2026 ran DEXI's C0 missions through this path: 8 of 20 seen missions passed, against arm 2's 38% on Ollama. With 16 missions in flight, a single copy kept each call above 100 tokens/s, about 1,100 tokens/s in total.
+The smoke test of Oct 13, 2026 ran DEXI's C0 missions through this path: 8 of 20 seen missions passed, against arm 2's 38% on Ollama. With 16 missions in flight, a single copy kept each call above 100 tokens/s, about 1,100 tokens/s in total. The student (`qwen3-4b-student`, also 2 CMUs) then flew all 100 of DEXI's frozen missions in under 4 minutes, with a median call of 0.35 s once warm. It passed 35 of 50 seen and 28 of 50 unseen missions, against arm 3's 35 and 27 on `mlx_lm.server`, with the same per-template counts except one more unseen coverage pass.
 
 ## Settings
 
