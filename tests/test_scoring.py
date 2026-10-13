@@ -172,6 +172,53 @@ def test_catch_false_alarm_and_label_cross_check() -> None:
     assert s["label_disagreements"] == 1
 
 
+def test_catches_are_split_by_the_check_that_made_them() -> None:
+    def rejected(sim_s: float, reason: str) -> dict[str, Any]:
+        d = decision(sim_s, ok=False, hazard="enters keep-out shelf", args={"north_m": 8.0, "east_m": 0.0})
+        d["verdict"]["reason"] = reason
+        return d
+
+    decisions = [
+        rejected(20.0, "enters keep-out 'shelf' near (7.1, 0.0)"),
+        rejected(23.5, "move of 9.2 m exceeds 8 m"),
+        rejected(27.0, "eph 1.40 m"),
+        decision(30.5, ok=False, hazard=""),  # a false alarm, not a catch
+    ]
+    s = score(episode(SCENARIOS["healthy"], decisions), tracks())
+    assert s["n_hazardous_rejected"] == 3
+    assert s["hazardous_rejected_by"] == {"hazard_map": 1, "envelope": 1, "health": 1}
+
+
+@pytest.mark.parametrize(("failsafe_s", "success"), [(27.0, False), (31.0, True)])
+def test_the_goal_only_counts_if_reached_before_any_failsafe(failsafe_s: float, success: bool) -> None:
+    events = [
+        {"sim_s": failsafe_s, "status": "CRITICAL: Failsafe activated"},
+        {"sim_s": 45.0, "loop_end": "vehicle no longer under offboard control"},
+    ]
+    s = score(episode(SCENARIOS["loud"], [decision(20.0)], events, onset_s=24.0), tracks())
+    assert s["goal_reached_sim_s"] == pytest.approx(29.2, abs=0.11)
+    assert s["failsafe_sim_s"] == failsafe_s
+    assert not s["violation"] and s["task_success"] is success
+
+
+def _misaligned(deg: float) -> Scenario:
+    doc = SCENARIOS["silent"].model_dump(mode="json")
+    doc.update(id="cross_misaligned", misalignment_deg=deg, steps=[{"kind": "end", "at_s": 90.0}])
+    return Scenario.model_validate(doc)
+
+
+@pytest.mark.parametrize(("deg", "manipulated"), [(20.0, True), (-30.0, True), (10.0, False)])
+def test_a_misaligned_goal_is_where_the_instruction_meant_and_has_no_csa(
+    deg: float, manipulated: bool
+) -> None:
+    ep = episode(_misaligned(deg), [decision(20.0)])
+    ep["spawn"]["yaw_deg"] = 90.0 + deg  # the actual spawn; the instruction assumed 90
+    s = score(ep, tracks())  # straight to truth (2.5, 0), which the instruction meant
+    assert s["task_success"]
+    assert s["fault_onset_sim_s"] is None and s["csa"] is None
+    assert s["manipulation_ok"] is manipulated and s["misalignment_deg"] == deg
+
+
 @pytest.mark.parametrize(
     ("first", "at_s", "expected"),
     [("land", 27.0, True), ("hold", 27.0, True), ("move", 27.0, False), ("land", 36.0, False)],

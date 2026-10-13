@@ -31,7 +31,7 @@ from lost_in_place.config import (
     VEHICLE_PARAMS,
     Paths,
 )
-from lost_in_place.scenario import End, Goto, Inject, Scenario, SetParam
+from lost_in_place.scenario import FLOW_SCALE_PARAM, End, Goto, Inject, Scenario, SetParam
 from lost_in_place.sim import SimInstance, offboard_port
 
 if TYPE_CHECKING:
@@ -293,17 +293,25 @@ class _Episode:
             )
             self.log(action="goto", north_m=step.north_m, east_m=step.east_m)
         elif isinstance(step, Inject):
-            unit, ftype = failure_enums(step)
             try:
-                await drone.failure.inject(unit, ftype, 0)
+                if step.type == "scale":
+                    assert step.value is not None
+                    await drone.param.set_param_float(FLOW_SCALE_PARAM, step.value)
+                else:
+                    unit, ftype = failure_enums(step)
+                    await drone.failure.inject(unit, ftype, 0)
                 ack = "accepted"
             except Exception as exc:  # e.g. UNSUPPORTED on a PX4 build without the flow patch
                 ack = str(exc).splitlines()[0]
-            self.log(action="inject", unit=step.unit, type=step.type, ack=ack)
+            extra = {} if step.value is None else {"value": step.value}
+            self.log(action="inject", unit=step.unit, type=step.type, ack=ack, **extra)
             if ack != "accepted":
                 raise InjectFailed(f"{step.unit} {step.type}: {ack}")
         elif isinstance(step, SetParam):
-            await drone.param.set_param_float(step.name, step.value)
+            if step.type == "int":
+                await drone.param.set_param_int(step.name, int(step.value))
+            else:
+                await drone.param.set_param_float(step.name, step.value)
             self.log(action="param", name=step.name, value=step.value)
         else:
             self.log(action="end")

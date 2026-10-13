@@ -13,6 +13,7 @@ from lost_in_place.validators import (
     Truth,
     hazard_in_truth,
     make_validator,
+    rejection_check,
 )
 
 PILOT = Path(__file__).parents[1] / "scenarios" / "pilot"
@@ -113,6 +114,29 @@ def test_silent_drift_blinds_the_geometric_validator_but_not_the_oracle() -> Non
     verdict = oracle.check(move, believed, drifted)  # ... but not from where the vehicle really is
     assert not verdict.ok and "shelf" in verdict.reason
     assert not oracle.check(move, believed, None).ok
+
+
+def test_every_rejection_reason_names_its_check() -> None:
+    geometric, health = make_validator("geometric", CROSS), make_validator("estimator_health", CROSS)
+    h = EstimatorHealth
+
+    cases = [
+        (geometric.check(_move(7.5, 0.0), _obs()), "hazard_map"),
+        (geometric.check(_move(0.0, 3.0), _obs()), "hazard_map"),
+        (geometric.check(_move(-3.0, 0.0), _obs(north=6.0)), "envelope"),
+        (geometric.check(Action("take_off", {"altitude_m": 3.0}), _obs()), "envelope"),
+        (geometric.check(Action("hold", {"seconds": 60.0}), _obs()), "envelope"),
+        (geometric.check(_move(1.0, 0.0), _obs(battery=10)), "envelope"),
+        (health.check(_move(1.0, 0.0), _obs(health=None)), "health"),
+        (health.check(_move(1.0, 0.0), _obs(health=h(False, 0.1, 180, False, False))), "health"),
+        (health.check(_move(1.0, 0.0), _obs(health=h(True, 1.5, 180, False, False))), "health"),
+        (health.check(_move(1.0, 0.0), _obs(health=h(True, 0.1, 180, True, False))), "health"),
+        (health.check(_move(1.0, 0.0), _obs(health=h(True, 0.1, 30, False, False))), "health"),
+    ]
+    for verdict, check in cases:
+        assert not verdict.ok
+        assert rejection_check(verdict.reason) == check, verdict.reason
+    assert rejection_check("no ground truth") == "other"
 
 
 def test_only_moves_can_be_hazardous() -> None:

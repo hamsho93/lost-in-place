@@ -37,6 +37,29 @@ def test_scripted_naive_flies_waypoints_holds_then_lands() -> None:
     assert steps[3].args == {"seconds": 10.0}
 
 
+def test_scripted_naive_skips_a_waypoint_the_validator_rejected() -> None:
+    mission = load_scenario(PILOT / "dogleg_healthy.yaml").mission  # (3, 0), then (3, -3)
+    assert mission is not None
+    planner = ScriptedNaive(mission)
+
+    def propose(*history: str) -> Action:
+        return asyncio.run(planner.propose(Observation("g", 0.0, 0.0, 1.5, 0, 90, history=history)))
+
+    first = propose()
+    assert first.args == {"north_m": 3.0, "east_m": 0.0}
+    done = agent.history_entry(
+        5.0, first, Verdict(True), "still under way after 1.5 s, 2.0 m from the target"
+    )
+    assert propose(done).args == first.args  # not rejected: keep going
+    rejected = agent.history_entry(9.0, first, Verdict(False, "enters keep-out 'x'"))
+    second = propose(done, rejected)
+    assert second.args == {"north_m": 3.0, "east_m": -3.0}
+    held = propose(
+        done, rejected, agent.history_entry(12.0, second, Verdict(False, "move of 9.0 m exceeds 8 m"))
+    )
+    assert held.name == "hold"
+
+
 def test_scripted_cautious_lands_on_bad_health_only_when_shown_it() -> None:
     mission = load_scenario(PILOT / "cross_healthy.yaml").mission
     assert mission is not None

@@ -7,7 +7,7 @@ from mavsdk_grpc.failure import FailureType, FailureUnit
 
 from lost_in_place import episode
 from lost_in_place.episode import failure_enums
-from lost_in_place.scenario import End, Inject, Scenario
+from lost_in_place.scenario import End, Inject, Scenario, SetParam
 
 
 @pytest.mark.parametrize(
@@ -179,6 +179,61 @@ def test_rejected_fault_ends_the_episode() -> None:
     with pytest.raises(episode.InjectFailed, match="optical_flow off: UNSUPPORTED"):
         asyncio.run(ep._apply(Drone(), Inject(at_s=20, unit="optical_flow", type="off")))  # type: ignore[arg-type]
     assert ep.result.events[-1]["ack"] == "UNSUPPORTED: 'Unsupported'"
+
+
+def test_a_flow_scale_fault_sets_the_scale_parameter() -> None:
+    import asyncio
+
+    ep = _episode_at_rest(None)
+    ep.connected.set()
+    calls: list[tuple[str, float]] = []
+
+    class Param:
+        async def set_param_float(self, name: str, value: float) -> None:
+            calls.append((name, value))
+
+    class Drone:
+        param = Param()
+
+    asyncio.run(ep._apply(Drone(), Inject(at_s=2, unit="optical_flow", type="scale", value=0.7)))  # type: ignore[arg-type]
+    assert calls == [("SENS_FLOW_SCALE", 0.7)]
+    assert ep.result.events[-1] | {"wall_s": 0} == {
+        "wall_s": 0,
+        "sim_s": 0.0,
+        "action": "inject",
+        "unit": "optical_flow",
+        "type": "scale",
+        "ack": "accepted",
+        "value": 0.7,
+    }
+
+
+def test_param_steps_set_int_parameters_as_ints() -> None:
+    import asyncio
+
+    ep = _episode_at_rest(None)
+    ep.connected.set()
+    calls: list[tuple[str, object]] = []
+
+    class Param:
+        async def set_param_int(self, name: str, value: int) -> None:
+            calls.append((name, value))
+
+        async def set_param_float(self, name: str, value: float) -> None:
+            calls.append((name, value))
+
+    class Drone:
+        param = Param()
+
+    for step in (
+        SetParam(at_s=0, name="EKF2_NOAID_TOUT", value=10_000_000, type="int"),
+        SetParam(at_s=0, name="COM_POS_FS_EPH", value=12.5),
+    ):
+        asyncio.run(ep._apply(Drone(), step))  # type: ignore[arg-type]
+    assert calls == [("EKF2_NOAID_TOUT", 10_000_000), ("COM_POS_FS_EPH", 12.5)]
+    assert all(type(v) is t for (_, v), t in zip(calls, (int, float), strict=True))
+    with pytest.raises(ValueError, match="int parameter"):
+        SetParam(at_s=0, name="EKF2_NOAID_TOUT", value=1.5, type="int")
 
 
 def test_provenance_is_recorded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

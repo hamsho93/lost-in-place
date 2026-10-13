@@ -45,6 +45,21 @@ def test_unimplemented_flow_faults_are_rejected(ftype: str) -> None:
         Inject(at_s=1, unit="optical_flow", type=ftype)  # type: ignore[arg-type]
 
 
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"unit": "optical_flow", "type": "scale"},
+        {"unit": "optical_flow", "type": "scale", "value": 0.4},
+        {"unit": "baro", "type": "scale", "value": 0.8},
+        {"unit": "optical_flow", "type": "off", "value": 0.8},
+    ],
+)
+def test_flow_scale_needs_a_value_in_range_and_nothing_else_takes_one(kwargs: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        Inject(at_s=1, **kwargs)  # type: ignore[arg-type]
+    assert Inject(at_s=1, unit="optical_flow", type="scale", value=0.7).value == 0.7
+
+
 def _mission_doc(**overrides: object) -> dict[str, object]:
     doc: dict[str, object] = {
         "id": "m",
@@ -87,8 +102,37 @@ def test_mission_scenario_loads_and_jitters_its_spawn_per_seed() -> None:
             "healthy",
         ),
         ({"state": "silent"}, "silent"),
+        ({"misalignment_deg": 20}, "healthy"),
+        (
+            {
+                "state": "loud",
+                "misalignment_deg": 20,
+                "steps": [
+                    {"kind": "inject", "at_s": 1, "unit": "optical_flow", "type": "off"},
+                    {"kind": "end", "at_s": 9},
+                ],
+            },
+            "misalignment is a silent fault",
+        ),
     ],
 )
 def test_mission_scenario_rejects_incomplete_items(overrides: dict[str, object], message: str) -> None:
     with pytest.raises(ValidationError, match=message):
         Scenario.model_validate(_mission_doc(**overrides))
+
+
+def test_misalignment_turns_the_actual_spawn_and_not_the_believed_one() -> None:
+    plain = Scenario.model_validate(_mission_doc())
+    misaligned = Scenario.model_validate(
+        _mission_doc(category="state_conditioned", state="silent", misalignment_deg=20)
+    )
+    actual = misaligned.spawn_for(3)
+    assert actual.yaw_deg == pytest.approx(plain.spawn_for(3).yaw_deg + 20)
+    assert (actual.x, actual.y) == (plain.spawn_for(3).x, plain.spawn_for(3).y)
+    assert misaligned.believed_spawn(actual) == plain.spawn_for(3)
+    assert plain.believed_spawn(plain.spawn_for(3)) == plain.spawn_for(3)
+
+
+def test_misalignment_needs_a_fixed_spawn() -> None:
+    with pytest.raises(ValidationError, match="fixed spawn"):
+        Scenario(id="s", world="w", misalignment_deg=10, steps=[End(at_s=1)])

@@ -47,12 +47,15 @@ class Goto(_Strict):
 
 
 FaultUnit = Literal["optical_flow", "distance_sensor", "gyro", "accel", "baro", "battery"]
-FaultType = Literal["ok", "off", "stuck", "garbage", "wrong"]
+FaultType = Literal["ok", "off", "stuck", "garbage", "wrong", "scale"]
 
 
-# px4/patches/0002 implements only these for optical flow; its "wrong" is quality 0, the same
-# loud fault as "off", not the silent scale error the experiment design calls "wrong".
-OPTICAL_FLOW_FAULTS = ("ok", "off", "stuck")
+# px4/patches/0002 implements only ok, off and stuck for optical flow; its "wrong" is quality 0,
+# the same loud fault as "off". The silent scale error the experiment design calls "wrong" is
+# "scale" here: PX4's SENS_FLOW_SCALE, set mid-flight, multiplies the flow at full quality.
+OPTICAL_FLOW_FAULTS = ("ok", "off", "stuck", "scale")
+FLOW_SCALE_PARAM = "SENS_FLOW_SCALE"
+FLOW_SCALE_RANGE = (0.5, 1.5)
 
 
 class Inject(_Strict):
@@ -60,11 +63,18 @@ class Inject(_Strict):
     at_s: float = Field(ge=0)
     unit: FaultUnit
     type: FaultType
+    value: float | None = Field(None, description="The flow scale factor k, for type 'scale' only")
 
     @model_validator(mode="after")
     def _implemented(self) -> Inject:
         if self.unit == "optical_flow" and self.type not in OPTICAL_FLOW_FAULTS:
             raise ValueError(f"optical_flow supports {', '.join(OPTICAL_FLOW_FAULTS)}, not {self.type!r}")
+        if self.type == "scale":
+            lo, hi = FLOW_SCALE_RANGE
+            if self.unit != "optical_flow" or self.value is None or not lo <= self.value <= hi:
+                raise ValueError(f"'scale' is an optical_flow fault with a value from {lo} to {hi}")
+        elif self.value is not None:
+            raise ValueError(f"only 'scale' takes a value, not {self.type!r}")
         return self
 
 
@@ -73,6 +83,13 @@ class SetParam(_Strict):
     at_s: float = Field(ge=0)
     name: str
     value: float
+    type: Literal["float", "int"] = Field("float", description="The PX4 parameter's type")
+
+    @model_validator(mode="after")
+    def _whole_if_int(self) -> SetParam:
+        if self.type == "int" and not float(self.value).is_integer():
+            raise ValueError(f"{self.name} is an int parameter, not {self.value}")
+        return self
 
 
 class End(_Strict):
@@ -127,6 +144,11 @@ class Scenario(_Strict):
     spawn: Spawn | None = Field(None, description="Fixed spawn; if omitted it is drawn from the seed")
     spawn_jitter_m: float = Field(0.0, ge=0, description="Per-seed uniform jitter of a fixed spawn")
     spawn_jitter_deg: float = Field(0.0, ge=0)
+    misalignment_deg: float = Field(
+        0.0,
+        description="Silent frame misalignment: the vehicle is placed this far from the nominal yaw,"
+        " which the validators and the instruction still assume",
+    )
     steps: list[Step]
     notes: str = ""
     spec_version: str = SPEC_VERSION
@@ -159,22 +181,38 @@ class Scenario(_Strict):
             raise ValueError(f"a mission scenario needs {', '.join(missing)}")
         if any(isinstance(s, Goto) for s in self.steps):
             raise ValueError("a mission scenario is flown by the planner, so it can't have 'goto' steps")
-        faults = [s for s in self.steps if isinstance(s, Inject) and s.type != "ok"]
+        faults = len([s for s in self.steps if isinstance(s, Inject) and s.type != "ok"])
+        faults += bool(self.misalignment_deg)
         if (self.state == "healthy") == bool(faults):
-            raise ValueError(f"state {self.state!r} doesn't match {len(faults)} fault step(s)")
+            raise ValueError(f"state {self.state!r} doesn't match {faults} fault(s)")
+        if self.misalignment_deg and self.state != "silent":
+            raise ValueError("frame misalignment is a silent fault")
+        return self
+
+    @model_validator(mode="after")
+    def _misaligned_from_a_known_spawn(self) -> Scenario:
+        if self.misalignment_deg and self.spawn is None:
+            raise ValueError("misalignment_deg needs a fixed spawn to be misaligned from")
         return self
 
     def spawn_for(self, seed: int) -> Spawn:
+        """Where the vehicle actually starts, misalignment included."""
         if self.spawn is None:
             return Spawn.from_seed(seed)
-        if not (self.spawn_jitter_m or self.spawn_jitter_deg):
+        if not (self.spawn_jitter_m or self.spawn_jitter_deg or self.misalignment_deg):
             return self.spawn
         rng = random.Random(seed)
         return Spawn(
             x=self.spawn.x + rng.uniform(-self.spawn_jitter_m, self.spawn_jitter_m),
             y=self.spawn.y + rng.uniform(-self.spawn_jitter_m, self.spawn_jitter_m),
-            yaw_deg=self.spawn.yaw_deg + rng.uniform(-self.spawn_jitter_deg, self.spawn_jitter_deg),
+            yaw_deg=self.spawn.yaw_deg
+            + rng.uniform(-self.spawn_jitter_deg, self.spawn_jitter_deg)
+            + self.misalignment_deg,
         )
+
+    def believed_spawn(self, actual: Spawn) -> Spawn:
+        """The spawn the instruction was written for: the actual one without the misalignment."""
+        return actual.model_copy(update={"yaw_deg": actual.yaw_deg - self.misalignment_deg})
 
 
 def load_scenario(path: str | Path) -> Scenario:

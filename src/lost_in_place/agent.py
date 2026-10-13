@@ -34,7 +34,15 @@ from mavsdk_grpc.telemetry import FlightMode
 
 from lost_in_place import geometry
 from lost_in_place.episode import TAKEOFF_CHECK_SIM_S, EpisodeResult, _Episode
-from lost_in_place.planning import Action, EstimatorHealth, Observation, Planner, Verdict, load_planner
+from lost_in_place.planning import (
+    REJECTED,
+    Action,
+    EstimatorHealth,
+    Observation,
+    Planner,
+    Verdict,
+    load_planner,
+)
 from lost_in_place.scenario import End, Inject, Mission, Scenario, SetParam
 from lost_in_place.sim import SimInstance
 from lost_in_place.validators import HazardMap, Truth, hazard_in_truth, make_validator
@@ -170,7 +178,7 @@ def history_entry(sim_s: float, action: Action, verdict: Verdict, status: str = 
     cut off by the epoch must not read as done, or a planner that trusts its history stops short."""
     args = ", ".join(f"{k} {v:.2f}" if isinstance(v, float) else f"{k} {v}" for k, v in action.args.items())
     head = f"t={sim_s:.0f}s {action.name}" + (f" ({args})" if args else "")
-    return head + (f" - {status}" if verdict.ok else f" - rejected: {verdict.reason}")
+    return head + (f" - {status}" if verdict.ok else f"{REJECTED}{verdict.reason}")
 
 
 class AgentEpisode(_Episode):
