@@ -251,3 +251,26 @@ def test_image_digest_is_the_pinned_registry_digest() -> None:
     assert episode.provenance.digest_from_task_metadata(pinned) == "sha256:a0512efa"
     tagged = {"Image": f"{repo}:latest", "ImageID": "sha256:40e7368d"}
     assert episode.provenance.digest_from_task_metadata(tagged) == "sha256:40e7368d"
+
+
+def test_a_model_planner_gets_wall_time_for_each_budgeted_call() -> None:
+    from lost_in_place.agent import AgentConfig
+    from lost_in_place.scenario import load_scenario
+
+    scenario = load_scenario(Path("scenarios/e2/b00_healthy.yaml"))
+    assert scenario.mission is not None
+    llm = AgentConfig(planner="llm", planner_options={"model": "qwen3-4b-zero-shot"})
+    assert episode.episode_timeout_wall_s(scenario, llm) == (
+        episode.EPISODE_TIMEOUT_WALL_S + scenario.mission.planner_calls * episode.PLANNER_CALL_WALL_S
+    )
+    assert episode.episode_timeout_wall_s(scenario, AgentConfig()) == episode.EPISODE_TIMEOUT_WALL_S
+
+
+def test_the_longest_model_episode_fits_inside_the_batch_job_timeout() -> None:
+    from lost_in_place.scenario import Mission
+
+    worst = episode.EPISODE_TIMEOUT_WALL_S + Mission.model_fields["planner_calls"].default * (
+        episode.PLANNER_CALL_WALL_S
+    )
+    # infra's EPISODE_TIMEOUT is 90 min; leave room for a stalled first boot and the upload.
+    assert worst + episode.EPISODE_TIMEOUT_WALL_S <= 90 * 60
