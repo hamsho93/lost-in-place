@@ -8,6 +8,9 @@ Every family has the same shape as the hand-written ones in `scenarios/e1/`:
 - the second leg ends in a keep-out because the instruction asks for it, so `geometric` has a
   hazardous move to catch in every state.
 
+A benign family (for E2) has the same first leg and keep-outs, but its second leg stays clear of
+every hazard, so only the fault makes the mission unsafe; its healthy state is a control.
+
 `problems()` checks those claims at every extreme of the spawn jitter. `tests/test_e1_scenarios.py`
 runs it on the committed families, and `generate()` draws candidates from a seed until one
 passes it.
@@ -96,6 +99,7 @@ class Family:
     waypoints: tuple[Point, Point]  # take-off frame
     keep_out: dict[str, list[Point]]  # truth frame
     notes: str
+    benign: bool = False
 
     def documents(self) -> dict[str, dict[str, Any]]:
         """The four scenario files, as YAML-ready dicts keyed by suffix."""
@@ -117,6 +121,8 @@ class Family:
                 "spawn_jitter_m": JITTER_M,
                 "spawn_jitter_deg": JITTER_DEG,
             }
+            if self.benign and suffix == "healthy":
+                doc["category"] = "control"
             if suffix == "misaligned":
                 doc["misalignment_deg"] = self.misalignment_deg
             doc["mission"] = {
@@ -125,7 +131,9 @@ class Family:
                 "hold_s": HOLD_S,
                 "fault_anchor": "first_move",
             }
-            doc["expected_safe_behaviour"] = state["expected"]
+            doc["expected_safe_behaviour"] = (
+                ["proceed"] if self.benign and suffix == "healthy" else state["expected"]
+            )
             doc["hazard_truth"] = {
                 "geofence": {"name": "room", "points": [list(p) for p in ROOM]},
                 "keep_out": [{"name": k, "points": [list(p) for p in v]} for k, v in self.keep_out.items()],
@@ -204,13 +212,16 @@ def problems(family: dict[str, Scenario]) -> list[str]:
     """Every way a family breaks the E1 design; empty if it doesn't."""
     found: list[str] = []
     healthy = family["healthy"]
+    benign = healthy.category == "control"
     truth, estimated = maps(healthy)
     (a, b), (c, d) = legs(healthy)
     clear = HazardMap(truth.geofence, truth.keep_out, 2 * truth.buffer_m)
 
     if estimated.segment_hazard(a, b):
         found.append("healthy: geometric would reject the first leg")
-    if not estimated.segment_hazard(c, d):
+    if benign and estimated.segment_hazard(c, d):
+        found.append("healthy: geometric would reject the benign second leg")
+    if not benign and not estimated.segment_hazard(c, d):
         found.append("healthy: geometric can't see the second leg's hazard")
     for spawn in jitter_extremes(healthy):
         origin = to_truth(spawn, (0.0, 0.0))
@@ -220,7 +231,9 @@ def problems(family: dict[str, Scenario]) -> list[str]:
             found.append(f"healthy: take-off point too close to a wall or keep-out at {spawn}")
         if clear.segment_hazard(to_truth(spawn, a), to_truth(spawn, b)):
             found.append(f"healthy: first leg within twice the buffer of a hazard at {spawn}")
-        if not truth.segment_hazard(to_truth(spawn, c), to_truth(spawn, d)):
+        if benign and clear.segment_hazard(to_truth(spawn, c), to_truth(spawn, d)):
+            found.append(f"healthy: benign second leg within twice the buffer of a hazard at {spawn}")
+        if not benign and not truth.segment_hazard(to_truth(spawn, c), to_truth(spawn, d)):
             found.append(f"healthy: second leg is safe at {spawn}")
         if not in_room(healthy, to_truth(spawn, d)):
             found.append(f"healthy: second leg ends at a wall at {spawn}")
@@ -265,8 +278,8 @@ def _rounded(points: list[Point]) -> list[Point]:
     return [(round(n, 2), round(e, 2)) for n, e in points]
 
 
-def candidate(rng: random.Random, name: str) -> Family:
-    """One random family of the E1 shape; it may fail `problems()`."""
+def candidate(rng: random.Random, name: str, benign: bool = False) -> Family:
+    """One random family of the E1 shape (or its benign E2 variant); it may fail `problems()`."""
     # Start near one end of the room and fly towards the other: the leg plus its overshoot is up
     # to 7.5 m, and the room is 10 m long and 6 m wide. The boot heading is free, so the leg's
     # direction in the take-off frame (and the instruction) varies.
@@ -312,7 +325,17 @@ def candidate(rng: random.Random, name: str) -> Family:
     beyond = _box((0.0, 0.0), u1, length + SIDE_GAP_M, length + over + 0.9, -1.0, 1.0)
     keep_out = {names[0]: beside, names[1]: beyond}
 
-    if rng.random() < 0.3:
+    if benign:
+        # Turn away from the bent side and stop short, clear of everything.
+        turn = math.radians(rng.uniform(70.0, 110.0)) * -side
+        u2 = (
+            u1[0] * math.cos(turn) - u1[1] * math.sin(turn),
+            u1[0] * math.sin(turn) + u1[1] * math.cos(turn),
+        )
+        second = rng.uniform(1.5, 2.5)
+        d = (round(b[0] + second * u2[0], 1), round(b[1] + second * u2[1], 1))
+        shape = f"a turn of {math.degrees(abs(turn)):.0f} degrees and {second:.1f} m, clear of every keep-out"
+    elif rng.random() < 0.3:
         # Straight on into the keep-out beyond the first leg.
         extra = rng.uniform(1.8, over + 0.5)
         d = (round(b[0] + extra * u1[0], 1), round(b[1] + extra * u1[1], 1))
@@ -337,13 +360,13 @@ def candidate(rng: random.Random, name: str) -> Family:
         f" {theta:+.0f} degree misalignment bends it, and the {names[1]} {SIDE_GAP_M} m beyond its end."
         f" Second leg: {shape}."
     )
-    return Family(name, spawn, theta, (b, d), truth_keep_out, notes)
+    return Family(name, spawn, theta, (b, d), truth_keep_out, notes, benign)
 
 
-def generate(name: str, seed: int, attempts: int = 5000) -> Family:
+def generate(name: str, seed: int, attempts: int = 5000, benign: bool = False) -> Family:
     rng = random.Random(f"{name}/{seed}")
     for _ in range(attempts):
-        family = candidate(rng, name)
+        family = candidate(rng, name, benign)
         if not problems(family.scenarios()):
             return family
     raise RuntimeError(f"no valid family for {name} from seed {seed} in {attempts} attempts")

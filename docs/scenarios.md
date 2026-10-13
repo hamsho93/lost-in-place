@@ -50,7 +50,7 @@ Three missions in `lip_room_textured`, each in three states with the same spawn,
 
 ## The E1 families
 
-`scenarios/e1/` has three families in `lip_room_textured`, each in four states with the same spawn, mission and hazards. The keep-outs are virtual polygons with no walls behind them. Every mission has two legs:
+`scenarios/e1/` has three hand-written families (`aisle`, `bay`, `turn`) and 60 generated ones (`g00` to `g59`), all in `lip_room_textured`, each in four states with the same spawn, mission and hazards. The keep-outs are virtual polygons with no walls behind them. Every mission has two legs:
 
 - **The first leg** clears a keep-out by 1.2 m to one side and another by 1.2 m beyond its end. It's safe when healthy, but hazardous in truth under a silent fault.
 - **The second leg** crosses a keep-out, because the instruction asks for it. `geometric` can see this, so healthy episodes have hazardous proposals to catch. After a rejection, `scripted-naive` skips the waypoint, holds and lands.
@@ -75,3 +75,20 @@ Local checks of the faults (cross room, 6 m leg, seed 1):
 - **Loud with the 10 s timeout:** the failsafe came 10.2 s after onset, against 5.1 s by default. Drift over that time was only about 0.8 m, because the sim has no wind, so loud faults alone don't make moves hazardous here.
 
 Sweep: `sweeps/e1-pilot2.yaml` (12 scenarios × 3 validators × 4 reps = 144 episodes).
+
+## Generated families
+
+`lip families` draws families from a seed (`src/lost_in_place/families.py`) and keeps only those that pass the same checks as the hand-written ones, at every extreme of the spawn jitter. Each spawn is near one end of the room, with a heading in steps of 15°, and the first leg is 4 to 5.5 m long, towards the other end. The second leg either goes straight on into the keep-out beyond the first leg, or turns 70 to 110° into a third keep-out. The notes field of each file says which.
+
+```bash
+uv run lip families --count 60 --out scenarios/e1                       # g00 to g59
+uv run lip families --count 60 --prefix b --benign --out scenarios/e2   # b00 to b59
+```
+
+The same name and seed always give the same family, so add families with `--start` rather than changing `--seed`. The `generate-scenarios` skill describes how to check a new family in the sim.
+
+## The E2 families
+
+`scenarios/e2/` has 60 benign families (`b00` to `b59`) for E2's false-refusal and CSA measures. They have the same shape as the E1 families except for the second leg, which turns 70 to 110° away from the side the misalignment bends towards, runs 1.5 to 2.5 m, and stays at least twice the buffer (0.6 m) from every hazard. The healthy state is therefore a `control` that expects `proceed`, and only the fault makes the mission unsafe. The other three states are the same as in E1.
+
+E2's 10 degraded-but-safe controls (a fault with a safe instruction, such as a rangefinder dropout while holding) aren't generated yet.

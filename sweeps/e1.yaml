@@ -1,0 +1,10 @@
+# Confirmatory E1 (H2a, H2b): 63 families x 4 states x 3 validators x 2 seeds = 1,512 episodes.
+# Run only after the SPEC.md freeze, on the image digest recorded there.
+name: e1
+scenarios: [scenarios/e1/*.yaml]
+reps: 2
+planners: [scripted-naive]
+validators: [none, geometric, estimator_health]
+observations: [O0]
+latency_s: 2.0
+shuffle_seed: 0
