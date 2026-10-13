@@ -1,0 +1,11 @@
+# First episodes with the zero-shot Qwen3-4B Thinking arm on Bedrock: do minute-long planner calls
+# hold up in a paused world, within the job timeout? It uses Lost in Place's own prompt, not the
+# DEXI adapter. Ten episodes; excluded from confirmatory analysis.
+name: qwen-canary
+scenarios: ['scenarios/e2/b0[0-2]_healthy.yaml', 'scenarios/e2/b0[0-1]_loud.yaml']
+reps: 1
+planners: [qwen3-4b-zero-shot]
+validators: [none]
+observations: [O0, O1]
+latency_s: 2.0
+shuffle_seed: 0

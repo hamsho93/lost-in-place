@@ -722,6 +722,7 @@ plot = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "jinja2" },
     { name = "mypy" },
     { name = "pytest" },
     { name = "ruff" },
@@ -744,6 +745,7 @@ provides-extras = ["aws", "plot"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "jinja2", specifier = ">=3.1" },
     { name = "mypy", specifier = ">=1.10" },
     { name = "pytest", specifier = ">=8" },
     { name = "ruff", specifier = ">=0.5" },

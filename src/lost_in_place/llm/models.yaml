@@ -27,3 +27,17 @@ qwen3-4b-zero-shot:
     768f209d9ea81521153ed38c47d515654e938aea, bf16, imported with Bedrock Custom Model Import
     (infra/README.md). The same build as DEXI's C0 arm 2 (Ollama qwen3:4b), whose reasoning can't be
     turned off; the 8192-token cap and temperature 0 match C0.
+
+qwen3-4b-student:
+  provider: bedrock_imported
+  model_id: lip-qwen3-4b-c1-c6bc0a6
+  chat_template: qwen3-instruct-2507
+  max_tokens: 8192
+  temperature: 0
+  notes: >-
+    Student arm of E2, added 2026-10-13: DEXI's C1 student (Qwen3-4B-Instruct-2507 with LoRA SFT v1,
+    fused, bf16), the model of DEXI's arm 3. Weights are private. The import uses the student's
+    weights and config with the tokenizer files of Qwen/Qwen3-4B-Instruct-2507 at revision
+    cdbee75f17c01a7cc42f958dc650907174af0554: they encode identically, but the student's own
+    tokenizer.json marks <tool_call> as a special token, which a server may strip from replies.
+    c6bc0a6 is the start of the first weight shard's CRC64NVME checksum in S3.

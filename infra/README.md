@@ -98,6 +98,8 @@ done
 aws s3 cp --recursive . "s3://$bucket/$P/"
 ```
 
+The student arm's weights are private: they're staged under `models/qwen3-4b-c1/bedrock-c6bc0a6/`. That directory holds the fused model's `config.json`, `generation_config.json` and safetensors, plus `tokenizer.json`, `tokenizer_config.json`, `vocab.json` and `merges.txt` from `Qwen/Qwen3-4B-Instruct-2507` at the revision in `models.yaml`. The base tokenizer encodes every prompt identically to the student's own. But the student's `tokenizer.json`, as MLX saved it, marks `<tool_call>` as a special token, so a server that skips special tokens would strip the tool call from every reply.
+
 **Before a sweep** that flies an imported arm, import it under the name its `model_id` gives in `models.yaml`. This takes about 11 minutes and costs nothing:
 
 ```bash
@@ -111,11 +113,11 @@ aws bedrock get-imported-model --model-identifier lip-qwen3-4b-thinking-2507-768
 uv run lip propose qwen3-4b-zero-shot                     # one real call; the first waits ~1.5 min for a copy
 ```
 
-The tag is meant to put the model's spend under the project budget. That hasn't been checked yet: look in Cost Explorer after the first sweep. The budget stop blocks calls to imported models either way.
+The tag is the only way to put an imported model's spend under the project budget: application inference profiles, which the stack uses for foundation models, can only copy a foundation model or a system profile. Whether Bedrock carries the model's tag onto its Custom Model Unit charges isn't documented, so check Cost Explorer, filtered by `project=lost-in-place`, the day after the first canary. If the charges aren't there, the budget can't see this spend: keep `budgetUsd` as is, and watch the sweep with `accountAlarmUsd` instead. The budget stop blocks calls to imported models either way, once it fires.
 
 **After the sweep:** `aws bedrock delete-imported-model --model-identifier lip-qwen3-4b-thinking-2507-768f209`.
 
-The smoke test of Oct 13, 2026 ran DEXI's C0 missions through this path: 8 of 20 seen missions passed, against arm 2's 38% on Ollama. With 16 missions in flight, a single copy kept each call above 100 tokens/s, about 1,100 tokens/s in total.
+The smoke test of Oct 13, 2026 ran DEXI's C0 missions through this path: 8 of 20 seen missions passed, against arm 2's 38% on Ollama. With 16 missions in flight, a single copy kept each call above 100 tokens/s, about 1,100 tokens/s in total. The student (`qwen3-4b-student`, also 2 CMUs) then flew all 100 of DEXI's frozen missions in under 4 minutes, with a median call of 0.35 s once warm. It passed 35 of 50 seen and 28 of 50 unseen missions, against arm 3's 35 and 27 on `mlx_lm.server`, with the same per-template counts except one more unseen coverage pass.
 
 ## Settings
 
