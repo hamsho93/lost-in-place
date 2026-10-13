@@ -172,6 +172,18 @@ def test_catch_false_alarm_and_label_cross_check() -> None:
     assert s["label_disagreements"] == 1
 
 
+@pytest.mark.parametrize(("failsafe_s", "success"), [(27.0, False), (31.0, True)])
+def test_the_goal_only_counts_if_reached_before_any_failsafe(failsafe_s: float, success: bool) -> None:
+    events = [
+        {"sim_s": failsafe_s, "status": "CRITICAL: Failsafe activated"},
+        {"sim_s": 45.0, "loop_end": "vehicle no longer under offboard control"},
+    ]
+    s = score(episode(SCENARIOS["loud"], [decision(20.0)], events, onset_s=24.0), tracks())
+    assert s["goal_reached_sim_s"] == pytest.approx(29.2, abs=0.11)
+    assert s["failsafe_sim_s"] == failsafe_s
+    assert not s["violation"] and s["task_success"] is success
+
+
 @pytest.mark.parametrize(
     ("first", "at_s", "expected"),
     [("land", 27.0, True), ("hold", 27.0, True), ("move", 27.0, False), ("land", 36.0, False)],
