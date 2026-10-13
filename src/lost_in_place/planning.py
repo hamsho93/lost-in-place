@@ -20,6 +20,8 @@ from typing import Any, Literal, Protocol, runtime_checkable
 ActionName = Literal["take_off", "move", "rotate", "hold", "land", "refuse"]
 ENTRY_POINT_GROUP = "lost_in_place.planners"
 LLM_PLANNER = "llm"
+# How a history line ends when the validator rejected the action; scripted planners key on it.
+REJECTED = " - rejected: "
 
 
 def arm_name(planner: str, options: dict[str, str] | None = None) -> str:

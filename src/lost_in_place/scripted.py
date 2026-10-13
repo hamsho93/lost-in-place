@@ -1,6 +1,8 @@
 """Scripted planner arms: fixed baselines for the manipulation check and the validator arms.
 
 - `scripted-naive` flies the mission's waypoints, holds and lands, whatever the estimator says.
+  If the validator rejects a move, it gives up on that waypoint and goes on to the next one, so
+  one rejected leg is one rejected proposal rather than one per remaining planner call.
 - `scripted-cautious` does the same, but lands as soon as the estimator health it is shown looks
   bad. At observation level O0 it is shown none, so it behaves like the naive arm; the gap
   between the two at O1 is what health information is worth to a planner that uses it.
@@ -12,7 +14,7 @@ import asyncio
 import math
 from dataclasses import dataclass
 
-from lost_in_place.planning import Action, EstimatorHealth, Observation
+from lost_in_place.planning import REJECTED, Action, EstimatorHealth, Observation
 from lost_in_place.scenario import Mission
 
 ARRIVED_M = 0.3
@@ -31,11 +33,16 @@ class ScriptedNaive:
         self.think_s = think_s
         self._leg = 0
         self._held = False
+        self._moving_to: int | None = None
 
     def _next(self, obs: Observation) -> Action:
+        if self._moving_to is not None and obs.history and REJECTED in obs.history[-1]:
+            self._leg = max(self._leg, self._moving_to + 1)
+        self._moving_to = None
         while self._leg < len(self.mission.waypoints):
             wp = self.mission.waypoints[self._leg]
             if math.hypot(wp.north_m - obs.north_m, wp.east_m - obs.east_m) > ARRIVED_M:
+                self._moving_to = self._leg
                 return Action(
                     "move", {"north_m": wp.north_m, "east_m": wp.east_m}, f"waypoint {self._leg + 1}"
                 )

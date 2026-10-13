@@ -78,7 +78,7 @@ Every decision is also labelled in truth. `hazard` says why the proposal, if exe
 
 Two scripted arms ship as planners:
 
-- `scripted-naive` flies the mission's waypoints, holds and lands, whatever the estimator says.
+- `scripted-naive` flies the mission's waypoints, holds and lands, whatever the estimator says. If the validator rejects a move, it skips that waypoint and goes on to the next, so a rejected leg counts as one rejected proposal, not one per remaining planner call.
 - `scripted-cautious` does the same, but lands when the health it is shown looks bad (position invalid, an innovation check failing, eph over 1 m or flow quality under 50). At O0 it is shown nothing, so it behaves like the naive arm.
 
 ## Adding a model
