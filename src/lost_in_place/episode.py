@@ -44,6 +44,10 @@ LOCAL_POSITION_TIMEOUT_WALL_S = 120.0
 ARM_TIMEOUT_WALL_S = 90.0
 LAND_TIMEOUT_WALL_S = 90.0
 EPISODE_TIMEOUT_WALL_S = 900.0
+# Added per budgeted planner call for model planners: a thinking model averaged about 21 s a call
+# and up to 47 s on Bedrock, and a call that hits its 8,192-token cap takes about 75 s. The
+# 40-call default gives 3,900 s, inside the Batch job timeout (infra: EPISODE_TIMEOUT, 90 min).
+PLANNER_CALL_WALL_S = 75.0
 MAX_BOOT_ATTEMPTS = 3
 # Good runs are 0.4 m or more above the floor this long after arming; every scenario's first
 # fault comes later, so a stuck vehicle is caught before it can be mistaken for a fault response.
@@ -340,6 +344,14 @@ def _mavsdk_server_log(path: Path) -> Iterator[None]:
         handler.close()
 
 
+def episode_timeout_wall_s(scenario: Scenario, agent: AgentConfig | None) -> float:
+    """The wall-clock limit for one boot of an episode. The world is paused while a model decides,
+    so planner time is wall time the scenario's own timing doesn't account for."""
+    if scenario.mission is None or agent is None or agent.planner.startswith("scripted-"):
+        return EPISODE_TIMEOUT_WALL_S
+    return EPISODE_TIMEOUT_WALL_S + scenario.mission.planner_calls * PLANNER_CALL_WALL_S
+
+
 def run_episode(
     scenario: Scenario,
     seed: int,
@@ -378,6 +390,7 @@ def run_episode(
         scenario=scenario.model_dump(mode="json"),
     )
     sim = SimInstance(paths=paths, world=scenario.world, spawn=spawn, params=params, instance=instance)
+    timeout_s = episode_timeout_wall_s(scenario, agent)
 
     with _mavsdk_server_log(out_dir / "mavsdk_server.txt"):
         for attempt in range(1, MAX_BOOT_ATTEMPTS + 1):
@@ -396,7 +409,7 @@ def run_episode(
             )
             sim.start(out_dir / "px4_console.txt")
             try:
-                result.outcome = asyncio.run(asyncio.wait_for(episode.run(), EPISODE_TIMEOUT_WALL_S))
+                result.outcome = asyncio.run(asyncio.wait_for(episode.run(), timeout_s))
             except BootStall:
                 result.outcome = "boot_stall"
             except StuckOnGround as exc:
