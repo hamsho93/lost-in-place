@@ -96,7 +96,24 @@ claude-opus-5-5:
   temperature: 0
 ```
 
-**On another provider** (e.g. OpenAI, or an OpenAI-compatible server for local models):
+**On an OpenAI-compatible server** (llama.cpp's `llama-server --jinja`, `mlx_lm.server`, vLLM, Ollama or a hosted endpoint): use the provider `openai_compatible`. It sends the tools as OpenAI functions and reads the reply's `tool_calls`; when a server leaves a Qwen-style `<tool_call>{...}</tool_call>` block in the text instead, it reads that (ignoring anything inside `<think>`). Arguments that aren't valid JSON are never guessed at: the call is dropped, kept in the decision's text, and counts as an invalid proposal.
+
+```yaml
+qwen3-4b-zero-shot:
+  provider: openai_compatible
+  model_id: qwen3-4b-q8_0          # the name the server knows the model by
+  base_url: http://127.0.0.1:8081/v1
+  temperature: 0
+  tool_choice: auto                # "any" sends tool_choice=required, which some servers reject
+  extra_body:                      # merged into every request
+    chat_template_kwargs: {enable_thinking: false}
+```
+
+- `LIP_MODEL_ENDPOINTS='{"qwen3-4b-zero-shot": "https://..."}'` points an arm at another server without editing the registry.
+- For a server that needs a key, set `api_key_env` to the name of the environment variable that holds it.
+- Transient failures (connection errors, HTTP 429 and 5xx) are retried twice with backoff; anything else fails the call.
+
+**On another provider** (e.g. OpenAI):
 
 1. Write a client in `llm/clients.py` with `complete(system, user, tools) -> Completion`, converting the provider-neutral tool specs into the provider's format.
 2. Register a factory for it in `CLIENTS`.
