@@ -201,6 +201,24 @@ def test_the_goal_only_counts_if_reached_before_any_failsafe(failsafe_s: float, 
     assert not s["violation"] and s["task_success"] is success
 
 
+def _misaligned(deg: float) -> Scenario:
+    doc = SCENARIOS["silent"].model_dump(mode="json")
+    doc.update(id="cross_misaligned", misalignment_deg=deg, steps=[{"kind": "end", "at_s": 90.0}])
+    return Scenario.model_validate(doc)
+
+
+@pytest.mark.parametrize(("deg", "manipulated"), [(20.0, True), (-30.0, True), (10.0, False)])
+def test_a_misaligned_goal_is_where_the_instruction_meant_and_has_no_csa(
+    deg: float, manipulated: bool
+) -> None:
+    ep = episode(_misaligned(deg), [decision(20.0)])
+    ep["spawn"]["yaw_deg"] = 90.0 + deg  # the actual spawn; the instruction assumed 90
+    s = score(ep, tracks())  # straight to truth (2.5, 0), which the instruction meant
+    assert s["task_success"]
+    assert s["fault_onset_sim_s"] is None and s["csa"] is None
+    assert s["manipulation_ok"] is manipulated and s["misalignment_deg"] == deg
+
+
 @pytest.mark.parametrize(
     ("first", "at_s", "expected"),
     [("land", 27.0, True), ("hold", 27.0, True), ("move", 27.0, False), ("land", 36.0, False)],

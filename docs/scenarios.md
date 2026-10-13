@@ -18,9 +18,10 @@ A scenario is a YAML file validated by `src/lost_in_place/scenario.py`. There ar
 | --- | --- |
 | `spec_version` | `"0.1"` |
 | `category` | `state_conditioned`, `control`, `degraded_safe` or `instruction_hazard` |
-| `state` | `healthy`, `loud`, `silent` or `degraded_safe`. Must agree with the fault steps: healthy has none |
+| `state` | `healthy`, `loud`, `silent` or `degraded_safe`. Must agree with the faults: healthy has no fault steps and no misalignment |
 | `pair_id` | Links a scenario with its matched controls: same room, spawn, mission and hazards, different state |
 | `spawn`, `spawn_jitter_m`, `spawn_jitter_deg` | Nominal Gazebo spawn, jittered per seed. Validators only know the nominal spawn |
+| `misalignment_deg` | Silent frame misalignment: the vehicle starts this far from the nominal yaw, which the instruction and the validators still assume. With no compass, north is the nose at boot, so every waypoint is turned by this angle in truth (a point 6 m from take-off moves 2.1 m at 20°). Needs `state: silent` |
 | `mission.instruction` | The text the planner gets |
 | `mission.waypoints` | The instruction's targets in the take-off frame. Scripted planners fly these. Task success is judged against them |
 | `mission.hold_s` | Hold at the last waypoint before landing |

@@ -127,6 +127,11 @@ class Scenario(_Strict):
     spawn: Spawn | None = Field(None, description="Fixed spawn; if omitted it is drawn from the seed")
     spawn_jitter_m: float = Field(0.0, ge=0, description="Per-seed uniform jitter of a fixed spawn")
     spawn_jitter_deg: float = Field(0.0, ge=0)
+    misalignment_deg: float = Field(
+        0.0,
+        description="Silent frame misalignment: the vehicle is placed this far from the nominal yaw,"
+        " which the validators and the instruction still assume",
+    )
     steps: list[Step]
     notes: str = ""
     spec_version: str = SPEC_VERSION
@@ -159,22 +164,38 @@ class Scenario(_Strict):
             raise ValueError(f"a mission scenario needs {', '.join(missing)}")
         if any(isinstance(s, Goto) for s in self.steps):
             raise ValueError("a mission scenario is flown by the planner, so it can't have 'goto' steps")
-        faults = [s for s in self.steps if isinstance(s, Inject) and s.type != "ok"]
+        faults = len([s for s in self.steps if isinstance(s, Inject) and s.type != "ok"])
+        faults += bool(self.misalignment_deg)
         if (self.state == "healthy") == bool(faults):
-            raise ValueError(f"state {self.state!r} doesn't match {len(faults)} fault step(s)")
+            raise ValueError(f"state {self.state!r} doesn't match {faults} fault(s)")
+        if self.misalignment_deg and self.state != "silent":
+            raise ValueError("frame misalignment is a silent fault")
+        return self
+
+    @model_validator(mode="after")
+    def _misaligned_from_a_known_spawn(self) -> Scenario:
+        if self.misalignment_deg and self.spawn is None:
+            raise ValueError("misalignment_deg needs a fixed spawn to be misaligned from")
         return self
 
     def spawn_for(self, seed: int) -> Spawn:
+        """Where the vehicle actually starts, misalignment included."""
         if self.spawn is None:
             return Spawn.from_seed(seed)
-        if not (self.spawn_jitter_m or self.spawn_jitter_deg):
+        if not (self.spawn_jitter_m or self.spawn_jitter_deg or self.misalignment_deg):
             return self.spawn
         rng = random.Random(seed)
         return Spawn(
             x=self.spawn.x + rng.uniform(-self.spawn_jitter_m, self.spawn_jitter_m),
             y=self.spawn.y + rng.uniform(-self.spawn_jitter_m, self.spawn_jitter_m),
-            yaw_deg=self.spawn.yaw_deg + rng.uniform(-self.spawn_jitter_deg, self.spawn_jitter_deg),
+            yaw_deg=self.spawn.yaw_deg
+            + rng.uniform(-self.spawn_jitter_deg, self.spawn_jitter_deg)
+            + self.misalignment_deg,
         )
+
+    def believed_spawn(self, actual: Spawn) -> Spawn:
+        """The spawn the instruction was written for: the actual one without the misalignment."""
+        return actual.model_copy(update={"yaw_deg": actual.yaw_deg - self.misalignment_deg})
 
 
 def load_scenario(path: str | Path) -> Scenario:
