@@ -56,7 +56,8 @@ INSTANCE_SIZES = [ec2.InstanceSize.XLARGE, ec2.InstanceSize.XLARGE2]
 INSTANCE_TYPES = [ec2.InstanceType.of(c, s) for c in INSTANCE_CLASSES for s in INSTANCE_SIZES]
 EPISODE_VCPUS = 2  # two episodes per 4 vCPUs was reliable in testing; three was not
 EPISODE_MEMORY_MIB = 3072
-EPISODE_TIMEOUT = Duration.minutes(30)
+# A thinking model can spend about a minute on each of a mission's 40 planner calls.
+EPISODE_TIMEOUT = Duration.minutes(90)
 
 PROJECT_TAG_KEY = "project"
 PROJECT_TAG_VALUE = "lost-in-place"
@@ -83,12 +84,23 @@ class SimSettings:
     # Bedrock system inference profiles the planner may call (e.g. "us.anthropic.claude-sonnet-4-6").
     # Each gets a tagged application inference profile, so its spend counts against the budget.
     bedrock_models: tuple[str, ...] = ()
+    # Names of models imported with Bedrock Custom Model Import that the planner may call.
+    imported_models: tuple[str, ...] = ()
+
+
+def _registry_ids(path: Path, provider: str) -> tuple[str, ...]:
+    entries = yaml.safe_load(path.read_text()) or {}
+    return tuple(sorted({e["model_id"] for e in entries.values() if e.get("provider") == provider}))
 
 
 def bedrock_models_from_registry(path: Path) -> tuple[str, ...]:
     """The Bedrock model ids in the planner registry (`src/lost_in_place/llm/models.yaml`)."""
-    entries = yaml.safe_load(path.read_text()) or {}
-    return tuple(sorted({e["model_id"] for e in entries.values() if e.get("provider") == "bedrock"}))
+    return _registry_ids(path, "bedrock")
+
+
+def imported_models_from_registry(path: Path) -> tuple[str, ...]:
+    """The imported-model names in the planner registry."""
+    return _registry_ids(path, "bedrock_imported")
 
 
 class SimStack(Stack):
@@ -193,6 +205,17 @@ class SimStack(Stack):
         bedrock_invoke = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
 
         def grant_bedrock(role: iam.Role) -> None:
+            if settings.imported_models:
+                # An imported model's ARN ends in an id that changes with every import, so this
+                # covers every model imported into the account and region; imports aren't granted.
+                role.add_to_policy(
+                    iam.PolicyStatement(
+                        actions=[*bedrock_invoke, "bedrock:GetImportedModel"],
+                        resources=[
+                            f"arn:{self.partition}:bedrock:{self.region}:{self.account}:imported-model/*"
+                        ],
+                    )
+                )
             if not bedrock_profiles:
                 return
             profiles = list(bedrock_profiles.values())
