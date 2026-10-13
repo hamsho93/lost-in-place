@@ -38,6 +38,7 @@ def mirror(runs: str, manifest_path: str, out: Path, rescore: bool) -> None:
     from lost_in_place.storage import list_files, parse_s3_uri
 
     keys = _keys(manifest_path)
+    runs = manifest.runs_root(runs, manifest.read_document(manifest_path))
     _, prefix = parse_s3_uri(runs)
     s3 = boto3.client("s3")
     by_key: dict[str, list[report.Attempt]] = defaultdict(list)

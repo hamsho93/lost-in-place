@@ -22,7 +22,7 @@ The first section gives outcomes per image (git SHA). Check whether failures clu
 
 ## 2. Read one failing attempt
 
-Each attempt uploads to `runs/<key>/<job id>-<index>-attempt<n>/`:
+Each attempt uploads to `runs/<sweep name>/<key>/<job id>-<index>-attempt<n>/` (the pilots' attempts are under `runs/<key>/`):
 
 | File | Look for |
 |---|---|
