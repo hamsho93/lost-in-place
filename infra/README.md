@@ -10,6 +10,7 @@ One stack, `LostInPlaceSim`, in us-east-1. It contains:
   - a budget action that, at 100%, blocks job submission and planner model calls from the operator and job roles;
   - optionally, a CloudWatch alarm on the whole account's estimated charges (`accountAlarmUsd`). It is off by default, because billing metrics can't be filtered by tag.
 - **Bedrock planner models.** For each Bedrock model in [`src/lost_in_place/llm/models.yaml`](../src/lost_in_place/llm/models.yaml), an application inference profile tagged `project=lost-in-place`, so model spend counts against the budget. Jobs get the mapping in `LIP_BEDROCK_PROFILES`, and the `BedrockProfiles` output has it for use elsewhere. The roles can call the models only through these profiles.
+- **Imported planner models.** If the registry has a `bedrock_imported` model, the job and operator roles may call any model imported into the account with Bedrock Custom Model Import. Importing one is a manual step (see [Imported models](#imported-models)).
 - **Operator role** for submitting jobs, reading results and calling the planner models.
 
 There is no NAT gateway: instances sit in public subnets and only make outbound connections.
@@ -73,6 +74,48 @@ uv run lip report s3://$bucket/runs --manifest s3://$bucket/manifests/e1-pilot.j
 Each child runs `lip run-manifest`, which uploads to `runs/<sweep name>/<scenario>/<planner>-<validator>-<obs>/r<rep>-s<seed>/<job id>-attempt<n>/`. The sweep name keeps sweeps apart, since episode keys don't name the sweep; give a sweep a new name to fly it again (on a new image, say), and keep the name to resume it. `lip report --manifest` adds the prefix to an `s3://` root. Manifests built before the prefix existed (the pilots) have none, and their results stay under `runs/`. Before flying, it lists that episode's earlier attempts and exits without flying if one of them is a result, or if three attempts have all been harness failures (the episode then counts as missing). Resubmitting the same array after a cancellation or a quota stall therefore only flies the episodes that are still open. `lip report` takes each episode's first attempt that isn't a harness failure, and reports the harness-failure rate, missing episodes, and the intra-scenario correlation of violations per cell next to the rates.
 
 An episode exits non-zero only on a harness failure. A metrics or scoring error is printed and the episode still uploads and exits zero, because a Batch retry would re-roll a result; re-score it with `lip analyze`.
+
+## Imported models
+
+Open-weight planner models (the Qwen3-4B arms) run on [Bedrock Custom Model Import](https://docs.aws.amazon.com/bedrock/latest/userguide/model-customization-import-model.html), which serves them without a GPU in the account. Bedrock decides the size of a copy at import. Qwen3-4B needs 2 Custom Model Units (CMUs), which cost $0.05718 per CMU per minute in us-east-1: about $6.86 an hour while a copy is active, billed in 5-minute windows. A copy shuts down after 5 minutes without calls, and storage costs $1.95 per CMU per month, so import before a sweep and delete afterwards.
+
+**Once per account**, outside the stack:
+
+- Create a role `lip-bedrock-model-import`. Its trust policy lets `bedrock.amazonaws.com` assume it, and its inline policy allows `s3:GetObject` on `<results bucket>/models/*` and `s3:ListBucket` on the bucket.
+- Give whoever imports the right to:
+  - create and read import jobs;
+  - get, list and delete imported models;
+  - tag them (`bedrock:TagResource`);
+  - pass that role to `bedrock.amazonaws.com`.
+- Stage the weights: the model's Hugging Face files at a pinned revision, under `models/<model>/<revision>/` in the results bucket.
+
+```bash
+P=models/qwen3-4b-thinking-2507/768f209     # Qwen/Qwen3-4B-Thinking-2507 at 768f209d9ea8...
+for f in config.json generation_config.json merges.txt model.safetensors.index.json tokenizer.json \
+    tokenizer_config.json vocab.json LICENSE model-0000{1,2,3}-of-00003.safetensors; do
+  curl -sfL "https://huggingface.co/Qwen/Qwen3-4B-Thinking-2507/resolve/768f209d9ea81521153ed38c47d515654e938aea/$f" -o "$f"
+done
+aws s3 cp --recursive . "s3://$bucket/$P/"
+```
+
+**Before a sweep** that flies an imported arm, import it under the name its `model_id` gives in `models.yaml`. This takes about 11 minutes and costs nothing:
+
+```bash
+aws bedrock create-model-import-job --job-name "lip-qwen3-4b-thinking-$(date +%s)" \
+  --imported-model-name lip-qwen3-4b-thinking-2507-768f209 \
+  --role-arn "arn:aws:iam::<account>:role/lip-bedrock-model-import" \
+  --model-data-source "s3DataSource={s3Uri=s3://$bucket/$P/}" \
+  --imported-model-tags key=project,value=lost-in-place
+aws bedrock get-imported-model --model-identifier lip-qwen3-4b-thinking-2507-768f209 \
+  --query customModelUnits                               # once the job's status is Completed
+uv run lip propose qwen3-4b-zero-shot                     # one real call; the first waits ~1.5 min for a copy
+```
+
+The tag is meant to put the model's spend under the project budget. That hasn't been checked yet: look in Cost Explorer after the first sweep. The budget stop blocks calls to imported models either way.
+
+**After the sweep:** `aws bedrock delete-imported-model --model-identifier lip-qwen3-4b-thinking-2507-768f209`.
+
+The smoke test of Oct 13, 2026 ran DEXI's C0 missions through this path: 8 of 20 seen missions passed, against arm 2's 38% on Ollama. With 16 missions in flight, a single copy kept each call above 100 tokens/s, about 1,100 tokens/s in total.
 
 ## Settings
 

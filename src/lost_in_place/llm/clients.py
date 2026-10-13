@@ -15,6 +15,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from importlib.resources import files
 from typing import Any, Protocol
 
 from lost_in_place.llm.registry import ModelSpec
@@ -232,9 +233,16 @@ def _arguments(raw: Any) -> dict[str, Any]:
     return args
 
 
+def _visible(text: str) -> str:
+    """The reply without its reasoning. A thought cut off by the token limit never closes, and
+    anything after its `<think>` is still reasoning, not an answer."""
+    text = _THINKING.sub("", text)
+    return text.split("<think>", 1)[0]
+
+
 def _inline_tool_calls(text: str) -> list[ToolCall]:
     calls = []
-    for block in _INLINE_TOOL_CALL.findall(_THINKING.sub("", text)):
+    for block in _INLINE_TOOL_CALL.findall(_visible(text)):
         try:
             parsed = json.loads(block)
             calls.append(ToolCall(name=parsed["name"], args=_arguments(parsed.get("arguments"))))
@@ -243,9 +251,136 @@ def _inline_tool_calls(text: str) -> list[ToolCall]:
     return calls
 
 
+def load_chat_template(name: str) -> Any:
+    """A chat template from llm/templates/, compiled the way Hugging Face's apply_chat_template
+    compiles it, so the prompt matches the one the model was trained on byte for byte."""
+    import jinja2  # imported lazily, like boto3
+    from jinja2.sandbox import ImmutableSandboxedEnvironment
+
+    def raise_exception(message: str) -> None:
+        raise jinja2.exceptions.TemplateError(message)
+
+    def tojson(value: Any, ensure_ascii: bool = False, indent: int | None = None, **kwargs: Any) -> str:
+        return json.dumps(value, ensure_ascii=ensure_ascii, indent=indent, **kwargs)
+
+    source = files("lost_in_place.llm").joinpath("templates", f"{name}.jinja").read_text()
+    env = ImmutableSandboxedEnvironment(
+        trim_blocks=True, lstrip_blocks=True, extensions=["jinja2.ext.loopcontrols"]
+    )
+    env.filters["tojson"] = tojson
+    env.globals["raise_exception"] = raise_exception
+    return env.from_string(source)
+
+
+# Bedrock's codes for a model that is scaling up from zero copies (about 1.5 min) or is busy.
+_IMPORTED_RETRYABLE = {"ModelNotReadyException", "ThrottlingException", "ServiceUnavailableException"}
+
+
+class BedrockImportedClient:
+    """A model imported with Bedrock Custom Model Import, such as Qwen3. Bedrock has no Converse
+    API for Qwen3 imports, so this renders the model's own chat template and sends the raw prompt
+    with InvokeModel; the model answers with Qwen-style `<tool_call>` text.
+
+    `model_id` is the imported model's name. Its ARN changes with every import, so it is looked up
+    on the first call."""
+
+    attempts = 8
+    read_timeout_s = 600
+
+    def __init__(
+        self,
+        spec: ModelSpec,
+        runtime: Any = None,
+        control: Any = None,
+        sleep: Callable[[float], None] = time.sleep,
+    ):
+        if not spec.chat_template:
+            raise LookupError(f"model '{spec.name}': bedrock_imported needs a chat_template")
+        self.spec = spec
+        self.template = load_chat_template(spec.chat_template)
+        self._runtime = runtime
+        self._control = control
+        self._sleep = sleep
+        self._arn: str | None = None
+
+    @classmethod
+    def from_spec(cls, spec: ModelSpec) -> BedrockImportedClient:
+        return cls(spec)
+
+    def _client(self, service: str) -> Any:
+        import boto3
+        from botocore.config import Config
+
+        config = Config(retries={"mode": "standard", "max_attempts": 1}, read_timeout=self.read_timeout_s)
+        return boto3.client(service, region_name=self.spec.region, config=config)
+
+    def arn(self) -> str:
+        if self._arn is None:
+            if self._control is None:
+                self._control = self._client("bedrock")
+            self._arn = str(self._control.get_imported_model(modelIdentifier=self.spec.model_id)["modelArn"])
+        return self._arn
+
+    def render(self, system: str, user: str, tools: list[dict[str, Any]]) -> str:
+        messages = [{"role": "system", "content": system}] if system else []
+        return str(
+            self.template.render(
+                messages=[*messages, {"role": "user", "content": user}],
+                tools=[{"type": "function", "function": tool} for tool in tools],
+                add_generation_prompt=True,
+            )
+        )
+
+    def _invoke(self, body: dict[str, Any]) -> dict[str, Any]:
+        if self._runtime is None:
+            self._runtime = self._client("bedrock-runtime")
+        for attempt in range(self.attempts):
+            try:
+                response = self._runtime.invoke_model(
+                    modelId=self.arn(),
+                    body=json.dumps(body),
+                    accept="application/json",
+                    contentType="application/json",
+                )
+                payload: dict[str, Any] = json.loads(response["body"].read())
+                return payload
+            except Exception as exc:
+                code = getattr(exc, "response", {}).get("Error", {}).get("Code", "")
+                if attempt + 1 == self.attempts or code not in _IMPORTED_RETRYABLE:
+                    raise
+                self._sleep(min(60.0, 5.0 * 2**attempt))
+        raise AssertionError("unreachable")
+
+    def complete(self, system: str, user: str, tools: list[dict[str, Any]]) -> Completion:
+        prompt = self.render(system, user, tools)
+        body: dict[str, Any] = {"prompt": prompt, "max_tokens": self.spec.max_tokens}
+        if self.spec.temperature is not None:
+            body["temperature"] = self.spec.temperature
+        started = time.monotonic()
+        payload = self._invoke(body)
+        latency_ms = int((time.monotonic() - started) * 1000)
+        choice = (payload.get("choices") or [{}])[0]
+        text = choice.get("text") or ""
+        # The template opens the thought; put it back so the text reads as the model wrote it.
+        if prompt.endswith("<think>\n"):
+            text = "<think>\n" + text
+        usage = payload.get("usage") or {}
+        return Completion(
+            tool_calls=tuple(_inline_tool_calls(text)),
+            text=text,
+            stop_reason=choice.get("finish_reason") or "",
+            input_tokens=int(usage.get("prompt_tokens", 0)),
+            output_tokens=int(usage.get("completion_tokens", 0)),
+            latency_ms=latency_ms,
+            # The import's id, not its ARN, which would put the account ID in every trace.
+            model_id=f"{self.spec.model_id}@{self.arn().rsplit('/', 1)[-1]}",
+        )
+
+
 CLIENTS: dict[str, Callable[[ModelSpec], ChatClient]] = {
     "bedrock": BedrockConverseClient.from_spec,
     "openai_compatible": OpenAICompatibleClient.from_spec,
+    "bedrock_imported": BedrockImportedClient.from_spec,
 }
 
 

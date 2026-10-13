@@ -10,6 +10,7 @@ from lost_in_place_infra.sim_stack import (
     SimSettings,
     SimStack,
     bedrock_models_from_registry,
+    imported_models_from_registry,
 )
 
 
@@ -54,7 +55,7 @@ def test_job_retries_spot_reclaims_and_times_out(template: Template) -> None:
         "AWS::Batch::JobDefinition",
         {
             "RetryStrategy": Match.object_like({"Attempts": 3}),
-            "Timeout": {"AttemptDurationSeconds": 1800},
+            "Timeout": {"AttemptDurationSeconds": 5400},
         },
     )
 
@@ -328,6 +329,40 @@ def test_budget_stop_blocks_model_calls_from_both_roles(bedrock_template: Templa
 def test_registry_bedrock_models_are_read_from_models_yaml() -> None:
     registry = Path(__file__).resolve().parents[2] / "src" / "lost_in_place" / "llm" / "models.yaml"
     assert SONNET in bedrock_models_from_registry(registry)
+    assert "lip-qwen3-4b-thinking-2507-768f209" in imported_models_from_registry(registry)
+    assert SONNET not in imported_models_from_registry(registry)
+
+
+def imported_statements(template: Template) -> list[dict[str, object]]:
+    return [
+        statement
+        for policy in template.find_resources("AWS::IAM::Policy").values()
+        for statement in policy["Properties"]["PolicyDocument"]["Statement"]
+        if "imported-model" in json.dumps(statement.get("Resource"))
+    ]
+
+
+def test_roles_may_call_imported_models_but_not_import_them() -> None:
+    app = cdk.App()
+    stack = SimStack(
+        app,
+        "WithImported",
+        settings=SimSettings(imported_models=("lip-qwen-test",)),
+        env=cdk.Environment(account="123456789012", region="us-east-1"),
+    )
+    statements = imported_statements(Template.from_stack(stack))
+    assert len(statements) == 2  # job role and operator role
+    for statement in statements:
+        assert statement["Action"] == [
+            "bedrock:InvokeModel",
+            "bedrock:InvokeModelWithResponseStream",
+            "bedrock:GetImportedModel",
+        ]
+        assert json.dumps(statement["Resource"]).endswith(':imported-model/*"]]}')
+
+
+def test_no_imported_model_grants_without_imported_models(template: Template) -> None:
+    assert imported_statements(template) == []
 
 
 def test_job_definition_can_pin_an_image_digest() -> None:

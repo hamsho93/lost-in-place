@@ -25,6 +25,9 @@ class ModelSpec(BaseModel):
     base_url: str | None = None
     api_key_env: str | None = None
     extra_body: dict[str, Any] = Field(default_factory=dict)
+    # Bedrock imported models only: the chat template (a file in llm/templates/, without .jinja)
+    # that turns a request into the raw prompt the model was trained on.
+    chat_template: str | None = None
     notes: str = ""
 
 

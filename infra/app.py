@@ -6,7 +6,12 @@ from pathlib import Path
 
 import aws_cdk as cdk
 
-from lost_in_place_infra.sim_stack import SimSettings, SimStack, bedrock_models_from_registry
+from lost_in_place_infra.sim_stack import (
+    SimSettings,
+    SimStack,
+    bedrock_models_from_registry,
+    imported_models_from_registry,
+)
 
 MODEL_REGISTRY = Path(__file__).resolve().parent.parent / "src" / "lost_in_place" / "llm" / "models.yaml"
 
@@ -26,6 +31,7 @@ settings = SimSettings(
     account_alarm_usd=float(ctx("accountAlarmUsd", "0")),
     github_repo=ctx("githubRepo", ""),
     bedrock_models=bedrock_models_from_registry(MODEL_REGISTRY),
+    imported_models=imported_models_from_registry(MODEL_REGISTRY),
 )
 SimStack(
     app,
