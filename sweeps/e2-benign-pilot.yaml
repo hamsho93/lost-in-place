@@ -1,0 +1,11 @@
+# Geometry check of the benign E2 families with the scripted planner: healthy controls should
+# reach the goal without a violation or a rejection, and faults should still cause violations.
+# Excluded from confirmatory analysis.
+name: e2-benign-pilot
+scenarios: ['scenarios/e2/b0[0-7]_*.yaml']
+reps: 1
+planners: [scripted-naive]
+validators: [none, geometric]
+observations: [O0]
+latency_s: 2.0
+shuffle_seed: 0

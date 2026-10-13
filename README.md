@@ -4,7 +4,7 @@
 
 Lost in Place is an open benchmark for that question. It runs PX4 and Gazebo in simulation, where the true position is known exactly. It then degrades the vehicle's own position estimate (featureless floors, frozen or missing optical flow, no compass) while an LLM planner and a validator command the drone. We score whether the stack holds, lands or refuses instead of flying on.
 
-> Status: **pre-alpha**. The harness, fault injection, validators and scorer work, and episodes run in sweeps on spot AWS Batch. Two harness pilots have run with the scripted planner ([docs/pilot.md](docs/pilot.md)); they test the measurement, not the hypotheses, and are excluded from any results. The measurement contract is drafted in [SPEC.md](SPEC.md) and will be frozen and published as an RFC before any confirmatory run. There are no benchmark results yet.
+> Status: **pre-alpha**. The harness, fault injection, validators and scorer work, and episodes run in sweeps on spot AWS Batch. Three harness pilots have run with the scripted planner ([docs/pilot.md](docs/pilot.md)); they test the measurement, not the hypotheses, and are excluded from any results. The measurement contract is drafted in [SPEC.md](SPEC.md) and will be frozen and published as an RFC before any confirmatory run. There are no benchmark results yet.
 
 ## Why
 
@@ -33,7 +33,7 @@ To run episodes on spot AWS Batch, see [`infra/`](infra/README.md). The first sm
 | `src/lost_in_place/` | Episode runner, scenario schema, metrics, world generator, planner and validator interfaces |
 | `src/lost_in_place/llm/` | LLM planner and its model registry ([`models.yaml`](src/lost_in_place/llm/models.yaml)) |
 | `SPEC.md` | The benchmark specification (draft): frames, scenario items, faults, arms, harness rules and metric definitions |
-| `scenarios/` | Scenario files (YAML): scripted fixtures, the first pilot's items and the E1 families. See `docs/scenarios.md` |
+| `scenarios/` | Scenario files (YAML): scripted fixtures, the first pilot's items, the E1 families and the benign E2 families. See `docs/scenarios.md` |
 | `sweeps/` | Sweep definitions: scenarios × planners × validators × observation levels × repetitions |
 | `px4/` | Pinned PX4 commit and the patches we apply to it |
 | `docker/` | Headless image with PX4, Gazebo and the runner |
