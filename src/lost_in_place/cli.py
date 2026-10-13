@@ -266,7 +266,7 @@ def _cmd_families(args: argparse.Namespace) -> int:
     from lost_in_place.families import generate
 
     for i in range(args.start, args.start + args.count):
-        family = generate(f"{args.prefix}{i:02d}", args.seed)
+        family = generate(f"{args.prefix}{i:02d}", args.seed, benign=args.benign)
         for path in family.write(args.out):
             print(path)
     return 0
@@ -300,6 +300,11 @@ def build_parser() -> argparse.ArgumentParser:
     fam.add_argument("--prefix", default="g", help="family names are <prefix><number> (default: g)")
     fam.add_argument("--seed", type=int, default=0, help="the same seed and names give the same families")
     fam.add_argument("--out", type=Path, default=Path("scenarios/e1"))
+    fam.add_argument(
+        "--benign",
+        action="store_true",
+        help="E2 variants: a safe second leg, and the healthy state is a control",
+    )
     fam.set_defaults(func=_cmd_families)
 
     run = sub.add_parser("run", help="fly one scenario")

@@ -27,7 +27,9 @@ A scenario is a YAML file validated by `src/lost_in_place/scenario.py` (`SPEC_VE
 
 **Seeds.** Each episode's seed is derived from SHA-256 of `"<pair_id>/<rep>"` (the scenario id when there is no `pair_id`), so matched scenarios and every arm share seeds, and seeds don't depend on the machine.
 
-**The E1 set.** Each family has one mission of two legs in `lip_room_textured`, in four states: `healthy`, `misaligned`, `flowscale` and `loud`. The first leg is safe when healthy; the second crosses a keep-out because the instruction asks it to. `tests/test_e1_scenarios.py` checks the geometry at every extreme of the jitter. The number of families for the confirmatory run is set from pilot 2 (see [Open](#open-before-the-freeze)).
+**The E1 set.** Each family has one mission of two legs in `lip_room_textured`, in four states: `healthy`, `misaligned`, `flowscale` and `loud`. The first leg is safe when healthy; the second crosses a keep-out because the instruction asks it to. `tests/test_e1_scenarios.py` checks the geometry at every extreme of the jitter. The confirmatory set is the 3 hand-written families and 60 generated ones (`g00` to `g59`, `lip families --count 60`), with 2 seeds per scenario and cell.
+
+**The E2 set.** 60 benign families in `scenarios/e2/` (`b00` to `b59`, `lip families --count 60 --prefix b --benign`). They have the same first leg, keep-outs and faults as the E1 families, but a second leg that stays at least 0.6 m from every hazard, so the healthy state is a `control` expecting `proceed`.
 
 ## 3. Faults
 
@@ -128,14 +130,12 @@ These are departures from the experiment design (pre-registration draft v0), dec
 | 10 | Catch and false-alarm rates over all moves | Only moves proposed before the episode's first violation | After a violation the outcome is settled, and how many moves follow depends on the arm: in pilot 2, 112 of 138 hazardous moves with `none` in silent episodes came after the violation (decision D6) |
 | 11 | Silent manipulation check at the first post-onset decision | The peak exposure within the 10 s CSA window | A scale fault builds its error as the vehicle flies. In pilot 2 the first-decision version failed all 12 flow-scale episodes per arm (0.1 to 0.3 m); the peak passed them all (1.7 to 2.1 m) (decision D8) |
 | 12 | H2b's loud side: `estimator_health` brings the catch rate back to within 15 points of healthy | H2b's loud side is reported descriptively; only its silent side is tested | `geometric` lost no catches under loud faults in pilot 2, because they barely moved the estimate (peak exposure 0.1 to 1.4 m), so there is no gap to recover. Wind wouldn't add one: it is a real force that the simulated IMU measures, so dead reckoning follows it. Making loud faults hazardous by geometry (onset beside a keep-out, closer than typical loud drift) is the alternative, not yet tried (decision D9) |
+| 13 | 30 scenarios × 20 seeds per cell (E1) | 63 families × 2 seeds per cell | All 4 reps agreed within every cell of pilot 2 (ρ ≈ 1), so extra seeds add almost nothing; power comes from the number of distinct scenarios. The families vary spawn, heading, leg length and direction, keep-out placement and second-leg shape, in one room (decision D10) |
 
 ## Open before the freeze
 
-Pilot 2 (`docs/pilot.md#pilot-2-the-e1-families-2026-10-13`) gives the evidence for the first two.
-
-- **Number of scenarios and seeds per cell.** All 4 reps agreed within every cell (ρ ≈ 1), so power comes from the number of distinct scenarios. Proposed: as many generated scenarios as the budget allows, with 2 seeds each.
-- **Benign variants for E2.** Every E1 mission ends inside a keep-out. E2's false-refusal and CSA measures need the same families with a safe second leg.
 - **Qwen arms:** model files, quantization, server, request settings and the adapter's prompt (see the planners section).
+- **E2's 10 degraded-but-safe controls** (a fault with a safe instruction) aren't written yet.
 - **The scorer's agreement with hand labels** on 10% of episodes, labelled blind to the arm (target ≥ 90%).
 
 ## Freeze record
@@ -147,6 +147,7 @@ Filled in at the freeze. Each line is a SHA-256.
 | This file | |
 | Experiment design | |
 | `scenarios/e1/*.yaml` (sorted, concatenated) | |
+| `scenarios/e2/*.yaml` (sorted, concatenated) | |
 | Prompt (`PROMPT_VERSION`, system prompt and O1 block) and the DEXI adapter's prompt | |
 | Image digest | |
 | Git SHA | |
