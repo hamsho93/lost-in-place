@@ -83,6 +83,13 @@ class SetParam(_Strict):
     at_s: float = Field(ge=0)
     name: str
     value: float
+    type: Literal["float", "int"] = Field("float", description="The PX4 parameter's type")
+
+    @model_validator(mode="after")
+    def _whole_if_int(self) -> SetParam:
+        if self.type == "int" and not float(self.value).is_integer():
+            raise ValueError(f"{self.name} is an int parameter, not {self.value}")
+        return self
 
 
 class End(_Strict):

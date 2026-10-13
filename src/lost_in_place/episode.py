@@ -308,7 +308,10 @@ class _Episode:
             if ack != "accepted":
                 raise InjectFailed(f"{step.unit} {step.type}: {ack}")
         elif isinstance(step, SetParam):
-            await drone.param.set_param_float(step.name, step.value)
+            if step.type == "int":
+                await drone.param.set_param_int(step.name, int(step.value))
+            else:
+                await drone.param.set_param_float(step.name, step.value)
             self.log(action="param", name=step.name, value=step.value)
         else:
             self.log(action="end")
