@@ -98,6 +98,8 @@ done
 aws s3 cp --recursive . "s3://$bucket/$P/"
 ```
 
+The student arm's weights are private: they're staged under `models/qwen3-4b-c1/bedrock-c6bc0a6/`. That directory holds the fused model's `config.json`, `generation_config.json` and safetensors, plus `tokenizer.json`, `tokenizer_config.json`, `vocab.json` and `merges.txt` from `Qwen/Qwen3-4B-Instruct-2507` at the revision in `models.yaml`. The base tokenizer encodes every prompt identically to the student's own. But the student's `tokenizer.json`, as MLX saved it, marks `<tool_call>` as a special token, so a server that skips special tokens would strip the tool call from every reply.
+
 **Before a sweep** that flies an imported arm, import it under the name its `model_id` gives in `models.yaml`. This takes about 11 minutes and costs nothing:
 
 ```bash

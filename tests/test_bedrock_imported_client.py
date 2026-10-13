@@ -68,11 +68,36 @@ def client(runtime: Runtime, control: Control | None = None) -> BedrockImportedC
 MOVE = '<tool_call>\n{"name": "move", "arguments": {"north_m": 1.0, "east_m": 0.5}}\n</tool_call>'
 
 
-def test_prompt_matches_llama_cpp_rendering_byte_for_byte() -> None:
+@pytest.mark.parametrize(
+    ("template", "fixture"),
+    [
+        ("qwen3-thinking-2507", "qwen3_thinking_render.txt"),
+        ("qwen3-instruct-2507", "qwen3_instruct_render.txt"),
+    ],
+)
+def test_prompt_matches_reference_rendering_byte_for_byte(template: str, fixture: str) -> None:
     request = json.loads((FIXTURES / "qwen3_thinking_request.json").read_text())
-    rendered = client(Runtime()).render(request["system"], request["user"], request["tools"])
-    # Captured from llama-server --jinja (b11561) on Ollama's qwen3:4b GGUF via /apply-template.
-    assert rendered == (FIXTURES / "qwen3_thinking_render.txt").read_text()
+    spec = SPEC.model_copy(update={"chat_template": template})
+    imported = BedrockImportedClient(spec, runtime=Runtime(), control=Control())
+    rendered = imported.render(request["system"], request["user"], request["tools"])
+    # Both captured with transformers 4.57.6 apply_chat_template; the Thinking one also matches
+    # llama-server --jinja (b11561) via /apply-template.
+    assert rendered == (FIXTURES / fixture).read_text()
+
+
+def test_a_prompt_without_a_system_message_has_no_empty_system_turn() -> None:
+    spec = SPEC.model_copy(update={"chat_template": "qwen3-instruct-2507"})
+    rendered = BedrockImportedClient(spec, runtime=Runtime(), control=Control()).render("", "u", tool_specs())
+    assert rendered.count("<|im_start|>system\n") == 1
+    assert rendered.endswith("<|im_start|>user\nu<|im_end|>\n<|im_start|>assistant\n")
+
+
+def test_a_model_that_does_not_think_answers_directly() -> None:
+    spec = SPEC.model_copy(update={"chat_template": "qwen3-instruct-2507"})
+    imported = BedrockImportedClient(spec, runtime=Runtime(completion(MOVE)), control=Control())
+    result = imported.complete("", "u", tool_specs())
+    assert result.tool_calls == (ToolCall(name="move", args={"north_m": 1.0, "east_m": 0.5}),)
+    assert result.text == MOVE
 
 
 def test_sends_the_raw_prompt_with_the_registry_settings() -> None:
@@ -143,7 +168,8 @@ def test_needs_a_chat_template() -> None:
         BedrockImportedClient(SPEC.model_copy(update={"chat_template": None}))
 
 
-def test_the_zero_shot_arm_is_registered_for_this_client() -> None:
-    spec = get_model("qwen3-4b-zero-shot")
+@pytest.mark.parametrize("arm", ["qwen3-4b-zero-shot", "qwen3-4b-student"])
+def test_the_qwen_arms_are_registered_for_this_client(arm: str) -> None:
+    spec = get_model(arm)
     assert (spec.provider, spec.max_tokens, spec.temperature) == ("bedrock_imported", 8192, 0)
     assert isinstance(make_client(spec), BedrockImportedClient)

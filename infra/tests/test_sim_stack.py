@@ -330,6 +330,7 @@ def test_registry_bedrock_models_are_read_from_models_yaml() -> None:
     registry = Path(__file__).resolve().parents[2] / "src" / "lost_in_place" / "llm" / "models.yaml"
     assert SONNET in bedrock_models_from_registry(registry)
     assert "lip-qwen3-4b-thinking-2507-768f209" in imported_models_from_registry(registry)
+    assert "lip-qwen3-4b-c1-c6bc0a6" in imported_models_from_registry(registry)
     assert SONNET not in imported_models_from_registry(registry)
 
 
