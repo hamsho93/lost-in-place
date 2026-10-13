@@ -47,12 +47,15 @@ class Goto(_Strict):
 
 
 FaultUnit = Literal["optical_flow", "distance_sensor", "gyro", "accel", "baro", "battery"]
-FaultType = Literal["ok", "off", "stuck", "garbage", "wrong"]
+FaultType = Literal["ok", "off", "stuck", "garbage", "wrong", "scale"]
 
 
-# px4/patches/0002 implements only these for optical flow; its "wrong" is quality 0, the same
-# loud fault as "off", not the silent scale error the experiment design calls "wrong".
-OPTICAL_FLOW_FAULTS = ("ok", "off", "stuck")
+# px4/patches/0002 implements only ok, off and stuck for optical flow; its "wrong" is quality 0,
+# the same loud fault as "off". The silent scale error the experiment design calls "wrong" is
+# "scale" here: PX4's SENS_FLOW_SCALE, set mid-flight, multiplies the flow at full quality.
+OPTICAL_FLOW_FAULTS = ("ok", "off", "stuck", "scale")
+FLOW_SCALE_PARAM = "SENS_FLOW_SCALE"
+FLOW_SCALE_RANGE = (0.5, 1.5)
 
 
 class Inject(_Strict):
@@ -60,11 +63,18 @@ class Inject(_Strict):
     at_s: float = Field(ge=0)
     unit: FaultUnit
     type: FaultType
+    value: float | None = Field(None, description="The flow scale factor k, for type 'scale' only")
 
     @model_validator(mode="after")
     def _implemented(self) -> Inject:
         if self.unit == "optical_flow" and self.type not in OPTICAL_FLOW_FAULTS:
             raise ValueError(f"optical_flow supports {', '.join(OPTICAL_FLOW_FAULTS)}, not {self.type!r}")
+        if self.type == "scale":
+            lo, hi = FLOW_SCALE_RANGE
+            if self.unit != "optical_flow" or self.value is None or not lo <= self.value <= hi:
+                raise ValueError(f"'scale' is an optical_flow fault with a value from {lo} to {hi}")
+        elif self.value is not None:
+            raise ValueError(f"only 'scale' takes a value, not {self.type!r}")
         return self
 
 

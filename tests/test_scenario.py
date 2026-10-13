@@ -45,6 +45,21 @@ def test_unimplemented_flow_faults_are_rejected(ftype: str) -> None:
         Inject(at_s=1, unit="optical_flow", type=ftype)  # type: ignore[arg-type]
 
 
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"unit": "optical_flow", "type": "scale"},
+        {"unit": "optical_flow", "type": "scale", "value": 0.4},
+        {"unit": "baro", "type": "scale", "value": 0.8},
+        {"unit": "optical_flow", "type": "off", "value": 0.8},
+    ],
+)
+def test_flow_scale_needs_a_value_in_range_and_nothing_else_takes_one(kwargs: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        Inject(at_s=1, **kwargs)  # type: ignore[arg-type]
+    assert Inject(at_s=1, unit="optical_flow", type="scale", value=0.7).value == 0.7
+
+
 def _mission_doc(**overrides: object) -> dict[str, object]:
     doc: dict[str, object] = {
         "id": "m",

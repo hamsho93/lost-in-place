@@ -181,6 +181,33 @@ def test_rejected_fault_ends_the_episode() -> None:
     assert ep.result.events[-1]["ack"] == "UNSUPPORTED: 'Unsupported'"
 
 
+def test_a_flow_scale_fault_sets_the_scale_parameter() -> None:
+    import asyncio
+
+    ep = _episode_at_rest(None)
+    ep.connected.set()
+    calls: list[tuple[str, float]] = []
+
+    class Param:
+        async def set_param_float(self, name: str, value: float) -> None:
+            calls.append((name, value))
+
+    class Drone:
+        param = Param()
+
+    asyncio.run(ep._apply(Drone(), Inject(at_s=2, unit="optical_flow", type="scale", value=0.7)))  # type: ignore[arg-type]
+    assert calls == [("SENS_FLOW_SCALE", 0.7)]
+    assert ep.result.events[-1] | {"wall_s": 0} == {
+        "wall_s": 0,
+        "sim_s": 0.0,
+        "action": "inject",
+        "unit": "optical_flow",
+        "type": "scale",
+        "ack": "accepted",
+        "value": 0.7,
+    }
+
+
 def test_provenance_is_recorded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LIP_GIT_SHA", "abc123")
     prov = episode.provenance.collect('{"id": "x"}')
