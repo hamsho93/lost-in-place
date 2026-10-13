@@ -113,6 +113,22 @@ qwen3-4b-zero-shot:
 - For a server that needs a key, set `api_key_env` to the name of the environment variable that holds it.
 - Transient failures (connection errors, HTTP 429 and 5xx) are retried twice with backoff; anything else fails the call.
 
+**On Bedrock Custom Model Import** (open-weight models such as Qwen3, served by Bedrock without a GPU of your own): use the provider `bedrock_imported`. Bedrock has no Converse API for Qwen3 imports, so the client renders the model's own chat template from `llm/templates/` and sends the raw prompt with `InvokeModel`. It reads the reply's `<tool_call>` text after the model's `</think>`. A tool call inside the thought, or in a thought cut off by `max_tokens`, isn't an answer, so the decision counts as invalid.
+
+```yaml
+qwen3-4b-zero-shot:
+  provider: bedrock_imported
+  model_id: lip-qwen3-4b-thinking-2507-768f209   # the imported model's name
+  chat_template: qwen3-thinking-2507             # llm/templates/qwen3-thinking-2507.jinja
+  max_tokens: 8192
+  temperature: 0
+```
+
+- **The template must be the model's own.** Copy it from the model's `tokenizer_config.json` (`chat_template`). `tests/test_bedrock_imported_client.py` checks that the rendering matches llama.cpp's, byte for byte.
+- **The model's ARN** changes with every import, so the client looks it up by name on its first call. Traces record `name@import-id`, not the ARN, which contains the account ID.
+- **A model with no recent calls scales to zero.** The next call waits about 1.5 minutes while Bedrock starts a copy; the client retries through it.
+- **Importing a model** is a one-off step before a sweep, in [`infra/README.md`](../infra/README.md#imported-models). The stack lets the job and operator roles call any imported model in the account, but not import one.
+
 **On another provider** (e.g. OpenAI):
 
 1. Write a client in `llm/clients.py` with `complete(system, user, tools) -> Completion`, converting the provider-neutral tool specs into the provider's format.

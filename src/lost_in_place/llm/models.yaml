@@ -4,6 +4,7 @@
 # model_id   the provider's identifier; for Bedrock, a system inference profile such as us.anthropic.*
 # Optional:  region, max_tokens, temperature (omit to use the provider default), tool_choice (any|auto)
 # openai_compatible only: base_url, api_key_env, extra_body (see docs/planners.md)
+# bedrock_imported only: chat_template; model_id is the imported model's name (see docs/planners.md)
 #
 # Pin exact model identifiers: results are only comparable for the same model version.
 
@@ -14,3 +15,15 @@ claude-sonnet-4-6:
   notes: >-
     Frontier arm, added 2026-10-12. The newest Claude model this account can use on Bedrock;
     the 5.x models need an agreement through AWS Sales.
+
+qwen3-4b-zero-shot:
+  provider: bedrock_imported
+  model_id: lip-qwen3-4b-thinking-2507-768f209
+  chat_template: qwen3-thinking-2507
+  max_tokens: 8192
+  temperature: 0
+  notes: >-
+    Zero-shot arm of E2, added 2026-10-13: Qwen/Qwen3-4B-Thinking-2507 at Hugging Face revision
+    768f209d9ea81521153ed38c47d515654e938aea, bf16, imported with Bedrock Custom Model Import
+    (infra/README.md). The same build as DEXI's C0 arm 2 (Ollama qwen3:4b), whose reasoning can't be
+    turned off; the 8192-token cap and temperature 0 match C0.
