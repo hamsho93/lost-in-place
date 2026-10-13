@@ -111,7 +111,7 @@ aws bedrock get-imported-model --model-identifier lip-qwen3-4b-thinking-2507-768
 uv run lip propose qwen3-4b-zero-shot                     # one real call; the first waits ~1.5 min for a copy
 ```
 
-The tag is meant to put the model's spend under the project budget. That hasn't been checked yet: look in Cost Explorer after the first sweep. The budget stop blocks calls to imported models either way.
+The tag is the only way to put an imported model's spend under the project budget: application inference profiles, which the stack uses for foundation models, can only copy a foundation model or a system profile. Whether Bedrock carries the model's tag onto its Custom Model Unit charges isn't documented, so check Cost Explorer, filtered by `project=lost-in-place`, the day after the first canary. If the charges aren't there, the budget can't see this spend: keep `budgetUsd` as is, and watch the sweep with `accountAlarmUsd` instead. The budget stop blocks calls to imported models either way, once it fires.
 
 **After the sweep:** `aws bedrock delete-imported-model --model-identifier lip-qwen3-4b-thinking-2507-768f209`.
 
