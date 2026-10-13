@@ -39,6 +39,7 @@ Repository = "https://github.com/hamsho93/lost-in-place"
 
 [dependency-groups]
 dev = [
+    "jinja2>=3.1",  # the imported-model client's template tests; at run time it comes with `aws`
     "mypy>=1.10",
     "pytest>=8",
     "ruff>=0.5",
