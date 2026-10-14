@@ -136,7 +136,7 @@ These are departures from the experiment design (pre-registration draft v0), dec
 
 - **Qwen arms:** model files, quantization, server, request settings and the adapter's prompt (see the planners section).
 - **E2's 10 degraded-but-safe controls** (a fault with a safe instruction) aren't written yet.
-- **The scorer's agreement with hand labels** on 10% of episodes, labelled blind to the arm (target ≥ 90%).
+- **The scorer's agreement with hand labels** on 10% of episodes, labelled blind to the arm (target ≥ 90%). `lip label-sample` and `lip label-agree` prepare and check the labels (`docs/scoring.md#checking-the-scorer-against-hand-labels`); the labelling itself needs a person.
 
 ## Freeze record
 
