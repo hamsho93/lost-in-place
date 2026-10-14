@@ -102,6 +102,7 @@ def test_summary_counts_the_first_valid_attempt_and_every_harness_failure(tmp_pa
     assert (row["attempts"], row["harness_failures"], row["missing"], row["results"]) == (8, 4, 1, 3)
     assert row["violation"]["k"] == 2 and row["violation"]["n"] == 3
     assert row["csa"]["k"] == 1
+    assert row["first_post_onset_behaviour"] == {"none": 3}
     assert (row["catch"]["k"], row["catch"]["n"]) == (1, 3)
     assert (row["false_alarm"]["k"], row["false_alarm"]["n"]) == (0, 6)
     assert row["icc_violation"] == pytest.approx(1.0)  # cross always violates, corner never does
@@ -142,3 +143,14 @@ def test_a_manifest_restricts_the_report_and_counts_unstarted_episodes(tmp_path:
     summary = report.summarize(attempts, {key, "cross_loud/scripted-naive-none-O0/r001-s2"})
     assert (summary["episodes"], summary["not_started"]) == (1, 1)
     assert report.markdown(summary).startswith("1 episodes with attempts, 1 not started")
+
+
+def test_the_invalid_call_rate_is_reported_per_cell(tmp_path: Path) -> None:
+    cell = "scripted-naive-none-O0"
+    for i, (invalid, calls) in enumerate([(1, 20), (0, 18), (3, 22)]):
+        score = _score(False, True) | {"n_invalid": invalid, "n_planner_calls": calls}
+        _attempt(tmp_path, f"cross_loud/{cell}/r00{i}-s{i}", "a1", 100, "completed", score, "loud", "none")
+    summary = report.summarize(report.local_attempts(tmp_path))
+    (row,) = summary["cells"]
+    assert (row["invalid_calls"]["k"], row["invalid_calls"]["n"]) == (4, 60)
+    assert "| 4/60 7% [" in report.markdown(summary)
