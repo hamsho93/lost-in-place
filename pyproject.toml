@@ -68,7 +68,7 @@ strict = true
 files = ["src"]
 
 [[tool.mypy.overrides]]
-module = ["mavsdk_grpc.*", "pyulog.*", "PIL.*", "boto3.*", "botocore.*"]
+module = ["mavsdk_grpc.*", "pyulog.*", "PIL.*", "boto3.*", "botocore.*", "matplotlib.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
