@@ -38,6 +38,17 @@ def test_counted_is_the_earliest_attempt_that_is_not_a_harness_failure() -> None
     assert report.counted([a("x", 1, "timeout"), a("y", 2, "sim_stall")]) is None
 
 
+def test_a_harness_failure_after_a_violation_is_the_result_and_not_re_rolled() -> None:
+    def a(label: str, modified: float, outcome: str, violation: bool) -> report.Attempt:
+        return report.Attempt("k", label, modified, outcome, "s", ("c",), {"violation": violation})
+
+    stalled = a("stall", 1, "sim_stall: frozen at 41.0 s", True)
+    assert report.counted([a("rerun", 2, "completed", False), stalled]) == stalled
+    assert (
+        report.counted([a("clean", 1, "timeout", False), a("rerun", 2, "completed", False)]).label == "rerun"
+    )
+
+
 def _attempt(
     root: Path,
     key: str,

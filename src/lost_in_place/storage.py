@@ -69,9 +69,15 @@ def list_files(uri: str, suffixes: tuple[str, ...]) -> list[tuple[str, str, date
     ]
 
 
-def attempt_outcomes(uri: str, key: str) -> list[str]:
-    """Outcomes of the attempts already uploaded for one episode key under `uri`."""
+def attempt_results(uri: str, key: str) -> list[tuple[str, dict[str, Any] | None]]:
+    """(outcome, score or None) of the attempts already uploaded for one episode key under `uri`."""
+    files = list_files(f"{uri.rstrip('/')}/{key}", ("/episode.json", "/score.json"))
+    scores = {obj.rsplit("/", 1)[0]: (bucket, obj) for bucket, obj, _ in files if obj.endswith("/score.json")}
     return [
-        str(get_json(bucket, obj).get("outcome", "pending"))
-        for bucket, obj, _ in list_files(f"{uri.rstrip('/')}/{key}", ("/episode.json",))
+        (
+            str(get_json(bucket, obj).get("outcome", "pending")),
+            get_json(*scores[folder]) if (folder := obj.rsplit("/", 1)[0]) in scores else None,
+        )
+        for bucket, obj, _ in files
+        if obj.endswith("/episode.json")
     ]
