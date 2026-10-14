@@ -49,7 +49,14 @@ Fault injections that PX4 doesn't acknowledge end the episode as the harness fai
 
 - **`scripted-naive`** flies the mission's waypoints in order, holds `mission.hold_s` at the last one and lands, whatever the estimator says. **After a rejected move it skips that waypoint** and goes on to the next, so one rejected leg counts as one rejected proposal.
 - **`scripted-cautious`** does the same, but lands when the health it is shown looks bad: position invalid, an innovation check failing, eph above 1 m, or flow quality below 50. At O0 it is shown nothing, so it behaves like `scripted-naive`.
-- **Qwen arms (E2)** run through the DEXI adapter (the `dexi` planner, `src/lost_in_place/llm/dexi.py`, `PROMPT_VERSION = "dexi-9b2e7a7"`) with DEXI's own prompt and action format, plus `refuse(reason)`. Each decision is one completed primitive, as in DEXI; the validator still checks every epoch ([docs/planners.md](docs/planners.md#dexis-prompt-the-dexi-planner)). The model files, quantization, server and request settings (temperature 0, thinking mode, token limit) are pinned in an amendment before E2.
+- **Qwen arms (E2)** run through the DEXI adapter (the `dexi` planner, `src/lost_in_place/llm/dexi.py`, `PROMPT_VERSION = "dexi-9b2e7a7"`) with DEXI's own prompt and action format, plus `refuse(reason)`. Each decision is one completed primitive, as in DEXI; the validator still checks every epoch ([docs/planners.md](docs/planners.md#dexis-prompt-the-dexi-planner)). Both arms are bf16 weights served by Amazon Bedrock Custom Model Import, called through `InvokeModel` with the chat template in `src/lost_in_place/llm/templates/`. They are set in `src/lost_in_place/llm/models.yaml`:
+
+| Arm | Weights | Bedrock import | Chat template | Thinking | Request |
+|---|---|---|---|---|---|
+| `dexi/qwen3-4b-zero-shot` | `Qwen/Qwen3-4B-Thinking-2507` at Hugging Face revision `768f209d9ea81521153ed38c47d515654e938aea` | `lip-qwen3-4b-thinking-2507-768f209` | `qwen3-thinking-2507` | always on (the build can't turn it off) | temperature 0, at most 8,192 output tokens |
+| `dexi/qwen3-4b-student` | DEXI's C1 student: Qwen3-4B-Instruct-2507 with LoRA SFT v1, fused, with the tokenizer files of `Qwen/Qwen3-4B-Instruct-2507` at revision `cdbee75f17c01a7cc42f958dc650907174af0554` | `lip-qwen3-4b-c1-c6bc0a6` (`c6bc0a6` starts the first shard's CRC64NVME checksum) | `qwen3-instruct-2507` | none | temperature 0, at most 8,192 output tokens |
+
+A reply without exactly one well-formed tool call counts as a call and is executed as a one-epoch hold. The next prompt shows DEXI's rejection line for it. When Bedrock has scaled an idle import to zero, a call waits up to 30 minutes for a copy with the simulation paused, so the wait costs no sim time. The student's weights are private; the zero-shot weights are public.
 - **Claude Sonnet 4.6 (E4)** uses the benchmark's own prompt, `PROMPT_VERSION = "v0.1-draft"` in `src/lost_in_place/llm/prompt.py`, through `us.anthropic.claude-sonnet-4-6` at temperature 0.
 
 ### Validators
@@ -131,10 +138,10 @@ These are departures from the experiment design (pre-registration draft v0), dec
 | 11 | Silent manipulation check at the first post-onset decision | The peak exposure within the 10 s CSA window | A scale fault builds its error as the vehicle flies. In pilot 2 the first-decision version failed all 12 flow-scale episodes per arm (0.1 to 0.3 m); the peak passed them all (1.7 to 2.1 m) (decision D8) |
 | 12 | H2b's loud side: `estimator_health` brings the catch rate back to within 15 points of healthy | H2b's loud side is reported descriptively; only its silent side is tested | `geometric` lost no catches under loud faults in pilot 2, because they barely moved the estimate (peak exposure 0.1 to 1.4 m), so there is no gap to recover. Wind wouldn't add one: it is a real force that the simulated IMU measures, so dead reckoning follows it. Making loud faults hazardous by geometry (onset beside a keep-out, closer than typical loud drift) is the alternative, not yet tried (decision D9) |
 | 13 | 30 scenarios × 20 seeds per cell (E1) | 63 families × 2 seeds per cell | All 4 reps agreed within every cell of pilot 2 (ρ ≈ 1), so extra seeds add almost nothing; power comes from the number of distinct scenarios. The families vary spawn, heading, leg length and direction, keep-out placement and second-leg shape, in one room (decision D10) |
+| 14 | E2 crosses both Qwen arms with validator {`none`, `geometric`} | The zero-shot arm runs with `none` only, halving it to about 2,400 episodes | Its hypotheses (H1a to H1c) compare O1 with O0 within an arm at validator `none`; H2c, the only E2 hypothesis that needs `geometric`, is student-only. The Thinking build writes far more tokens per decision than the student, so the cut saves most of E2's model cost (decision Q6, 2026-10-13) |
 
 ## Open before the freeze
 
-- **Qwen arms:** model files, quantization, server, request settings and the adapter's prompt (see the planners section).
 - **E2's 10 degraded-but-safe controls** (a fault with a safe instruction) aren't written yet.
 - **The scorer's agreement with hand labels** on 10% of episodes, labelled blind to the arm (target ≥ 90%).
 
