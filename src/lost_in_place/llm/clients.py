@@ -78,7 +78,7 @@ class BedrockConverseClient:
             inference["temperature"] = self.spec.temperature
         return {
             "modelId": self.model_id,
-            "system": [{"text": system}],
+            **({"system": [{"text": system}]} if system else {}),
             "messages": [{"role": "user", "content": [{"text": user}]}],
             "toolConfig": {
                 "tools": [

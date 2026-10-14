@@ -126,7 +126,7 @@ qwen3-4b-zero-shot:
 
 - **The template must be the model's own.** Copy it from the model's `tokenizer_config.json` (`chat_template`). `tests/test_bedrock_imported_client.py` checks that the rendering matches llama.cpp's, byte for byte.
 - **The model's ARN** changes with every import, so the client looks it up by name on its first call. Traces record `name@import-id`, not the ARN, which contains the account ID.
-- **A model with no recent calls scales to zero.** The next call waits about 1.5 minutes while Bedrock starts a copy; the client retries through it.
+- **A model with no recent calls scales to zero.** The next call waits while Bedrock starts a copy, which has taken from 1.5 to 27 minutes; the client retries for up to 30.
 - **Importing a model** is a one-off step before a sweep, in [`infra/README.md`](../infra/README.md#imported-models). The stack lets the job and operator roles call any imported model in the account, but not import one.
 
 **On another provider** (e.g. OpenAI):
@@ -136,6 +136,27 @@ qwen3-4b-zero-shot:
 3. Add registry entries with that provider name.
 
 The planner, prompt, parsing and traces are shared, so every model is scored on the same footing. Spend outside AWS isn't covered by the stack's budget, so cap it with the provider.
+
+## DEXI's prompt: the `dexi` planner
+
+DEXI's fine-tuned student learned DEXI's own prompt, so the Qwen arms run through it rather than through `llm.prompt`. `lost_in_place.llm.dexi` carries DEXI's prompt, state line, tools and history format, copied from `hamsho93/drones` at `9b2e7a7`. `tests/test_dexi_adapter.py` checks them against prompts that DEXI's own loop recorded at that commit (`tests/fixtures/dexi_9b2e7a7/`), byte for byte. Any model in the registry can sit behind it:
+
+```bash
+uv run lip run scenarios/e2/b00_loud.yaml --planner dexi --planner-opt model=qwen3-4b-student --obs O1
+```
+
+In a sweep spec, list it as `<planner>/<model>`: `planners: [dexi/qwen3-4b-student, dexi/qwen3-4b-zero-shot]`. Episode keys and reports name the arm `dexi-<model>`.
+
+What changes from DEXI's own loop, and why:
+
+- **No system prompt and DEXI's six tools**, plus `refuse(reason)`, which the experiment design gives every LLM arm. DEXI's clients act on the first tool call, and so does this planner.
+- **The harness takes off first**, so the history starts with `1. take_off(alt_m=1.5) -> reached: took off, now at ... m`.
+- **Relative moves become absolute targets.** `move(direction, distance_m)` is flown from the estimated pose at decision time, along the current heading. `up` and `down` become a climb to an altitude. `rotate(deg)` becomes a heading.
+- **One decision is one completed primitive**, as in DEXI. The agent keeps flying an unfinished move, turn or climb without asking the model again, until it arrives, the validator rejects it, PX4 takes over, or it runs past DEXI's timeout (10 s plus 2 s per metre for a move, 30 s for a turn). Each further epoch is still checked by the validator arm, and recorded in `decisions` with `continued: true`. The latency charge and the world pause apply only to model calls. The scorer counts continued epochs as moves for catch and false alarm, but not as the planner's response to a fault onset (CSA).
+- **The history reads like DEXI's flights**, with the details `MavsdkDriver` reports: `reached (1.0 N, 3.0 E, 1.5 m alt)`, `rotated to heading -89 deg`, `held for 10 s`, `timeout: did not reach target ... within 14s`. A rejection reads `REJECTED by validator: <reason>`; a rejected continuation reads `failed: stopped by the validator: <reason>`.
+- **DEXI's own validator isn't applied.** The benchmark's validator arms replace it. The planner only rejects what can't be flown at all, in DEXI's words: no tool call, an unknown tool, a malformed argument, `take_off` in the air, `mission_complete` before landing, or a descent below 0.3 m. Those count as invalid proposals.
+- **The envelope line** shows DEXI's altitude cap (2 m), move cap (2 m) and hold cap (30 s), and a geofence box: the smallest box around the take-off point that keeps every waypoint 0.5 m inside, rounded up to 0.5 m (±4.5 to 6.5 m in E2). The student saw boxes of ±2.5 to 5 m. A box around the whole room would be ±8 to 9 m, further from anything it has seen.
+- **At O1**, the same estimator-health lines as `llm.prompt` follow the state line. DEXI's prompt has no health fields of its own.
 
 ## Plugging in a planner that lives in another repo
 

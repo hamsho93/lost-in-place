@@ -10,7 +10,7 @@ from lost_in_place import episode as episode_module
 from lost_in_place.agent import AgentConfig, AgentEpisode, Telemetry, health_from_estimator_status
 from lost_in_place.config import Paths
 from lost_in_place.episode import EpisodeResult, InjectFailed
-from lost_in_place.planning import Action, EstimatorHealth, Observation, Verdict
+from lost_in_place.planning import Action, EstimatorHealth, Observation, Outcome, Verdict
 from lost_in_place.scenario import Inject, load_scenario
 from lost_in_place.scripted import ScriptedCautious, ScriptedNaive
 from lost_in_place.sim import SimInstance
@@ -323,6 +323,85 @@ def test_rejected_actions_are_held_not_executed() -> None:
     assert all(sp.north_m == 0.0 for sp in drone.offboard.setpoints)
     assert len(ep.result.decisions) == 2 and not ep.first_move.is_set()
     assert ep.history[-1].endswith("rejected: no")
+
+
+class OneMoveThenLand:
+    """A `PrimitivePlanner` that proposes a 3 m move, then lands."""
+
+    def __init__(self) -> None:
+        self.proposed = 0
+        self.outcomes: list[Outcome] = []
+
+    async def propose(self, observation: Observation) -> Action:
+        self.proposed += 1
+        return Action("move", {"north_m": 3.0, "east_m": 0.0}) if self.proposed == 1 else Action("land")
+
+    def timeout_s(self, action: Action) -> float:
+        return 16.0
+
+    def outcome(self, outcome: Outcome) -> None:
+        self.outcomes.append(outcome)
+
+
+def _fly_north(ep: AgentEpisode, speed_mps: float) -> asyncio.Task[None]:
+    async def tick() -> None:  # 0.5 s of sim per `wait_sim` poll, so an epoch is about 1.5 s
+        while True:
+            await asyncio.sleep(0.01)
+            if not ep.paused:
+                ep.sim_us += 50_000
+                if ep.target.north_m > ep.tel.north_m:
+                    ep.tel.north_m = min(ep.target.north_m, ep.tel.north_m + speed_mps * 0.05)
+
+    return asyncio.create_task(tick())
+
+
+def _run_loop(ep: AgentEpisode, speed_mps: float) -> None:
+    async def scenario() -> None:
+        clock = _fly_north(ep, speed_mps)
+        try:
+            await ep._decide_until_done(FakeDrone(), 0.0)  # type: ignore[arg-type]
+        finally:
+            clock.cancel()
+
+    ep.sim_us = 20_000_000
+    asyncio.run(scenario())
+
+
+def test_a_primitive_planner_is_asked_again_only_when_its_move_ends() -> None:
+    ep = _agent_episode("cross_healthy.yaml", AgentConfig(latency_s=2.0))
+    planner = ep.planner = OneMoveThenLand()
+    _run_loop(ep, speed_mps=0.5)
+    assert planner.proposed == 2
+    assert ep.world.calls == ["pause", "resume"] * 2  # type: ignore[attr-defined]
+    moves = [d for d in ep.result.decisions if d["action"]["name"] == "move"]
+    assert len(moves) >= 2 and [d["continued"] for d in moves] == [False] + [True] * (len(moves) - 1)
+    assert {d["index"] for d in moves} == {1}
+    (outcome,) = planner.outcomes
+    assert (outcome.status, outcome.epochs, outcome.timed_out) == ("arrived", len(moves), False)
+
+
+def test_a_primitive_that_overruns_its_timeout_ends_as_timed_out() -> None:
+    ep = _agent_episode("cross_healthy.yaml", AgentConfig(latency_s=0.0))
+    planner = ep.planner = OneMoveThenLand()
+    planner.timeout_s = lambda action: 4.0  # type: ignore[method-assign]
+    _run_loop(ep, speed_mps=0.2)
+    (outcome,) = planner.outcomes
+    assert outcome.timed_out and outcome.status.startswith(agent.UNDER_WAY) and outcome.epochs >= 2
+
+
+def test_a_rejected_continuation_stops_the_primitive() -> None:
+    ep = _agent_episode("cross_healthy.yaml", AgentConfig(latency_s=0.0))
+    planner = ep.planner = OneMoveThenLand()
+
+    class RejectContinuations:
+        def check(self, action: Action, observation: Observation, truth: object = None) -> Verdict:
+            return Verdict(ok=action.name != "move" or observation.north_m == 0.0, reason="eph 1.30 m")
+
+    ep.validator = RejectContinuations()
+    _run_loop(ep, speed_mps=0.5)
+    (outcome,) = planner.outcomes
+    assert not outcome.verdict.ok and outcome.epochs == 1
+    assert [d["verdict"]["ok"] for d in ep.result.decisions] == [True, False, True]
 
 
 def test_a_vehicle_back_on_the_floor_ends_the_loop() -> None:

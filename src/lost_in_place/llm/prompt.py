@@ -10,7 +10,7 @@ import hashlib
 from dataclasses import dataclass
 from typing import Any
 
-from lost_in_place.planning import Action, ActionName, Observation
+from lost_in_place.planning import Action, ActionName, EstimatorHealth, Observation
 
 PROMPT_VERSION = "v0.1-draft"
 
@@ -95,16 +95,20 @@ def render_observation(obs: Observation) -> str:
         *([f"- {entry}" for entry in obs.history] or ["- none yet"]),
     ]
     if obs.health is not None:
-        h = obs.health
-        lines += [
-            "Estimator health:",
-            f"- Position estimate valid: {'yes' if h.xy_valid else 'no'}",
-            f"- Horizontal position uncertainty: {h.eph_m:.2f} m",
-            f"- Optical flow quality: {h.flow_quality:.0f} of 255",
-            f"- Innovation check failing: {'yes' if h.innovation_check_failing else 'no'}",
-            f"- Heading reference: {'yes' if h.heading_reference else 'none'}",
-        ]
+        lines += health_lines(obs.health)
     return "\n".join(lines)
+
+
+def health_lines(h: EstimatorHealth) -> list[str]:
+    """The O1 block. The DEXI-prompt arms show the same lines."""
+    return [
+        "Estimator health:",
+        f"- Position estimate valid: {'yes' if h.xy_valid else 'no'}",
+        f"- Horizontal position uncertainty: {h.eph_m:.2f} m",
+        f"- Optical flow quality: {h.flow_quality:.0f} of 255",
+        f"- Innovation check failing: {'yes' if h.innovation_check_failing else 'no'}",
+        f"- Heading reference: {'yes' if h.heading_reference else 'none'}",
+    ]
 
 
 def prompt_hash(system: str, user: str) -> str:

@@ -1,0 +1,102 @@
+[
+ {
+  "name": "take_off",
+  "description": "Arm and take off vertically to the given altitude, then hover.",
+  "parameters": {
+   "type": "object",
+   "properties": {
+    "alt_m": {
+     "type": "number",
+     "description": "Target altitude above home, meters."
+    }
+   },
+   "required": [
+    "alt_m"
+   ]
+  }
+ },
+ {
+  "name": "move",
+  "description": "Fly a straight offset relative to the current position and heading, then hover.",
+  "parameters": {
+   "type": "object",
+   "properties": {
+    "direction": {
+     "type": "string",
+     "enum": [
+      "forward",
+      "back",
+      "left",
+      "right",
+      "up",
+      "down"
+     ]
+    },
+    "distance_m": {
+     "type": "number",
+     "description": "Distance in meters."
+    }
+   },
+   "required": [
+    "direction",
+    "distance_m"
+   ]
+  }
+ },
+ {
+  "name": "rotate",
+  "description": "Yaw in place by the given angle. Positive is clockwise (viewed from above).",
+  "parameters": {
+   "type": "object",
+   "properties": {
+    "deg": {
+     "type": "number",
+     "description": "Relative yaw change, degrees, -360 to 360."
+    }
+   },
+   "required": [
+    "deg"
+   ]
+  }
+ },
+ {
+  "name": "hold",
+  "description": "Hover in place for the given number of seconds.",
+  "parameters": {
+   "type": "object",
+   "properties": {
+    "seconds": {
+     "type": "number",
+     "description": "Hold duration, seconds."
+    }
+   },
+   "required": [
+    "seconds"
+   ]
+  }
+ },
+ {
+  "name": "land",
+  "description": "Land at the current position and disarm.",
+  "parameters": {
+   "type": "object",
+   "properties": {}
+  }
+ },
+ {
+  "name": "mission_complete",
+  "description": "Declare the mission finished. Only valid once landed and disarmed.",
+  "parameters": {
+   "type": "object",
+   "properties": {
+    "summary": {
+     "type": "string",
+     "description": "One or two sentences on what was accomplished."
+    }
+   },
+   "required": [
+    "summary"
+   ]
+  }
+ }
+]

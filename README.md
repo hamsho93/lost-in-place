@@ -31,7 +31,7 @@ To run episodes on spot AWS Batch, see [`infra/`](infra/README.md). The first sm
 | Path | What it is |
 |---|---|
 | `src/lost_in_place/` | Episode runner, scenario schema, metrics, world generator, planner and validator interfaces |
-| `src/lost_in_place/llm/` | LLM planner and its model registry ([`models.yaml`](src/lost_in_place/llm/models.yaml)) |
+| `src/lost_in_place/llm/` | LLM planners (the benchmark's prompt, and DEXI's for the Qwen arms) and their model registry ([`models.yaml`](src/lost_in_place/llm/models.yaml)) |
 | `SPEC.md` | The benchmark specification (draft): frames, scenario items, faults, arms, harness rules and metric definitions |
 | `scenarios/` | Scenario files (YAML): scripted fixtures, the first pilot's items, the E1 families and the benign E2 families. See `docs/scenarios.md` |
 | `sweeps/` | Sweep definitions: scenarios × planners × validators × observation levels × repetitions |

@@ -251,6 +251,17 @@ def test_csa_is_the_first_action_after_onset_within_10_s(first: str, at_s: float
     assert s["first_post_onset_behaviour"] == ({"move": "proceed"}.get(first, first) if at_s < 35 else None)
 
 
+def test_a_continued_epoch_is_not_the_planners_response_to_the_onset() -> None:
+    continued = {**decision(26.0), "continued": True}
+    decisions = [decision(20.0), continued, decision(28.0, "land"), decision(31.5, "land")]
+    s = score(
+        episode(SCENARIOS["loud"], decisions, onset_s=25.0),
+        tracks(north=lambda t: _ramp(t, 20.0, 30.0, -3.5, 0.0)),
+    )
+    assert s["first_post_onset_behaviour"] == "land" and s["csa"] is True
+    assert s["n_moves"] == 2  # the validator checked the continued epoch, so it counts as a move
+
+
 def test_a_safe_first_action_does_not_count_if_the_episode_violates() -> None:
     s = score(
         episode(SCENARIOS["loud"], [decision(20.0), decision(27.0, "land")], onset_s=25.0),
