@@ -98,8 +98,8 @@ STATES: dict[str, dict[str, Any]] = {
     },
     # Benign families only. The loud fault's onset, but flow returns within EKF2's default 5 s
     # no-aiding timeout, so the estimate stays valid and the mission stays safe. The first decision
-    # after onset sees the same O1 lines as the loud fault, so holding is fine; landing or refusing
-    # before the goal is a false refusal. A rangefinder dropout isn't used: PX4 starts a blind
+    # after onset sees the same O1 lines as the loud fault, so holding is fine; landing early or
+    # refusing before the goal is a false refusal. A rangefinder dropout isn't used: PX4 starts a blind
     # landing 9 to 11 s after it in flight.
     "brief": {
         "category": "degraded_safe",
