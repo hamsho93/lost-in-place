@@ -22,8 +22,13 @@ SCENARIOS = {p.stem: load_scenario(p) for p in PATHS}
 FAMILIES = sorted({s.pair_id for s in SCENARIOS.values() if s.pair_id})
 
 
+def _suffixes(name: str) -> tuple[str, ...]:
+    benign = SCENARIOS[f"{name}_healthy"].category == "control"
+    return families.BENIGN_SUFFIXES if benign else families.SUFFIXES
+
+
 def _family(name: str) -> dict:
-    return {suffix: SCENARIOS[f"{name}_{suffix}"] for suffix in families.SUFFIXES}
+    return {suffix: SCENARIOS[f"{name}_{suffix}"] for suffix in _suffixes(name)}
 
 
 def test_every_family_has_all_four_states() -> None:
@@ -33,7 +38,7 @@ def test_every_family_has_all_four_states() -> None:
         family, suffix = name.rsplit("_", 1)
         assert s.pair_id == family
         by_family[family].add(suffix)
-    assert all(states == set(families.SUFFIXES) for states in by_family.values())
+    assert all(states == set(_suffixes(family)) for family, states in by_family.items())
 
 
 @pytest.mark.parametrize("name", sorted(SCENARIOS))
@@ -62,7 +67,12 @@ def test_generated_benign_families_pass_their_checks(seed: int) -> None:
     scenarios = family.scenarios()
     assert families.problems(scenarios) == []
     assert scenarios["healthy"].category == "control"
-    assert {s.category for k, s in scenarios.items() if k != "healthy"} == {"state_conditioned"}
+    faulted = {k: s.category for k, s in scenarios.items() if k != "healthy"}
+    assert faulted == {
+        **dict.fromkeys(families.SUFFIXES[1:], "state_conditioned"),
+        "brief": "degraded_safe",
+    }
+    assert scenarios["brief"].expected_safe_behaviour == ["proceed", "hold"]
     # The hazardous checker rejects it: its second leg is safe.
     as_hazard = scenarios["healthy"].model_copy(update={"category": "instruction_hazard"})
     hazardous = {**scenarios, "healthy": as_hazard}
@@ -93,6 +103,16 @@ def test_problems_reports_a_diagonal_benign_leg() -> None:
     bent = mission.model_copy(update={"waypoints": [first, diagonal]})
     family["healthy"] = family["healthy"].model_copy(update={"mission": bent})
     assert "healthy: a benign leg isn't along a take-off axis" in families.problems(family)
+
+
+def test_problems_reports_a_missing_or_lasting_brief_dropout() -> None:
+    benign = next(f for f in FAMILIES if SCENARIOS[f"{f}_healthy"].category == "control")
+    family = _family(benign)
+    lasting = [s for s in family["brief"].steps if not (s.kind == "inject" and s.type == "ok")]
+    family["brief"] = family["brief"].model_copy(update={"steps": lasting})
+    assert "brief: missing, or not a 3 s flow dropout" in families.problems(family)
+    del family["brief"]
+    assert "brief: missing, or not a 3 s flow dropout" in families.problems(family)
 
 
 def test_problems_reports_a_broken_family() -> None:
