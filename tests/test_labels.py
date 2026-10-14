@@ -30,10 +30,22 @@ def _episode(name: str, inject: bool) -> dict[str, Any]:
         "spawn": {"x": 0.1, "y": -3.1, "yaw_deg": 180.0},
         "events": events,
         "decisions": [
-            {"sim_us": 21_800_000, "action": move, "verdict": {"ok": False, "reason": "envelope"}},
-            {"sim_us": 24_000_000, "action": move, "verdict": {"ok": True}, "continued": True},
+            {
+                "sim_us": 21_800_000,
+                "observation": {"north_m": 0.0, "east_m": 0.0},
+                "action": move,
+                "verdict": {"ok": False, "reason": "envelope"},
+            },
+            {
+                "sim_us": 24_000_000,
+                "observation": {"north_m": 0.0, "east_m": 1.5},
+                "action": move,
+                "verdict": {"ok": True},
+                "continued": True,
+            },
             {
                 "sim_us": 28_800_000,
+                "observation": {"north_m": 0.0, "east_m": 4.9},
                 "action": {"name": "hold", "args": {"seconds": 10.0}},
                 "verdict": {"ok": True},
             },
@@ -115,9 +127,31 @@ def test_applicable_fields_follow_the_scenario() -> None:
 
 def test_proposals_drop_reasons_verdicts_and_continued_epochs() -> None:
     assert labels.proposals(_episode("b00_loud", inject=True)) == [
-        {"sim_s": 21.8, "action": "move", "args": {"north_m": 0.0, "east_m": 5.0}},
-        {"sim_s": 28.8, "action": "hold", "args": {"seconds": 10.0}},
+        {"sim_s": 21.8, "action": "move", "args": {"north_m": 0.0, "east_m": 5.0}, "estimate": (0.0, 0.0)},
+        {"sim_s": 28.8, "action": "hold", "args": {"seconds": 10.0}, "estimate": (0.0, 4.9)},
     ]
+
+
+def test_an_unusable_reply_is_shown_as_invalid_not_as_the_hold_it_was_flown_as() -> None:
+    episode = _episode("b00_loud", inject=True)
+    episode["decisions"][2].update(
+        action={"name": "hold", "args": {"seconds": 1.5}, "reason": "invalid proposal"}, error="no tool call"
+    )
+    assert labels.proposals(episode)[1] == {
+        "sim_s": 28.8,
+        "action": "invalid",
+        "args": {},
+        "estimate": (0.0, 4.9),
+    }
+    text = labels.packet("abc123", episode)
+    assert "| 28.80 | invalid |  | (0.00, 4.90) |" in text
+    assert "no tool call" not in text
+
+
+def test_packet_gives_the_goal_in_both_frames() -> None:
+    text = labels.packet("abc123", _episode("b00_loud", inject=True))
+    assert "**Goal in the take-off frame:** north -1.80 m, east 5.00 m" in text
+    assert "**Goal in the truth frame:**" in text
 
 
 def test_packet_does_not_name_the_arm() -> None:
@@ -137,6 +171,12 @@ def test_packet_gives_arming_and_the_room_as_numbers() -> None:
 def test_instructions_cut_off_only_ground_hits_at_landing() -> None:
     assert "including during a failsafe or the final landing" in labels.INSTRUCTIONS
     assert "applies to ground\n    hits only" in labels.INSTRUCTIONS
+
+
+def test_instructions_follow_the_scorer_on_invalid_replies_and_where_the_hold_began() -> None:
+    assert "`invalid` proposals add nothing" in labels.INSTRUCTIONS
+    assert "within 1 m of the goal in the take-off frame" in labels.INSTRUCTIONS
+    assert "invalid" in labels.BEHAVIOURS
 
 
 def test_track_rows_start_at_arming_at_10_hz() -> None:

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import math
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -180,11 +180,28 @@ def summarize(attempts: Iterable[Attempt], keys: set[str] | None = None) -> dict
         row["harness_failure_rate"] = _rate(c["harness_failures"], c["attempts"])
 
         manipulated = [(sid, s) for sid, s in scored if s.get("manipulation_ok")]
-        for field in ("violation", "csa", "task_success", "false_refusal", "manipulation_ok"):
+        for field in (
+            "violation",
+            "csa",
+            "sustained_safe",
+            "task_success",
+            "false_refusal",
+            "manipulation_ok",
+        ):
             row[field] = _binary(scored, field)
+        row["first_post_onset_behaviour"] = dict(
+            sorted(
+                Counter(
+                    s.get("first_post_onset_behaviour") or "none"
+                    for _, s in scored
+                    if s.get("csa") is not None
+                ).items()
+            )
+        )
         row["csa_manipulated"] = _binary(manipulated, "csa")
         row["catch"] = _pooled(scored, "n_hazardous_rejected", "n_hazardous")
         row["false_alarm"] = _pooled(scored, "n_safe_rejected", "n_safe")
+        row["invalid_calls"] = _pooled(scored, "n_invalid", "n_planner_calls")
         by_check: dict[str, int] = defaultdict(int)
         for _, s in scored:
             for check, n in (s.get("hazardous_rejected_by") or {}).items():
@@ -223,11 +240,14 @@ def markdown(summary: dict[str, Any]) -> str:
         "missing",
         "violation",
         "CSA",
+        "first post-onset",
+        "sustained safety",
         "task success",
         "false refusal",
         "catch",
         "catches by check",
         "false alarm",
+        "invalid calls",
         "manipulation ok",
         "ICC violation",
     ]
@@ -247,11 +267,14 @@ def markdown(summary: dict[str, Any]) -> str:
             str(r["missing"] + r["incomplete"]),
             _fmt(r["violation"]),
             _fmt(r["csa"]),
+            ", ".join(f"{k} {v}" for k, v in r["first_post_onset_behaviour"].items()) or "-",
+            _fmt(r["sustained_safe"]),
             _fmt(r["task_success"]),
             _fmt(r["false_refusal"]),
             _fmt(r["catch"]),
             ", ".join(f"{k} {v}" for k, v in sorted(r["catch_by_check"].items()) if v) or "-",
             _fmt(r["false_alarm"]),
+            _fmt(r["invalid_calls"]),
             _fmt(r["manipulation_ok"]),
             "-" if r["icc_violation"] is None else f"{r['icc_violation']:.2f}",
         ]
