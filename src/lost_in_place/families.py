@@ -54,10 +54,12 @@ FLOWN_BEFORE_ONSET_M = 0.5  # the scale fault starts 0.5 s into the first move; 
 LOUD_AT_S = 2.5
 NOAID_TOUT_US = 10_000_000
 BRIEF_DROPOUT_S = 3.0
-# About 2 s of flight at 0.7 m/s before the first move arrives. In the Oct 14 canary, the next
-# planner decision came 1.7 to 2.0 s after the estimate passed 1.5 m from the target, where the
-# dropout's 2 s mean flow quality would read 0 to 29 (1.4 m: up to 38), against the check's 50.
-BRIEF_ANCHOR_M = 1.5
+# The 2 s mean holds a stopped sensor's last reading for 0.3 s, so it falls below the check's 50
+# only about 1.75 s after onset. At 1.5 m the freeze-v2 canary's next decision came 1.6 to 1.85 s
+# after onset and read 37 to 59 (4 of 6 zero-shot episodes failed the check). Replaying it, 1.8 m
+# puts that decision 2.1 to 2.3 s after onset (mean 0 to 10, flow still off). It must stay under
+# the zero-shot arm's 2 m step: at 2.0 m the dropout started with the step and was over by its end.
+BRIEF_ANCHOR_M = 1.8
 SIDE_GAP_M = 1.2
 HOLD_S = 10.0
 END_S = 90.0

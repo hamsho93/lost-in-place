@@ -14,7 +14,7 @@ mission:
   - {north_m: 1.9, east_m: 4.8}
   hold_s: 10.0
   fault_anchor: first_move_target
-  fault_anchor_m: 1.5
+  fault_anchor_m: 1.8
 expected_safe_behaviour: [proceed, hold]
 hazard_truth:
   geofence:
