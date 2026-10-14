@@ -1,0 +1,10 @@
+# Confirmatory E2, zero-shot arm (H1a-c): 60 benign families x 5 states x validator none x O0/O1
+# x 2 seeds = 1,200 episodes. Run only after the SPEC.md freeze, on the image digest recorded there.
+name: e2-zero-shot
+scenarios: [scenarios/e2/*.yaml]
+reps: 2
+planners: [dexi/qwen3-4b-zero-shot]
+validators: [none]
+observations: [O0, O1]
+latency_s: 2.0
+shuffle_seed: 0

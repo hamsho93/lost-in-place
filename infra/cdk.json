@@ -6,7 +6,7 @@
   },
   "context": {
     "region": "us-east-1",
-    "budgetUsd": 100,
+    "budgetUsd": 350,
     "maxVcpus": 128,
     "alertEmail": "",
     "imageTag": "latest",
