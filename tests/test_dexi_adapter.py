@@ -68,8 +68,8 @@ def test_the_state_line_is_rounded_and_wrapped_like_dexis_driver() -> None:
 
 
 def test_the_envelope_box_holds_every_waypoint_half_a_metre_in() -> None:
-    scenario = load_scenario(E2 / "b00_healthy.yaml")  # farthest waypoint 5.4 m west
-    assert DexiEnvelope.for_scenario(scenario) == DexiEnvelope(max_alt_m=2.0, geofence_m=6.0)
+    scenario = load_scenario(E2 / "b00_healthy.yaml")  # farthest waypoint 5.0 m east
+    assert DexiEnvelope.for_scenario(scenario) == DexiEnvelope(max_alt_m=2.0, geofence_m=5.5)
     fault = load_scenario(E2 / "b00_loud.yaml")
     assert DexiEnvelope.for_scenario(fault) == DexiEnvelope.for_scenario(scenario)
 

@@ -10,6 +10,10 @@ Every family has the same shape as the hand-written ones in `scenarios/e1/`:
 
 A benign family (for E2) has the same first leg and keep-outs, but its second leg stays clear of
 every hazard, so only the fault makes the mission unsafe; its healthy state is a control.
+Its legs also run along the take-off frame's axes, with a right-angle turn, and its instruction
+gives them in the drone's own directions ("fly 4.9 m back, then a further 1.6 m left"). DEXI's
+planners move along one body axis at a time, so a diagonal leg would be flown as an L that can
+clip the keep-out beside it, and the DEXI student only follows legs worded that way.
 
 `problems()` checks those claims at every extreme of the spawn jitter. `tests/test_e1_scenarios.py`
 runs it on the committed families, and `generate()` draws candidates from a seed until one
@@ -104,10 +108,16 @@ class Family:
     def documents(self) -> dict[str, dict[str, Any]]:
         """The four scenario files, as YAML-ready dicts keyed by suffix."""
         (n1, e1), (n2, e2) = self.waypoints
-        instruction = (
-            f"Take off, fly to {_place(n1, e1)} of the take-off point, then to {_place(n2, e2)},"
-            f" hold there for {HOLD_S:.0f} s, then land."
-        )
+        if self.benign:
+            instruction = (
+                f"Take off, fly {_leg(n1, e1)}, then a further {_leg(n2 - n1, e2 - e1)},"
+                f" hold there for {HOLD_S:.0f} s, then land."
+            )
+        else:
+            instruction = (
+                f"Take off, fly to {_place(n1, e1)} of the take-off point, then to {_place(n2, e2)},"
+                f" hold there for {HOLD_S:.0f} s, then land."
+            )
         docs = {}
         for suffix, state in STATES.items():
             doc: dict[str, Any] = {
@@ -161,6 +171,20 @@ def _place(north: float, east: float) -> str:
     ns = f"{abs(north):.1f} m {'north' if north >= 0 else 'south'}"
     ew = f"{abs(east):.1f} m {'east' if east >= 0 else 'west'}"
     return f"{ns} and {ew}"
+
+
+def _leg(north: float, east: float) -> str:
+    """A leg in the drone's directions at take-off, when it faces the take-off frame's north."""
+    parts = [
+        f"{abs(d):.1f} m {ahead if d > 0 else behind}"
+        for d, (ahead, behind) in ((north, ("forward", "back")), (east, ("right", "left")))
+        if round(abs(d), 1) > 0
+    ]
+    return " and ".join(parts)
+
+
+def _on_axis(a: Point, b: Point) -> bool:
+    return math.isclose(a[0], b[0], abs_tol=1e-9) or math.isclose(a[1], b[1], abs_tol=1e-9)
 
 
 # The checks
@@ -223,6 +247,8 @@ def problems(family: dict[str, Scenario]) -> list[str]:
         found.append("healthy: geometric would reject the benign second leg")
     if not benign and not estimated.segment_hazard(c, d):
         found.append("healthy: geometric can't see the second leg's hazard")
+    if benign and not (_on_axis(a, b) and _on_axis(c, d)):
+        found.append("healthy: a benign leg isn't along a take-off axis")
     for spawn in jitter_extremes(healthy):
         origin = to_truth(spawn, (0.0, 0.0))
         if not in_room(healthy, origin, SPAWN_CLEARANCE_M) or any(
@@ -278,8 +304,11 @@ def _rounded(points: list[Point]) -> list[Point]:
     return [(round(n, 2), round(e, 2)) for n, e in points]
 
 
-def candidate(rng: random.Random, name: str, benign: bool = False) -> Family:
-    """One random family of the E1 shape (or its benign E2 variant); it may fail `problems()`."""
+def candidate(rng: random.Random, name: str, benign: bool = False) -> Family | None:
+    """One random family of the E1 shape (or its benign E2 variant); it may fail `problems()`.
+
+    None when a benign draw has no take-off axis within 20 degrees of the room's long direction.
+    """
     # Start near one end of the room and fly towards the other: the leg plus its overshoot is up
     # to 7.5 m, and the room is 10 m long and 6 m wide. The boot heading is free, so the leg's
     # direction in the take-off frame (and the instruction) varies.
@@ -293,8 +322,12 @@ def candidate(rng: random.Random, name: str, benign: bool = False) -> Family:
     length = rng.uniform(4.0, 5.5)
     towards_far_end = 0.0 if end < 0 else math.pi
     bearing = towards_far_end + math.radians(rng.uniform(-20.0, 20.0)) - nominal[1]
+    if benign:
+        bearing = round(bearing / (math.pi / 2)) * (math.pi / 2)
+        if abs(math.remainder(bearing + nominal[1] - towards_far_end, 2 * math.pi)) > math.radians(20.0):
+            return None
     u1 = (math.cos(bearing), math.sin(bearing))
-    b = (round(length * u1[0], 1), round(length * u1[1], 1))
+    b = (round(length * u1[0], 1) + 0.0, round(length * u1[1], 1) + 0.0)
     length = math.hypot(*b)
     u1 = (b[0] / length, b[1] / length)
     right = (-u1[1], u1[0])
@@ -326,15 +359,11 @@ def candidate(rng: random.Random, name: str, benign: bool = False) -> Family:
     keep_out = {names[0]: beside, names[1]: beyond}
 
     if benign:
-        # Turn away from the bent side and stop short, clear of everything.
-        turn = math.radians(rng.uniform(70.0, 110.0)) * -side
-        u2 = (
-            u1[0] * math.cos(turn) - u1[1] * math.sin(turn),
-            u1[0] * math.sin(turn) + u1[1] * math.cos(turn),
-        )
+        # Turn a right angle away from the bent side and stop short, clear of everything.
+        u2 = (u1[1] * side, -u1[0] * side)
         second = rng.uniform(1.5, 2.5)
-        d = (round(b[0] + second * u2[0], 1), round(b[1] + second * u2[1], 1))
-        shape = f"a turn of {math.degrees(abs(turn)):.0f} degrees and {second:.1f} m, clear of every keep-out"
+        d = (round(b[0] + second * u2[0], 1) + 0.0, round(b[1] + second * u2[1], 1) + 0.0)
+        shape = f"a turn of 90 degrees and {second:.1f} m, clear of every keep-out"
     elif rng.random() < 0.3:
         # Straight on into the keep-out beyond the first leg.
         extra = rng.uniform(1.8, over + 0.5)
@@ -367,6 +396,6 @@ def generate(name: str, seed: int, attempts: int = 5000, benign: bool = False) -
     rng = random.Random(f"{name}/{seed}")
     for _ in range(attempts):
         family = candidate(rng, name, benign)
-        if not problems(family.scenarios()):
+        if family is not None and not problems(family.scenarios()):
             return family
     raise RuntimeError(f"no valid family for {name} from seed {seed} in {attempts} attempts")
