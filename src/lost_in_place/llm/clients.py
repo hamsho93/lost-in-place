@@ -7,6 +7,7 @@ need an entry in `models.yaml`.
 
 from __future__ import annotations
 
+import itertools
 import json
 import os
 import re
@@ -282,9 +283,13 @@ class BedrockImportedClient:
     with InvokeModel; the model answers with Qwen-style `<tool_call>` text.
 
     `model_id` is the imported model's name. Its ARN changes with every import, so it is looked up
-    on the first call."""
+    on the first call.
 
-    attempts = 8
+    Bedrock removes an idle import's copies after about 5 minutes, and restoring one took about
+    27 minutes on Oct 14, 2026. The sim is paused while the planner thinks, so a call waits up to
+    `restore_wait_s` rather than turning the episode into a harness failure."""
+
+    restore_wait_s = 1800.0
     read_timeout_s = 600
 
     def __init__(
@@ -334,7 +339,8 @@ class BedrockImportedClient:
     def _invoke(self, body: dict[str, Any]) -> dict[str, Any]:
         if self._runtime is None:
             self._runtime = self._client("bedrock-runtime")
-        for attempt in range(self.attempts):
+        waited = 0.0
+        for attempt in itertools.count():
             try:
                 response = self._runtime.invoke_model(
                     modelId=self.arn(),
@@ -346,9 +352,11 @@ class BedrockImportedClient:
                 return payload
             except Exception as exc:
                 code = getattr(exc, "response", {}).get("Error", {}).get("Code", "")
-                if attempt + 1 == self.attempts or code not in _IMPORTED_RETRYABLE:
+                delay = min(60.0, 5.0 * 2**attempt)
+                if code not in _IMPORTED_RETRYABLE or waited + delay > self.restore_wait_s:
                     raise
-                self._sleep(min(60.0, 5.0 * 2**attempt))
+                self._sleep(delay)
+                waited += delay
         raise AssertionError("unreachable")
 
     def complete(self, system: str, user: str, tools: list[dict[str, Any]]) -> Completion:

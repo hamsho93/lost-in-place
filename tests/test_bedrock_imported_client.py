@@ -144,6 +144,22 @@ def test_waits_for_a_cold_model_then_succeeds() -> None:
     assert len(runtime.calls) == 3
 
 
+def test_waits_out_a_slow_restore_then_gives_up() -> None:
+    sleeps: list[float] = []
+    slow = Runtime(*[ClientError("ModelNotReadyException")] * 30, completion("ok\n</think>\n\n" + MOVE))
+    imported = BedrockImportedClient(SPEC, runtime=slow, control=Control(), sleep=sleeps.append)
+    assert imported.complete("s", "u", tool_specs()).tool_calls
+    assert sum(sleeps) > 27 * 60
+
+    sleeps.clear()
+    never = Runtime(*[ClientError("ModelNotReadyException")] * 50)
+    imported = BedrockImportedClient(SPEC, runtime=never, control=Control(), sleep=sleeps.append)
+    with pytest.raises(ClientError):
+        imported.complete("s", "u", tool_specs())
+    assert sum(sleeps) <= BedrockImportedClient.restore_wait_s
+    assert sum(sleeps) > BedrockImportedClient.restore_wait_s - 60
+
+
 def test_other_errors_are_not_retried() -> None:
     runtime = Runtime(ClientError("ValidationException"))
     with pytest.raises(ClientError):
