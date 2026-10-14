@@ -184,6 +184,41 @@ def _cmd_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_label_sample(args: argparse.Namespace) -> int:
+    from lost_in_place import labels, report
+
+    runs: str = args.runs
+    keys = None
+    if args.manifest:
+        from lost_in_place import manifest
+
+        document = manifest.read_document(args.manifest)
+        keys = {manifest.Entry(**e).key for e in document["entries"]}
+        if runs.startswith("s3://"):
+            runs = manifest.runs_root(runs, document)
+    attempts = report.s3_attempts(runs) if runs.startswith("s3://") else report.local_attempts(Path(runs))
+    picked = labels.pick(attempts, args.fraction, args.seed, keys)
+    if not picked:
+        print("no scored episodes to sample", file=sys.stderr)
+        return 1
+    args.out.mkdir(parents=True, exist_ok=True)
+    labels.sample(picked, labels.loader(runs), args.out, args.seed, with_plots=not args.no_plots)
+    labels.write_instructions(args.out)
+    print(
+        f"{len(picked)} episodes in {args.out}. Give the labeller sheet.csv, INSTRUCTIONS.md and packets/;"
+        " keep key.json."
+    )
+    return 0
+
+
+def _cmd_label_agree(args: argparse.Namespace) -> int:
+    from lost_in_place import labels
+
+    result = labels.agree(labels.read_sheet(args.sheet.read_text()), json.loads(args.key.read_text()))
+    print(json.dumps(result, indent=1) if args.json else labels.markdown(result))
+    return 0
+
+
 def _cmd_freeze_record(args: argparse.Namespace) -> int:
     from lost_in_place import freeze
 
@@ -312,7 +347,9 @@ def build_parser() -> argparse.ArgumentParser:
     worlds.add_argument("--seed", type=int, default=0)
     worlds.set_defaults(func=_cmd_worlds)
 
-    fam = sub.add_parser("families", help="generate E1 scenario families (four matched states each)")
+    fam = sub.add_parser(
+        "families", help="generate scenario families (four matched states each; five with --benign)"
+    )
     fam.add_argument("--count", type=int, required=True, help="how many families")
     fam.add_argument("--start", type=int, default=0, help="number of the first family (default: 0)")
     fam.add_argument("--prefix", default="g", help="family names are <prefix><number> (default: g)")
@@ -321,7 +358,7 @@ def build_parser() -> argparse.ArgumentParser:
     fam.add_argument(
         "--benign",
         action="store_true",
-        help="E2 variants: a safe second leg, and the healthy state is a control",
+        help="E2 variants: a safe second leg, a healthy control and a brief-flow-dropout control",
     )
     fam.set_defaults(func=_cmd_families)
 
@@ -401,6 +438,23 @@ def build_parser() -> argparse.ArgumentParser:
     rep.add_argument("--manifest", help="only this manifest's episodes, and count those not started")
     rep.add_argument("--json", action="store_true", help="full summary as JSON instead of a table")
     rep.set_defaults(func=_cmd_report)
+
+    ls = sub.add_parser(
+        "label-sample", help="a blind hand-label sample of scored episodes, to check the scorer"
+    )
+    ls.add_argument("runs", help="runs root, as for `lip report`")
+    ls.add_argument("--manifest", help="only this manifest's episodes")
+    ls.add_argument("--fraction", type=float, default=0.1, help="share of each cell (default: 0.1)")
+    ls.add_argument("--seed", type=int, default=0)
+    ls.add_argument("--out", type=Path, required=True, help="directory for the packets, sheet and key")
+    ls.add_argument("--no-plots", action="store_true", help="skip the plots (no matplotlib needed)")
+    ls.set_defaults(func=_cmd_label_sample)
+
+    la = sub.add_parser("label-agree", help="the hand labels' agreement with the scorer")
+    la.add_argument("sheet", type=Path, help="the labeller's sheet.csv")
+    la.add_argument("key", type=Path, help="key.json from `lip label-sample`")
+    la.add_argument("--json", action="store_true")
+    la.set_defaults(func=_cmd_label_agree)
 
     fr = sub.add_parser("freeze-record", help="SHA-256 of each artifact in SPEC's freeze record")
     fr.add_argument("--root", type=Path, default=Path(), help="repo root (default: .)")
