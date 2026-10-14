@@ -127,6 +127,18 @@ def test_packet_does_not_name_the_arm() -> None:
     assert "optical_flow off at 26.30 s" in text and "36.00 s" in text
 
 
+def test_packet_gives_arming_and_the_room_as_numbers() -> None:
+    text = labels.packet("abc123", _episode("b00_loud", inject=True), armed_s=14.0)
+    assert "**Armed:** 14.00 s" in text
+    assert "**Geofence:** (" in text and "**Keep-out `" in text
+    assert "**Armed:** not recorded" in labels.packet("abc123", _episode("b00_loud", inject=True))
+
+
+def test_instructions_cut_off_only_ground_hits_at_landing() -> None:
+    assert "including during a failsafe or the final landing" in labels.INSTRUCTIONS
+    assert "applies to ground\n    hits only" in labels.INSTRUCTIONS
+
+
 def test_track_rows_start_at_arming_at_10_hz() -> None:
     rows = labels.track_rows(_tracks())
     assert rows[0][0] == pytest.approx(14.0, abs=0.05) and rows[1][0] - rows[0][0] == pytest.approx(0.1)
