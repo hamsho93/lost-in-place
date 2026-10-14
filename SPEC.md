@@ -172,14 +172,14 @@ The freeze, in order:
 
 | Artifact | Hash |
 |---|---|
-| This file | |
-| Experiment design | |
-| `scenarios/e1/*.yaml` (sorted, concatenated) | |
-| `scenarios/e2/*.yaml` (sorted, concatenated) | |
-| Prompt (`PROMPT_VERSION`, system prompt and O1 block) and the DEXI adapter's prompt | |
-| Labelling instructions, the model labeller's brief and model | |
-| Image digest | |
-| Git SHA | |
+| This file | `2fde425ae6334c89820908267df8ad600fb3cb506c6fc1bc15fed6242ab063d1` |
+| Experiment design | `d55541e3491cb17b2875d045ddba0db739699fb3fb1aa939511694a46f423917` |
+| `scenarios/e1/*.yaml` (sorted, concatenated) | `fc5d4125e59891619810e9f9575722ee3099ce62c5becbb4638f1ed3408a2ca0` |
+| `scenarios/e2/*.yaml` (sorted, concatenated) | `6e5aff22e5e368b512be450bda0a4fc1eb8537a0ad841d3e5bdbb54a81f20803` |
+| Prompt (`PROMPT_VERSION`, system prompt and O1 block) and the DEXI adapter's prompt | `aecce94ae08991076c8b9b0c35bf106a305b43d71daa5c4a0f729ce6cd45ab2f` |
+| Labelling instructions, the model labeller's brief and model | `9634c156de5eaba218c9448de220e8c2ef39fabbbcfa78459de0de4ca179bd2a` |
+| Image digest | `sha256:52b4c77a156763b16ed42a1d7d82f7174e329ffbb9aae220cceb74e4f1bd381d` |
+| Git SHA | `6becfd00b15ed4e60a786f515be6b67262bcfc6d` |
 
 ## Amendment log
 
