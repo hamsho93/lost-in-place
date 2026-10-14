@@ -41,8 +41,10 @@ def _fly(
     upload_name: str | None = None,
 ) -> int:
     """Fly, analyze and upload one episode. Exits non-zero only on a harness failure, which Batch
-    retries; an analysis error never does, because a retry would re-roll a result."""
+    retries; an analysis error never does, because a retry would re-roll a result. Nor does a harness
+    failure whose score shows a violation (`manifest.is_result`)."""
     from lost_in_place.episode import run_episode
+    from lost_in_place.manifest import is_result
     from lost_in_place.scenario import load_scenario
     from lost_in_place.slots import claim_slot
 
@@ -62,7 +64,9 @@ def _fly(
         from lost_in_place.storage import attempt_label, upload_dir
 
         print(f"uploaded {out} to {upload_dir(out, upload, attempt_label(), upload_name)}")
-    return 0 if result.outcome == "completed" else 1
+    score_path = out / "score.json"
+    score = json.loads(score_path.read_text()) if score_path.exists() else None
+    return 0 if result.outcome == "completed" or is_result(result.outcome, score) else 1
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
@@ -141,11 +145,11 @@ def _cmd_run_manifest(args: argparse.Namespace) -> int:
     upload = manifest.runs_root(args.upload, document) if args.upload else None
     print(json.dumps({"index": index, "key": entry.key, "runs": upload}))
     if upload and not args.force:
-        from lost_in_place.storage import attempt_outcomes
+        from lost_in_place.storage import attempt_results
 
-        outcomes = attempt_outcomes(upload, entry.key)
-        if manifest.settled(outcomes):
-            print(json.dumps({"skipped": entry.key, "attempts": outcomes}))
+        attempts = attempt_results(upload, entry.key)
+        if manifest.settled(attempts):
+            print(json.dumps({"skipped": entry.key, "attempts": [o for o, _ in attempts]}))
             return 0
     agent = AgentConfig(
         planner=entry.planner,

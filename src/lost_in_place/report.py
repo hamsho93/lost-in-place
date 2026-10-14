@@ -2,8 +2,9 @@
 
 Reads every attempt under a runs root (a local copy, or `s3://bucket/runs`), laid out as
 `<episode key>/<attempt label>/{episode,score}.json`. An episode's result is its first attempt
-that isn't a harness failure (`docs/fidelity.md`); the harness-failure rate is reported per cell
-next to the results. A cell is (category, state, planner, validator, observation).
+that is one: not a harness failure, or a harness failure after a violation (`docs/fidelity.md`).
+The harness-failure rate is reported per cell next to the results. A cell is (category, state,
+planner, validator, observation).
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from lost_in_place.manifest import MAX_ATTEMPTS, is_harness_failure
+from lost_in_place.manifest import MAX_ATTEMPTS, is_result
 from lost_in_place.planning import arm_name
 
 Z95 = 1.959964
@@ -141,9 +142,9 @@ def _pooled(rows: Scored, k_field: str, n_field: str) -> dict[str, Any] | None:
 
 
 def counted(tries: Iterable[Attempt]) -> Attempt | None:
-    """An episode's result: its earliest attempt that isn't a harness failure."""
+    """An episode's result: its earliest attempt that is one (`manifest.is_result`)."""
     in_order = sorted(tries, key=lambda a: a.modified)
-    return next((a for a in in_order if not is_harness_failure(a.outcome)), None)
+    return next((a for a in in_order if is_result(a.outcome, a.score)), None)
 
 
 def summarize(attempts: Iterable[Attempt], keys: set[str] | None = None) -> dict[str, Any]:
@@ -164,7 +165,7 @@ def summarize(attempts: Iterable[Attempt], keys: set[str] | None = None) -> dict
         c = cells[cell]
         c["episodes"] += 1
         c["attempts"] += len(tries)
-        c["harness_failures"] += sum(is_harness_failure(a.outcome) for a in tries)
+        c["harness_failures"] += sum(not is_result(a.outcome, a.score) for a in tries)
         if result is None:
             c["missing" if len(tries) >= MAX_ATTEMPTS else "incomplete"] += 1
         else:

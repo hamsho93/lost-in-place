@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -105,15 +106,18 @@ def test_run_manifest_skips_only_results_from_its_own_sweep(
     path = tmp_path / "second.json"
     path.write_text(manifest.dumps(spec, manifest.build(spec, ROOT)))
     entry = manifest.read(str(path))[0]
-    earlier = {f"s3://bucket/runs/{entry.key}": ["completed"]}  # the same episode, from another sweep
-    mine = {f"s3://bucket/runs/second/{entry.key}": ["completed"]}
+    # The same episode, from another sweep.
+    earlier: dict[str, list[tuple[str, dict[str, Any] | None]]] = {
+        f"s3://bucket/runs/{entry.key}": [("completed", None)]
+    }
+    mine = {f"s3://bucket/runs/second/{entry.key}": [("completed", None)]}
     seen: list[str] = []
 
-    def outcomes(uri: str, key: str) -> list[str]:
+    def results(uri: str, key: str) -> list[tuple[str, dict[str, Any] | None]]:
         seen.append(f"{uri}/{key}")
         return {**earlier, **mine}.get(f"{uri}/{key}", [])
 
-    monkeypatch.setattr(storage, "attempt_outcomes", outcomes)
+    monkeypatch.setattr(storage, "attempt_results", results)
     assert cli.main(["run-manifest", str(path), "--index", "0", "--upload", "s3://bucket/runs"]) == 0
     assert seen == [f"s3://bucket/runs/second/{entry.key}"]
     assert '"skipped"' in capsys.readouterr().out
@@ -124,15 +128,71 @@ def test_arrays_are_split_at_the_batch_limit() -> None:
     assert manifest.array_chunks(270) == [(0, 270)]
 
 
+VIOLATED = {"violation": True}
+CLEAN = {"violation": False}
+
+
 @pytest.mark.parametrize(
-    ("outcomes", "settled"),
+    ("attempts", "settled"),
     [
         ([], False),
-        (["boot_stall"], False),
-        (["boot_stall", "completed"], True),
-        (["error: OSError", "sim_stall: no clock", "timeout"], True),
-        (["inject_failed: denied", "pending"], False),
+        ([("boot_stall", None)], False),
+        ([("boot_stall", None), ("completed", CLEAN)], True),
+        ([("error: OSError", None), ("sim_stall: no clock", None), ("timeout", None)], True),
+        ([("inject_failed: denied", None), ("pending", None)], False),
+        ([("sim_stall: frozen at 41.0 s", VIOLATED)], True),
+        ([("timeout", CLEAN)], False),
+        ([("error: LinkLost", {"error": "never armed"})], False),
+    ],
+    ids=[
+        "none",
+        "boot",
+        "then-result",
+        "three-failures",
+        "two-failures",
+        "stall-after-violation",
+        "clean-timeout",
+        "never-armed",
     ],
 )
-def test_an_episode_is_settled_by_a_result_or_three_attempts(outcomes: list[str], settled: bool) -> None:
-    assert manifest.settled(outcomes) is settled
+def test_an_episode_is_settled_by_a_result_or_three_attempts(
+    attempts: list[tuple[str, dict[str, Any] | None]], settled: bool
+) -> None:
+    assert manifest.settled(attempts) is settled
+
+
+@pytest.mark.parametrize(
+    ("outcome", "score", "code"),
+    [
+        ("completed", {"violation": False}, 0),
+        ("sim_stall: frozen at 41.0 s", {"violation": True}, 0),
+        ("sim_stall: frozen at 41.0 s", {"violation": False}, 1),
+        ("timeout", None, 1),
+    ],
+)
+def test_batch_retries_a_harness_failure_unless_it_came_after_a_violation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str, score: dict[str, Any] | None, code: int
+) -> None:
+    import contextlib
+
+    from lost_in_place import cli, episode, slots
+    from lost_in_place.agent import AgentConfig
+
+    def fly(scenario: Any, seed: int, out: Path, **_: Any) -> Any:
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "flight.ulg").write_bytes(b"")
+        return episode.EpisodeResult(
+            scenario_id=scenario.id, seed=seed, instance=0, world="w", spawn={}, outcome=outcome
+        )
+
+    def analyze(run_dirs: list[Path]) -> int:
+        if score is not None:
+            (run_dirs[0] / "score.json").write_text(json.dumps(score))
+        return 0
+
+    monkeypatch.setattr(episode, "run_episode", fly)
+    monkeypatch.setattr(slots, "claim_slot", lambda instance: contextlib.nullcontext(0))
+    monkeypatch.setattr(cli, "_analyze", analyze)
+    scenario = ROOT / "scenarios" / "pilot" / "cross_loud.yaml"
+    out = tmp_path / "run"
+    assert cli._fly(scenario, 0, out, AgentConfig(), instance=None, analyze=True, upload=None) == code

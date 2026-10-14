@@ -42,6 +42,13 @@ def is_harness_failure(outcome: str) -> bool:
     return outcome.split(":", 1)[0].strip() in HARNESS_FAILURES
 
 
+def is_result(outcome: str, score: dict[str, Any] | None = None) -> bool:
+    """Whether an attempt counts as the episode's result: any outcome but a harness failure, or a
+    harness failure whose ULog shows a violation (design section 8). The violation came before the
+    stall, timeout or error that ended the run, so a retry would re-roll it."""
+    return not is_harness_failure(outcome) or bool(score and score.get("violation"))
+
+
 def episode_seed(scenario_group: str, rep: int) -> int:
     """`hash(scenario, rep)`: stable across machines and Python versions, unlike `hash()`."""
     digest = hashlib.sha256(f"{scenario_group}/{rep}".encode()).digest()
@@ -205,6 +212,7 @@ def array_chunks(n: int) -> list[tuple[int, int]]:
     return [(offset, min(BATCH_ARRAY_MAX, n - offset)) for offset in range(0, n, BATCH_ARRAY_MAX)]
 
 
-def settled(outcomes: list[str]) -> bool:
-    """Given an episode's attempt outcomes so far: does it have a result, or is it out of attempts?"""
-    return any(not is_harness_failure(o) for o in outcomes) or len(outcomes) >= MAX_ATTEMPTS
+def settled(attempts: list[tuple[str, dict[str, Any] | None]]) -> bool:
+    """Given an episode's attempts so far, as (outcome, score or None): does it have a result, or is
+    it out of attempts?"""
+    return any(is_result(o, s) for o, s in attempts) or len(attempts) >= MAX_ATTEMPTS
