@@ -20,15 +20,18 @@ from typing import Any, Literal, Protocol, runtime_checkable
 ActionName = Literal["take_off", "move", "rotate", "hold", "land", "refuse"]
 ENTRY_POINT_GROUP = "lost_in_place.planners"
 LLM_PLANNER = "llm"
+DEXI_PLANNER = "dexi"
 # How a history line ends when the validator rejected the action; scripted planners key on it.
 REJECTED = " - rejected: "
 
 
 def arm_name(planner: str, options: dict[str, str] | None = None) -> str:
     """The planner arm in episode keys and results. An LLM arm is named by its model (`llm/models.yaml`),
-    so two models in one sweep never share a key or a cell."""
-    if planner == LLM_PLANNER and options and options.get("model"):
-        return options["model"]
+    so two models in one sweep never share a key or a cell; another planner running a model is named
+    `<planner>-<model>`."""
+    model = (options or {}).get("model")
+    if model:
+        return model if planner == LLM_PLANNER else f"{planner}-{model}"
     return planner
 
 
@@ -71,6 +74,30 @@ class Planner(Protocol):
 class Verdict:
     ok: bool
     reason: str = ""
+
+
+@dataclass(frozen=True)
+class Outcome:
+    """How a primitive ended, for a `PrimitivePlanner`."""
+
+    action: Action
+    verdict: Verdict  # the last check: a rejection after `epochs` > 0 stopped the primitive part-way
+    status: str  # the last epoch's status, as in the history: "arrived", "done", "interrupted: ..."
+    observation: Observation  # after the primitive
+    epochs: int  # epochs that flew the action itself
+    timed_out: bool = False
+
+
+@runtime_checkable
+class PrimitivePlanner(Planner, Protocol):
+    """A planner whose every decision is a whole primitive, as in DEXI's loop. The agent keeps
+    flying an unfinished move, turn or climb without asking the planner again, still checking it
+    with the validator every epoch, until it arrives, is rejected, loses control or runs past
+    `timeout_s`. Then it reports the outcome."""
+
+    def timeout_s(self, action: Action) -> float: ...
+
+    def outcome(self, outcome: Outcome) -> None: ...
 
 
 @runtime_checkable

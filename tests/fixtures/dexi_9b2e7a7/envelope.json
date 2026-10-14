@@ -1,0 +1,1 @@
+{"mission": "Take off to 1.2 m, fly a short pattern, then land and declare the mission complete.", "max_alt_m": 1.8, "geofence_m": 6.5, "max_move_m": 2.0, "max_hold_s": 30, "max_steps": 20}

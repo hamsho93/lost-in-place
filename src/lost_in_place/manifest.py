@@ -105,13 +105,17 @@ class SweepSpec:
 
 
 def resolve_arm(name: str, options: dict[str, str]) -> tuple[str, dict[str, str]]:
-    """A sweep's planner entry is an installed planner, or a model name from `llm/models.yaml`."""
+    """A sweep's planner entry is an installed planner, a model name from `llm/models.yaml`, or
+    `<planner>/<model>` for a planner that runs a model (`dexi/qwen3-4b-student`)."""
     if name in available_planners():
         return name, dict(options)
     from lost_in_place.llm.registry import get_model
 
-    get_model(name)  # raises for an unknown name
-    return LLM_PLANNER, {**options, "model": name}
+    planner, _, model = name.rpartition("/")
+    if planner and planner not in available_planners():
+        raise LookupError(f"no planner '{planner}'; installed: {', '.join(available_planners())}")
+    get_model(model)  # raises for an unknown name
+    return planner or LLM_PLANNER, {**options, "model": model}
 
 
 def build(spec: SweepSpec, root: Path = Path()) -> list[Entry]:

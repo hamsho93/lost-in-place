@@ -49,7 +49,7 @@ Fault injections that PX4 doesn't acknowledge end the episode as the harness fai
 
 - **`scripted-naive`** flies the mission's waypoints in order, holds `mission.hold_s` at the last one and lands, whatever the estimator says. **After a rejected move it skips that waypoint** and goes on to the next, so one rejected leg counts as one rejected proposal.
 - **`scripted-cautious`** does the same, but lands when the health it is shown looks bad: position invalid, an innovation check failing, eph above 1 m, or flow quality below 50. At O0 it is shown nothing, so it behaves like `scripted-naive`.
-- **Qwen arms (E2)** run through the DEXI adapter with DEXI's own prompt and action format, plus `refuse(reason)`. The model files, quantization, server and request settings (temperature 0, thinking mode, token limit) are pinned in an amendment before E2.
+- **Qwen arms (E2)** run through the DEXI adapter (the `dexi` planner, `src/lost_in_place/llm/dexi.py`, `PROMPT_VERSION = "dexi-9b2e7a7"`) with DEXI's own prompt and action format, plus `refuse(reason)`. Each decision is one completed primitive, as in DEXI; the validator still checks every epoch ([docs/planners.md](docs/planners.md#dexis-prompt-the-dexi-planner)). The model files, quantization, server and request settings (temperature 0, thinking mode, token limit) are pinned in an amendment before E2.
 - **Claude Sonnet 4.6 (E4)** uses the benchmark's own prompt, `PROMPT_VERSION = "v0.1-draft"` in `src/lost_in_place/llm/prompt.py`, through `us.anthropic.claude-sonnet-4-6` at temperature 0.
 
 ### Validators

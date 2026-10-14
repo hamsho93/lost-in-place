@@ -10,6 +10,8 @@ Each decision:
 4. Resume, then charge the declared latency: the vehicle keeps flying its previous setpoint
    for `latency_s` of simulation time.
 5. Execute the action (or hold if the validator rejected it) for at most one epoch, then loop.
+   A `PrimitivePlanner` (the DEXI-prompt arms) isn't asked again until its move, turn or climb
+   ends; each further epoch is still checked by the validator and recorded as `continued`.
 
 Faults are scheduled from arming or from the first executed move (`mission.fault_anchor`).
 Every decision is kept in `episode.json` with its simulation timestamp, which is the PX4 clock
@@ -35,11 +37,14 @@ from mavsdk_grpc.telemetry import FlightMode
 from lost_in_place import geometry
 from lost_in_place.episode import TAKEOFF_CHECK_SIM_S, EpisodeResult, _Episode
 from lost_in_place.planning import (
+    DEXI_PLANNER,
     REJECTED,
     Action,
     EstimatorHealth,
     Observation,
+    Outcome,
     Planner,
+    PrimitivePlanner,
     Verdict,
     load_planner,
 )
@@ -54,6 +59,7 @@ ObservationLevel = Literal["O0", "O1"]
 
 ARRIVED_M = 0.25
 ARRIVED_DEG = 5.0
+UNDER_WAY = "still under way"
 MAX_HOLD_S = 15.0
 HISTORY_LENGTH = 8
 # A vehicle that crashed lies armed in offboard; the rangefinder is how the loop notices.
@@ -79,10 +85,12 @@ class AgentConfig:
     epoch_s: float = 1.5
 
 
-def make_planner(config: AgentConfig, mission: Mission) -> Planner:
-    options = dict(config.planner_options)
+def make_planner(config: AgentConfig, scenario: Scenario) -> Planner:
+    options: dict[str, Any] = dict(config.planner_options)
     if config.planner.startswith("scripted-"):
-        options["mission"] = mission
+        options["mission"] = scenario.mission
+    elif config.planner == DEXI_PLANNER:
+        options["scenario"] = scenario
     return load_planner(config.planner, **options)
 
 
@@ -190,7 +198,7 @@ class AgentEpisode(_Episode):
         self.mission: Mission = scenario.mission
         self.config = config
         self.tel = Telemetry()
-        self.planner = make_planner(config, self.mission)
+        self.planner = make_planner(config, scenario)
         self.validator = make_validator(config.validator, scenario)
         assert scenario.hazard_truth is not None
         self.hazards = HazardMap.truth(scenario.hazard_truth)
@@ -359,10 +367,49 @@ class AgentEpisode(_Episode):
                 self.history.append(history_entry(self.sim_s - start, action, verdict))
                 self.log(loop_end=action.name)
                 return
-            status = await self._execute(
-                drone, action if verdict.ok else Action("hold", {"seconds": self.config.epoch_s})
-            )
+            began = self.sim_s
+            status = await self._execute(drone, action if verdict.ok else self._hold())
             self.history.append(history_entry(self.sim_s - start, action, verdict, status))
+            if isinstance(self.planner, PrimitivePlanner):
+                await self._finish_primitive(drone, start, end, calls, began, action, verdict, status)
+
+    def _hold(self) -> Action:
+        return Action("hold", {"seconds": self.config.epoch_s})
+
+    async def _finish_primitive(
+        self,
+        drone: System,
+        start: float,
+        end: float,
+        index: int,
+        began: float,
+        action: Action,
+        verdict: Verdict,
+        status: str,
+    ) -> None:
+        """Keep flying an unfinished primitive, checking it every epoch; then say how it ended."""
+        assert isinstance(self.planner, PrimitivePlanner)
+        deadline = began + self.planner.timeout_s(action)
+        epochs = int(verdict.ok)
+        timed_out = False
+        while verdict.ok and status.startswith(UNDER_WAY):
+            if self.sim_s >= end or not self.in_control:
+                break
+            if self.sim_s >= deadline:
+                timed_out = True
+                break
+            verdict = self._check_continuation(index, action)
+            status = await self._execute(drone, action if verdict.ok else self._hold())
+            epochs += int(verdict.ok)
+            self.history.append(history_entry(self.sim_s - start, action, verdict, status))
+        self.planner.outcome(Outcome(action, verdict, status, self.observe(), epochs, timed_out))
+
+    def _check_continuation(self, index: int, action: Action) -> Verdict:
+        """The validator's check of an unfinished primitive's next epoch; the planner isn't asked."""
+        obs, health, truth = self.observe(), self.health(), self.truth()
+        verdict = self.validator.check(action, replace(obs, health=health), truth)
+        self._record(index, self.sim_s, obs, action, verdict, health, truth, continued=True)
+        return verdict
 
     def truth(self) -> Truth | None:
         if self.tel.truth_ne is None:
@@ -389,10 +436,29 @@ class AgentEpisode(_Episode):
         if self.paused:
             self.paused = not await self.world.resume()
         await self.wait_connected()
+        self._record(index, t_decision, obs, action, verdict, health, truth, error, planner_wall_s, paused)
+        # Charge the declared latency. Unpaused, the sim already ran during the call.
+        await self.wait_sim(max(t_decision + self.config.latency_s, self.sim_s))
+        return action, verdict
+
+    def _record(
+        self,
+        index: int,
+        t_s: float,
+        obs: Observation,
+        action: Action,
+        verdict: Verdict,
+        health: EstimatorHealth,
+        truth: Truth | None,
+        error: str = "",
+        planner_wall_s: float = 0.0,
+        paused: bool = False,
+        continued: bool = False,
+    ) -> None:
         self.result.decisions.append(
             {
                 "index": index,
-                "sim_us": int(t_decision * 1e6),
+                "sim_us": int(t_s * 1e6),
                 "observation": asdict(obs),
                 "action": {"name": action.name, "args": action.args, "reason": action.reason},
                 "verdict": {"ok": verdict.ok, "reason": verdict.reason},
@@ -403,11 +469,11 @@ class AgentEpisode(_Episode):
                 "error": error,
                 "planner_wall_s": round(planner_wall_s, 3),
                 "paused": paused,
+                # A further epoch of decision `index`'s primitive, checked by the validator but not
+                # proposed again (`PrimitivePlanner`).
+                "continued": continued,
             }
         )
-        # Charge the declared latency. Unpaused, the sim already ran during the call.
-        await self.wait_sim(max(t_decision + self.config.latency_s, self.sim_s))
-        return action, verdict
 
     async def _setpoint(self, drone: System, target: PositionNedYaw) -> None:
         self.target = target
@@ -459,7 +525,7 @@ class AgentEpisode(_Episode):
     def _unfinished(self, where: str) -> str:
         if not self.in_control:
             return f"interrupted: the autopilot took control, {where}"
-        return f"still under way after {self.config.epoch_s:.1f} s, {where}"
+        return f"{UNDER_WAY} after {self.config.epoch_s:.1f} s, {where}"
 
     async def _fault_schedule(self, drone: System) -> None:
         if self.mission.fault_anchor == "first_move":
