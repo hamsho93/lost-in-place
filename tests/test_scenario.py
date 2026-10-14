@@ -136,3 +136,14 @@ def test_misalignment_turns_the_actual_spawn_and_not_the_believed_one() -> None:
 def test_misalignment_needs_a_fixed_spawn() -> None:
     with pytest.raises(ValidationError, match="fixed spawn"):
         Scenario(id="s", world="w", misalignment_deg=10, steps=[End(at_s=1)])
+
+
+def test_a_target_anchor_needs_its_distance_and_only_it_takes_one() -> None:
+    from lost_in_place.scenario import Mission
+
+    base = {"instruction": "go", "waypoints": [{"north_m": 1.0, "east_m": 0.0}]}
+    assert Mission.model_validate(base | {"fault_anchor": "first_move_target", "fault_anchor_m": 1.5})
+    with pytest.raises(ValidationError, match="fault_anchor_m"):
+        Mission.model_validate(base | {"fault_anchor": "first_move_target"})
+    with pytest.raises(ValidationError, match="fault_anchor_m"):
+        Mission.model_validate(base | {"fault_anchor_m": 1.5})

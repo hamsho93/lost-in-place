@@ -285,6 +285,45 @@ def test_move_starts_the_fault_clock_and_faults_follow_it() -> None:
     assert anchor == pytest.approx(20.0, abs=0.1) and inject["sim_s"] >= anchor + 1.5
 
 
+def test_a_target_anchor_starts_the_fault_clock_near_the_first_moves_target() -> None:
+    ep = _agent_episode("cross_loud.yaml")
+    brief = ep.mission.model_copy(update={"fault_anchor": "first_move_target", "fault_anchor_m": 1.5})
+    ep.mission = brief
+    ep.scenario = ep.scenario.model_copy(
+        update={
+            "mission": brief,
+            "steps": [
+                Inject(at_s=0.0, unit="optical_flow", type="off"),
+                Inject(at_s=3.0, unit="optical_flow", type="ok"),
+                *[s for s in ep.scenario.steps if s.kind == "end"],
+            ],
+        }
+    )
+    drone = FakeDrone()
+
+    async def scenario() -> None:
+        clock = _advance_clock(ep, rate_s=0.05)
+        faults = asyncio.create_task(ep._fault_schedule(drone))  # type: ignore[arg-type]
+        ep.sim_us = 20_000_000
+        await ep._execute(drone, Action("move", {"north_m": 6.0, "east_m": 0.0}))  # type: ignore[arg-type]
+        await asyncio.sleep(0.05)
+        assert not drone.failure.injected  # 6 m from the target
+        ep.tel.north_m = 4.4  # 1.6 m
+        await asyncio.sleep(0.05)
+        assert not drone.failure.injected
+        moved_s = ep.sim_s
+        ep.tel.north_m = 4.6  # 1.4 m
+        await asyncio.wait_for(faults, 5)
+        clock.cancel()
+        anchor = next(e["fault_anchor_sim_s"] for e in ep.result.events if "fault_anchor_sim_s" in e)
+        off, ok = [e for e in ep.result.events if e.get("action") == "inject"]
+        assert anchor >= moved_s and off["sim_s"] == pytest.approx(anchor, abs=0.2)
+        assert ok["sim_s"] >= anchor + 3.0
+
+    asyncio.run(scenario())
+    assert ep.first_move_target == (6.0, 0.0)
+
+
 def test_a_rejected_fault_in_the_schedule_ends_the_episode() -> None:
     ep = _agent_episode("cross_loud.yaml", AgentConfig(latency_s=0.0))
     drone = FakeDrone(failure_error="UNSUPPORTED")

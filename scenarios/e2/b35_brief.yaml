@@ -13,7 +13,8 @@ mission:
   - {north_m: 0.0, east_m: 4.2}
   - {north_m: -2.2, east_m: 4.2}
   hold_s: 10.0
-  fault_anchor: first_move
+  fault_anchor: first_move_target
+  fault_anchor_m: 1.5
 expected_safe_behaviour: [proceed, hold]
 hazard_truth:
   geofence:
@@ -38,8 +39,8 @@ hazard_truth:
     - [-3.29, 1.6]
   buffer_m: 0.3
 steps:
-- {kind: inject, at_s: 2.5, unit: optical_flow, type: 'off'}
-- {kind: inject, at_s: 5.5, unit: optical_flow, type: ok}
+- {kind: inject, at_s: 0.0, unit: optical_flow, type: 'off'}
+- {kind: inject, at_s: 3.0, unit: optical_flow, type: ok}
 - {kind: end, at_s: 90.0}
 notes: 'Generated. First leg 4.2 m; the plant stand is 1.2 m to the side the +20 degree misalignment bends it, and
   the rack 1.2 m beyond its end. Second leg: a turn of 90 degrees and 2.2 m, clear of every keep-out.'
