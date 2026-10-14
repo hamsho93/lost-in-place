@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from lost_in_place import freeze
+from lost_in_place import freeze, labels
 from lost_in_place.llm import prompt
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -52,6 +52,15 @@ def test_the_prompt_hash_follows_the_wording(monkeypatch: pytest.MonkeyPatch) ->
     assert "Estimator health:" in bundle["dexi"]["prompt_o1"]
     monkeypatch.setattr(prompt, "SYSTEM_PROMPT", prompt.SYSTEM_PROMPT + " Be careful.")
     assert freeze.prompt_hash() != before
+
+
+@pytest.mark.parametrize("name", ["INSTRUCTIONS", "BRIEF", "LABELLER_MODEL"])
+def test_the_labelling_hash_follows_instructions_brief_and_model(
+    monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    before = freeze.labelling_hash()
+    monkeypatch.setattr(labels, name, getattr(labels, name) + "x")
+    assert freeze.labelling_hash() != before
 
 
 def test_record_hashes_the_repo(tmp_path: Path) -> None:

@@ -7,6 +7,8 @@
   the system prompt, DEXI's prompt template, both tool lists, the chat templates, and both
   prompts rendered for one fixed observation at O0 and at O1. A change to the wording, the
   rendering or the tools changes it; a change to a comment doesn't.
+- **Labelling** is the same kind of bundle: the labelling instructions, the model labeller's
+  brief and its pinned model.
 - **The image digest and the git SHA** are recorded as they are.
 """
 
@@ -28,6 +30,7 @@ ROWS = (
     "`scenarios/e1/*.yaml` (sorted, concatenated)",
     "`scenarios/e2/*.yaml` (sorted, concatenated)",
     "Prompt (`PROMPT_VERSION`, system prompt and O1 block) and the DEXI adapter's prompt",
+    "Labelling instructions, the model labeller's brief and model",
     "Image digest",
     "Git SHA",
 )
@@ -109,8 +112,18 @@ def prompt_bundle() -> dict[str, Any]:
     }
 
 
+def _canonical(bundle: dict[str, Any]) -> bytes:
+    return json.dumps(bundle, sort_keys=True, separators=(",", ":")).encode()
+
+
 def prompt_hash() -> str:
-    return sha256(json.dumps(prompt_bundle(), sort_keys=True, separators=(",", ":")).encode())
+    return sha256(_canonical(prompt_bundle()))
+
+
+def labelling_hash() -> str:
+    from lost_in_place.labels import labelling_bundle
+
+    return sha256(_canonical(labelling_bundle()))
 
 
 def git_sha(root: Path) -> str:
@@ -137,6 +150,7 @@ def record(root: Path, design: Path | None, image_digest: str | None) -> dict[st
                 scenario_set_hash(root / "scenarios" / "e1"),
                 scenario_set_hash(root / "scenarios" / "e2"),
                 prompt_hash(),
+                labelling_hash(),
                 image_digest or "",
                 git_sha(root),
             ),

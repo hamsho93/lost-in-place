@@ -203,10 +203,9 @@ def _cmd_label_sample(args: argparse.Namespace) -> int:
         return 1
     args.out.mkdir(parents=True, exist_ok=True)
     labels.sample(picked, labels.loader(runs), args.out, args.seed, with_plots=not args.no_plots)
-    labels.write_instructions(args.out)
     print(
-        f"{len(picked)} episodes in {args.out}. Give the labeller sheet.csv, INSTRUCTIONS.md and packets/;"
-        " keep key.json."
+        f"{len(picked)} episodes in {args.out}. Give the labeller {args.out / labels.BLIND}/ only, and"
+        f" {labels.LABELLER_MODEL} the prompt in BRIEF.md; keep key.json."
     )
     return 0
 

@@ -164,11 +164,15 @@ def test_sample_writes_a_blind_sheet_and_a_private_key(tmp_path: Path) -> None:
         [loud, healthy], lambda a: (episodes[a.key], _tracks()), tmp_path, seed=0, with_plots=False
     )
 
-    rows = list(csv.DictReader(io.StringIO((tmp_path / "sheet.csv").read_text())))
+    blind = tmp_path / labels.BLIND
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["BRIEF.md", "blind", "key.json"]
+    assert sorted(p.name for p in blind.iterdir()) == ["INSTRUCTIONS.md", "packets", "sheet.csv"]
+    assert str(blind.resolve()) in (tmp_path / "BRIEF.md").read_text()
+    rows = list(csv.DictReader(io.StringIO((blind / "sheet.csv").read_text())))
     assert [r["first_post_onset_behaviour"] for r in rows] == ["", "n/a"]
     assert [r["false_refusal"] for r in rows] == ["n/a", ""]
-    sheet_and_packets = (tmp_path / "sheet.csv").read_text() + "".join(
-        p.read_text() for p in (tmp_path / "packets").glob("*.md")
+    sheet_and_packets = (blind / "sheet.csv").read_text() + "".join(
+        p.read_text() for p in (blind / "packets").glob("*.md")
     )
     assert "qwen" not in sheet_and_packets and "geometric" not in sheet_and_packets
 
