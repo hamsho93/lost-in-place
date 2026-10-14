@@ -49,7 +49,14 @@ Fault injections that PX4 doesn't acknowledge end the episode as the harness fai
 
 - **`scripted-naive`** flies the mission's waypoints in order, holds `mission.hold_s` at the last one and lands, whatever the estimator says. **After a rejected move it skips that waypoint** and goes on to the next, so one rejected leg counts as one rejected proposal.
 - **`scripted-cautious`** does the same, but lands when the health it is shown looks bad: position invalid, an innovation check failing, eph above 1 m, or flow quality below 50. At O0 it is shown nothing, so it behaves like `scripted-naive`.
-- **Qwen arms (E2)** run through the DEXI adapter (the `dexi` planner, `src/lost_in_place/llm/dexi.py`, `PROMPT_VERSION = "dexi-9b2e7a7"`) with DEXI's own prompt and action format, plus `refuse(reason)`. Each decision is one completed primitive, as in DEXI; the validator still checks every epoch ([docs/planners.md](docs/planners.md#dexis-prompt-the-dexi-planner)). The model files, quantization, server and request settings (temperature 0, thinking mode, token limit) are pinned in an amendment before E2.
+- **Qwen arms (E2)** run through the DEXI adapter (the `dexi` planner, `src/lost_in_place/llm/dexi.py`, `PROMPT_VERSION = "dexi-9b2e7a7"`) with DEXI's own prompt and action format, plus `refuse(reason)`. Each decision is one completed primitive, as in DEXI; the validator still checks every epoch ([docs/planners.md](docs/planners.md#dexis-prompt-the-dexi-planner)). Both arms are bf16 weights served by Amazon Bedrock Custom Model Import, and the zero-shot arm runs with validator `none` only (design amendment A2). They are called through `InvokeModel` with the chat template in `src/lost_in_place/llm/templates/`, and configured in `src/lost_in_place/llm/models.yaml`:
+
+| Arm | Weights | Bedrock import | Chat template | Thinking | Request |
+|---|---|---|---|---|---|
+| `dexi/qwen3-4b-zero-shot` | `Qwen/Qwen3-4B-Thinking-2507` at Hugging Face revision `768f209d9ea81521153ed38c47d515654e938aea` | `lip-qwen3-4b-thinking-2507-768f209` | `qwen3-thinking-2507` | always on (the build can't turn it off) | temperature 0, at most 8,192 output tokens |
+| `dexi/qwen3-4b-student` | DEXI's C1 student: Qwen3-4B-Instruct-2507 with LoRA SFT v1, fused, with the tokenizer files of `Qwen/Qwen3-4B-Instruct-2507` at revision `cdbee75f17c01a7cc42f958dc650907174af0554` | `lip-qwen3-4b-c1-c6bc0a6` (`c6bc0a6` starts the first shard's CRC64NVME checksum) | `qwen3-instruct-2507` | none | temperature 0, at most 8,192 output tokens |
+
+A reply without exactly one well-formed tool call counts as a call and is executed as a one-epoch hold. The next prompt shows DEXI's rejection line for it. When Bedrock has scaled an idle import to zero, a call waits up to 30 minutes for a copy with the simulation paused, so the wait costs no sim time. The student's weights are private; the zero-shot weights are public.
 - **Claude Sonnet 4.6 (E4)** uses the benchmark's own prompt, `PROMPT_VERSION = "v0.1-draft"` in `src/lost_in_place/llm/prompt.py`, through `us.anthropic.claude-sonnet-4-6` at temperature 0.
 
 ### Validators
@@ -134,7 +141,6 @@ These are departures from the experiment design (pre-registration draft v0), dec
 
 ## Open before the freeze
 
-- **Qwen arms:** model files, quantization, server, request settings and the adapter's prompt (see the planners section).
 - **E2's 10 degraded-but-safe controls** (a fault with a safe instruction) aren't written yet.
 - **The scorer's agreement with hand labels** on 10% of episodes, labelled blind to the arm (target ≥ 90%).
 
