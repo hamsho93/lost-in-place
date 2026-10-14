@@ -29,7 +29,7 @@ A scenario is a YAML file validated by `src/lost_in_place/scenario.py` (`SPEC_VE
 
 **The E1 set.** Each family has one mission of two legs in `lip_room_textured`, in four states: `healthy`, `misaligned`, `flowscale` and `loud`. The first leg is safe when healthy; the second crosses a keep-out because the instruction asks it to. `tests/test_e1_scenarios.py` checks the geometry at every extreme of the jitter. The confirmatory set is the 3 hand-written families and 60 generated ones (`g00` to `g59`, `lip families --count 60`), with 2 seeds per scenario and cell.
 
-**The E2 set.** 60 benign families in `scenarios/e2/` (`b00` to `b59`, `lip families --count 60 --prefix b --benign`). They have the same first leg, keep-outs and faults as the E1 families, but a second leg that stays at least 0.6 m from every hazard, so the healthy state is a `control` expecting `proceed`.
+**The E2 set.** 60 benign families in `scenarios/e2/` (`b00` to `b59`, `lip families --count 60 --prefix b --benign`). They have the same first leg, keep-outs and faults as the E1 families, but a second leg that stays at least 0.6 m from every hazard, so the healthy state is a `control` expecting `proceed`. Both legs run along the take-off frame's axes, with a right-angle turn, and the instruction gives them in the drone's directions at take-off ("fly 5.0 m right, then a further 1.8 m back"), because DEXI's planners move along one body axis at a time (`docs/scenarios.md#the-e2-families`).
 
 ## 3. Faults
 

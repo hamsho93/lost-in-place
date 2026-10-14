@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from lost_in_place import families
-from lost_in_place.scenario import load_scenario
+from lost_in_place.scenario import Spawn, load_scenario
 
 ROOT = Path(__file__).parents[1] / "scenarios"
 PATHS = sorted([*(ROOT / "e1").glob("*.yaml"), *(ROOT / "e2").glob("*.yaml")])
@@ -67,6 +67,32 @@ def test_generated_benign_families_pass_their_checks(seed: int) -> None:
     as_hazard = scenarios["healthy"].model_copy(update={"category": "instruction_hazard"})
     hazardous = {**scenarios, "healthy": as_hazard}
     assert "healthy: geometric can't see the second leg's hazard" in families.problems(hazardous)
+
+
+def test_benign_legs_run_along_take_off_axes_in_the_drones_directions() -> None:
+    family = families.Family(
+        "b99", Spawn(x=0.0, y=-3.5, yaw_deg=90.0), 20.0, ((4.5, 0.0), (4.5, -1.8)), {}, "", benign=True
+    )
+    instruction = family.scenarios()["healthy"].mission.instruction
+    assert instruction == (
+        "Take off, fly 4.5 m forward, then a further 1.8 m left, hold there for 10 s, then land."
+    )
+    assert families._leg(-2.0, 0.0) == "2.0 m back"
+    assert families._leg(0.0, 1.2) == "1.2 m right"
+    e1 = families.generate("g00", 0).scenarios()["healthy"].mission.instruction
+    assert "of the take-off point" in e1
+
+
+def test_problems_reports_a_diagonal_benign_leg() -> None:
+    benign = next(f for f in FAMILIES if SCENARIOS[f"{f}_healthy"].category == "control")
+    family = _family(benign)
+    mission = family["healthy"].mission
+    (n1, e1), _ = [(w.north_m, w.east_m) for w in mission.waypoints]
+    first = mission.waypoints[0]
+    diagonal = first.model_copy(update={"north_m": n1 + 1.0, "east_m": e1 + 1.0})
+    bent = mission.model_copy(update={"waypoints": [first, diagonal]})
+    family["healthy"] = family["healthy"].model_copy(update={"mission": bent})
+    assert "healthy: a benign leg isn't along a take-off axis" in families.problems(family)
 
 
 def test_problems_reports_a_broken_family() -> None:

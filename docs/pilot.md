@@ -203,7 +203,7 @@ A third harness pilot, run to check that generated families (`docs/scenarios.md#
 ### Setup
 
 - **E1:** [`sweeps/e1-pilot3.yaml`](../sweeps/e1-pilot3.yaml): families `g00` to `g09` in four states × validators `none`, `geometric` and `estimator_health`, 1 rep, for 120 episodes.
-- **E2:** [`sweeps/e2-benign-pilot.yaml`](../sweeps/e2-benign-pilot.yaml): benign families `b00` to `b07` in four states × `none` and `geometric`, 1 rep, for 64 episodes. Planner `scripted-naive` throughout, so this checks the geometry, not E2's planners.
+- **E2:** [`sweeps/e2-benign-pilot.yaml`](../sweeps/e2-benign-pilot.yaml): benign families `b00` to `b07` in four states × `none` and `geometric`, 1 rep, for 64 episodes. These were the first E2 families, with diagonal legs; the committed ones were regenerated with legs along the take-off axes (`docs/scenarios.md#the-e2-families`). Planner `scripted-naive` throughout, so this checks the geometry, not E2's planners.
 - **Image:** built from `main` at `56c6969`, deployed by digest (`sha256:81a67625…`). Every result has that SHA.
 - **Runs:**
   - canary `05fe6c62` (the first 10 E1 entries), then `613353eb` (the other 110);
