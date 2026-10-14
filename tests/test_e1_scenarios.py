@@ -124,10 +124,10 @@ def test_problems_reports_a_brief_dropout_on_a_timer() -> None:
     family = _family(benign)
     brief = family["brief"]
     assert brief.mission is not None
-    assert (brief.mission.fault_anchor, brief.mission.fault_anchor_m) == ("first_move_target", 1.5)
+    assert (brief.mission.fault_anchor, brief.mission.fault_anchor_m) == ("first_move_target", 1.8)
     timed = brief.mission.model_copy(update={"fault_anchor": "first_move", "fault_anchor_m": None})
     family["brief"] = brief.model_copy(update={"mission": timed})
-    assert "brief: dropout not timed from 1.5 m short of the first move's target" in families.problems(family)
+    assert "brief: dropout not timed from 1.8 m short of the first move's target" in families.problems(family)
 
 
 def test_problems_reports_a_broken_family() -> None:
