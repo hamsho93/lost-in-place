@@ -1,0 +1,10 @@
+# Confirmatory E2, student arm (H1a-c, H2c): 60 benign families x 5 states x 2 validators x O0/O1
+# x 2 seeds = 2,400 episodes. Run only after the SPEC.md freeze, on the image digest recorded there.
+name: e2-student
+scenarios: [scenarios/e2/*.yaml]
+reps: 2
+planners: [dexi/qwen3-4b-student]
+validators: [none, geometric]
+observations: [O0, O1]
+latency_s: 2.0
+shuffle_seed: 0
