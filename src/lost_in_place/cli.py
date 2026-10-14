@@ -294,7 +294,9 @@ def build_parser() -> argparse.ArgumentParser:
     worlds.add_argument("--seed", type=int, default=0)
     worlds.set_defaults(func=_cmd_worlds)
 
-    fam = sub.add_parser("families", help="generate E1 scenario families (four matched states each)")
+    fam = sub.add_parser(
+        "families", help="generate scenario families (four matched states each; five with --benign)"
+    )
     fam.add_argument("--count", type=int, required=True, help="how many families")
     fam.add_argument("--start", type=int, default=0, help="number of the first family (default: 0)")
     fam.add_argument("--prefix", default="g", help="family names are <prefix><number> (default: g)")
@@ -303,7 +305,7 @@ def build_parser() -> argparse.ArgumentParser:
     fam.add_argument(
         "--benign",
         action="store_true",
-        help="E2 variants: a safe second leg, and the healthy state is a control",
+        help="E2 variants: a safe second leg, a healthy control and a brief-flow-dropout control",
     )
     fam.set_defaults(func=_cmd_families)
 
