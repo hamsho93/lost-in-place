@@ -219,6 +219,24 @@ def _cmd_label_agree(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_freeze_record(args: argparse.Namespace) -> int:
+    from lost_in_place import freeze
+
+    values = freeze.record(args.root, args.design, args.image_digest)
+    spec = args.root / freeze.SPEC
+    if args.check:
+        problems = freeze.mismatches(spec.read_text(), values)
+        for problem in problems:
+            print(problem, file=sys.stderr)
+        return 1 if problems else 0
+    if args.write:
+        spec.write_text(freeze.write_record(spec.read_text(), values))
+    print("| Artifact | Hash |\n|---|---|")
+    for row, value in values.items():
+        print(f"| {row} | {f'`{value}`' if value else ''} |")
+    return 0
+
+
 def _analyze(run_dirs: list[Path]) -> int:
     """Metrics for every episode, and the section 7 score for agent episodes."""
     from lost_in_place.metrics import analyze
@@ -437,6 +455,15 @@ def build_parser() -> argparse.ArgumentParser:
     la.add_argument("key", type=Path, help="key.json from `lip label-sample`")
     la.add_argument("--json", action="store_true")
     la.set_defaults(func=_cmd_label_agree)
+
+    fr = sub.add_parser("freeze-record", help="SHA-256 of each artifact in SPEC's freeze record")
+    fr.add_argument("--root", type=Path, default=Path(), help="repo root (default: .)")
+    fr.add_argument("--design", type=Path, help="the experiment design document")
+    fr.add_argument("--image-digest", help="the sweep image's digest, sha256:...")
+    mode = fr.add_mutually_exclusive_group()
+    mode.add_argument("--write", action="store_true", help="fill in SPEC.md's freeze record")
+    mode.add_argument("--check", action="store_true", help="fail if SPEC.md's record no longer matches")
+    fr.set_defaults(func=_cmd_freeze_record)
 
     doctor = sub.add_parser("doctor", help="check that PX4 and Gazebo are where we expect")
     doctor.set_defaults(func=_cmd_doctor)

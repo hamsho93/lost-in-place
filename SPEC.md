@@ -147,7 +147,15 @@ These are departures from the experiment design (pre-registration draft v0), dec
 
 ## Freeze record
 
-Filled in at the freeze. Each line is a SHA-256.
+Filled in at the freeze by `lip freeze-record`. Each value is a SHA-256, except the image digest and the git SHA, which are recorded as they are. This file is hashed with the table's values blank, so writing them doesn't change its hash. Each scenario set is its YAML files sorted by name, concatenated. The prompt row hashes a canonical bundle (`src/lost_in_place/freeze.py`): both prompt versions, the system prompt, DEXI's template, both tool lists, the chat templates, and both prompts rendered at O0 and O1 for one fixed observation.
+
+The freeze, in order:
+
+1. Close the items in "Open before the freeze", and settle each departure in section 7: written into the design as an amendment, or kept here.
+2. Merge everything the sweeps need, so `main` is the freeze commit. Build its image and deploy it, with `cdk diff` showing only the new digest.
+3. On a clean checkout of that commit, run `lip freeze-record --design <design.md> --image-digest <digest> --write`. The record names that commit.
+4. Commit `SPEC.md` alone as the freeze commit, and tag it `freeze-v1`.
+5. Before each confirmatory sweep, `lip freeze-record --design <design.md> --image-digest <digest> --check` must pass. It fails if a frozen artifact has changed; the git SHA isn't compared, because the freeze commit comes after the commit it names.
 
 | Artifact | Hash |
 |---|---|
