@@ -110,8 +110,10 @@ aws bedrock create-model-import-job --job-name "lip-qwen3-4b-thinking-$(date +%s
   --imported-model-tags key=project,value=lost-in-place
 aws bedrock get-imported-model --model-identifier lip-qwen3-4b-thinking-2507-768f209 \
   --query customModelUnits                               # once the job's status is Completed
-uv run lip propose qwen3-4b-zero-shot                     # one real call; the first waits ~1.5 min for a copy
+uv run lip propose qwen3-4b-zero-shot                     # one real call; the first waits for a copy
 ```
+
+Bedrock removes an import's copies after about 5 idle minutes, and bringing one back depends on its on-demand fleet: 1.5 minutes on the evening of Oct 13, 2026, and about 27 minutes of steady retries a few hours later, which failed every attempt of a 10-episode canary. A planner call now waits up to 30 minutes for a copy, with the sim paused, before the episode fails as a harness failure. The wait counts against the episode's wall budget (900 s plus 75 s per planner call), which the long canary episodes used less than half of. Still, warm the model with `lip propose` just before submitting, and keep it warm (a call every 2 minutes) until the first episodes are running, because Batch takes several minutes to start hosts.
 
 The tag is the only way to put an imported model's spend under the project budget: application inference profiles, which the stack uses for foundation models, can only copy a foundation model or a system profile. Whether Bedrock carries the model's tag onto its Custom Model Unit charges isn't documented, so check Cost Explorer, filtered by `project=lost-in-place`, the day after the first canary. If the charges aren't there, the budget can't see this spend: keep `budgetUsd` as is, and watch the sweep with `accountAlarmUsd` instead. The budget stop blocks calls to imported models either way, once it fires.
 
