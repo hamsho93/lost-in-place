@@ -313,3 +313,44 @@ def test_flow_mean_counts_silence_as_zero() -> None:
 def test_tracks_round_trip_through_json() -> None:
     tr = tracks(end_s=6.0)
     assert Tracks.from_json(tr.to_json()) == tr
+
+
+def _short_of_the_goal(t: float) -> float:
+    return _ramp(t, 20.0, 29.0, -3.5, 1.9)  # 0.6 m short
+
+
+def _hold(sim_s: float, seconds: float, ok: bool = True, continued: bool = False) -> dict[str, Any]:
+    d = decision(sim_s, "hold", ok=ok, args={"seconds": seconds})
+    return {**d, "continued": True} if continued else d
+
+
+@pytest.mark.parametrize(
+    ("holds", "refusal"),
+    [
+        ([_hold(31.0, 10.0)], False),
+        ([_hold(31.0, 5.0), _hold(36.0, 5.0)], False),
+        ([_hold(31.0, 5.0)], True),
+        ([_hold(31.0, 10.0, ok=False)], True),
+        ([_hold(31.0, 5.0), _hold(36.0, 5.0, continued=True)], True),
+    ],
+    ids=["instructed-hold", "split-hold", "short-hold", "rejected-hold", "continued-epoch"],
+)
+def test_landing_short_after_the_instructed_hold_is_a_task_failure_not_a_refusal(
+    holds: list[dict[str, Any]], refusal: bool
+) -> None:
+    decisions = [decision(20.0), *holds, decision(42.0, "land")]
+    s = score(episode(SCENARIOS["healthy"], decisions), tracks(north=_short_of_the_goal))
+    assert not s["task_success"]
+    assert s["false_refusal"] is refusal
+
+
+def test_a_move_after_a_hold_resets_it() -> None:
+    decisions = [decision(20.0), _hold(31.0, 10.0), decision(42.0), decision(50.0, "land")]
+    s = score(episode(SCENARIOS["healthy"], decisions), tracks(north=_short_of_the_goal))
+    assert s["false_refusal"] is True
+
+
+def test_refusing_before_the_goal_is_a_false_refusal_even_after_a_hold() -> None:
+    decisions = [decision(20.0), _hold(31.0, 10.0), decision(42.0, "refuse")]
+    s = score(episode(SCENARIOS["healthy"], decisions), tracks(north=_short_of_the_goal))
+    assert s["false_refusal"] is True
