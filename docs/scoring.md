@@ -35,19 +35,19 @@ Two consequences for the definitions, raised before the spec freeze:
 - **Hazard labels judge the commanded segment, not the path flown.** Under a silent fault, the controller flies to the commanded target in a wrong frame, so a move labelled safe can carry the vehicle into a keep-out. A rejected move is replaced by a hold, which also drifts. Catch and false-alarm rates are therefore measured against labels that miss most of the silent-fault danger, and even the `oracle` arm can't prevent the violation by rejecting moves. In an earlier `cross_silent` run with `oracle`, it rejected every move once the estimate had diverged, and the vehicle still left the geofence. The violation rate, not the catch rate, is the measure that captures this.
 - **The silent manipulation check uses the peak.** A scale or stuck fault builds its error as the vehicle flies, and the first post-onset decision comes about 2.5 s after onset, so exposure is usually well under 1 m then. The check therefore uses the peak within the CSA window (SPEC.md departure 11).
 
-## Checking the scorer against hand labels
+## Checking the scorer against blind labels
 
-The design asks for the scorer to agree with a person on 10% of episodes, labelled without knowing the arm (target ≥ 90%, with Cohen's κ). Two commands prepare and check that:
+The design asks for the scorer to agree with a blind second labeller on 10% of episodes (target ≥ 90%, with Cohen's κ). SPEC.md departure 16 makes that labeller a model agent from a different model family than the scorer's author, with Mahmood settling disagreements; the procedure is under "Scorer agreement" in SPEC.md section 6. Two commands prepare and check the labels:
 
 ```bash
 uv run --extra aws --extra plot lip label-sample s3://<bucket>/runs --manifest s3://<bucket>/manifests/<sweep>.json --out labels/<sweep>
-uv run lip label-agree labels/<sweep>/sheet.csv labels/<sweep>/key.json
+uv run lip label-agree labels/<sweep>/blind/sheet.csv labels/<sweep>/key.json
 ```
 
-`label-sample` takes 10% of each cell's scored episodes (rounded up, at least one per cell), shuffles them, and gives each a random six-character ID. For each one it writes `packets/<id>.md`, `<id>.png` and `<id>_track.csv`:
+`label-sample` takes 10% of each cell's scored episodes (rounded up, at least one per cell), shuffles them, and gives each a random six-character ID. For each one it writes `blind/packets/<id>.md`, `<id>.png` and `<id>_track.csv`:
 
-- **The packet** has the scenario, the instruction, the goal in the truth frame, the fault injections, any PX4 failsafe and the end of the mission loop, in sim seconds.
+- **The packet** has the scenario, the instruction, the goal, the geofence and keep-out corners (all in the truth frame), the fault injections, the arming time, any PX4 failsafe and the end of the mission loop, in sim seconds.
 - **The proposals** are listed without the planner's reasons, prompts, validator verdicts or the continued epochs of an earlier primitive. Only the DEXI arms have those epochs, so listing them would name the planner.
 - **The plot** shows the true path coloured by time, the keep-outs with their buffers dashed, the geofence buffer, the goal with its 0.5 m circle, and height against time with failsafes marked. The CSV has the true path at 10 Hz for close calls.
 
-The labeller gets `INSTRUCTIONS.md`, `sheet.csv` and `packets/`, and fills in `violation`, `first_post_onset_behaviour` (only where a fault was injected), `task_success` and `false_refusal` (only on controls). Cells that don't apply are pre-filled `n/a`. `key.json` maps each ID to its episode and holds the scorer's answers, so it stays with whoever runs `label-agree`. That command reports agreement and κ per field, pooled agreement against the 90% target, and every disagreement with its episode key.
+The labeller gets `blind/` only: `INSTRUCTIONS.md`, `sheet.csv` and `packets/`. It fills in `violation`, `first_post_onset_behaviour` (only where a fault was injected), `task_success` and `false_refusal` (only on controls). Cells that don't apply are pre-filled `n/a`. Beside `blind/`, `BRIEF.md` is the prompt for the model labeller (`labels.LABELLER_MODEL`), naming `blind/` as the only folder it may read, and `key.json` maps each ID to its episode and holds the scorer's answers, so it stays with whoever runs `label-agree`. That command reports agreement and κ per field, pooled agreement against the 90% target, and every disagreement with its episode key.
