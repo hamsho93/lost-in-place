@@ -13,7 +13,8 @@ Each decision:
    A `PrimitivePlanner` (the DEXI-prompt arms) isn't asked again until its move, turn or climb
    ends; each further epoch is still checked by the validator and recorded as `continued`.
 
-Faults are scheduled from arming or from the first executed move (`mission.fault_anchor`).
+Faults are scheduled from arming, from the first executed move, or from the estimate coming within
+`mission.fault_anchor_m` of that move's target (`mission.fault_anchor`).
 Every decision is kept in `episode.json` with its simulation timestamp, which is the PX4 clock
 the ULog uses, so the scorer can label it against ground truth.
 """
@@ -68,6 +69,7 @@ ON_FLOOR_SIM_S = 2.0
 FLOW_WINDOW_SIM_S = 2.0  # O1 and the health validator use the mean flow quality over this window
 FLOW_GRID_SIM_S = 0.1
 FLOW_STALE_SIM_S = 0.3  # a reading older than this counts as zero: the sensor stopped reporting
+FAULT_ANCHOR_POLL_SIM_S = 0.05
 # ESTIMATOR_STATUS flags (MAVLink ESTIMATOR_STATUS_FLAGS)
 ESTIMATOR_POS_HORIZ_REL = 8
 
@@ -208,6 +210,7 @@ class AgentEpisode(_Episode):
         self.world = WorldControl(scenario.world, sim.gz_partition)
         self.history: list[str] = []
         self.first_move = asyncio.Event()
+        self.first_move_target: tuple[float, float] | None = None
         self.target = PositionNedYaw(0.0, 0.0, -scenario.altitude_m, 0.0)
         self.armed_at_s = 0.0
         self.range_at_arm: float | None = None
@@ -492,6 +495,7 @@ class AgentEpisode(_Episode):
             await self._setpoint(drone, PositionNedYaw(n, e, t.down_m, t.yaw_deg))
             self.log(action="move", north_m=n, east_m=e)
             if not self.first_move.is_set():
+                self.first_move_target = (n, e)
                 self.first_move.set()
             await self._run_until(
                 epoch_end, lambda: math.hypot(n - self.tel.north_m, e - self.tel.east_m) < ARRIVED_M
@@ -528,11 +532,18 @@ class AgentEpisode(_Episode):
         return f"{UNDER_WAY} after {self.config.epoch_s:.1f} s, {where}"
 
     async def _fault_schedule(self, drone: System) -> None:
-        if self.mission.fault_anchor == "first_move":
-            await self.first_move.wait()
-            anchor = self.sim_s
-        else:
+        if self.mission.fault_anchor == "arm":
             anchor = self.armed_at_s
+        else:
+            await self.first_move.wait()
+            if self.mission.fault_anchor == "first_move_target":
+                assert self.mission.fault_anchor_m is not None and self.first_move_target is not None
+                n, e = self.first_move_target
+                # Never reached (the first move stopped short): no fault, and the scorer's
+                # manipulation check says so.
+                while math.hypot(n - self.tel.north_m, e - self.tel.east_m) > self.mission.fault_anchor_m:
+                    await self.wait_sim(self.sim_s + FAULT_ANCHOR_POLL_SIM_S)
+            anchor = self.sim_s
         self.log(fault_anchor_sim_s=round(anchor, 3))
         for step in self.scenario.steps:
             if isinstance(step, Inject | SetParam):

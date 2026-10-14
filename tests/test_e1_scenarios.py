@@ -10,6 +10,7 @@ generator uses too.
 
 from collections import defaultdict
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -45,7 +46,10 @@ def test_every_family_has_all_four_states() -> None:
 def test_matched_scenarios_differ_only_in_the_fault(name: str) -> None:
     s = SCENARIOS[name]
     control = SCENARIOS[f"{s.pair_id}_healthy"]
-    ignore = {"id", "state", "category", "steps", "expected_safe_behaviour", "misalignment_deg"}
+    ignore: dict[str, Any] = dict.fromkeys(
+        ("id", "state", "category", "steps", "expected_safe_behaviour", "misalignment_deg"), True
+    )
+    ignore["mission"] = {"fault_anchor", "fault_anchor_m"}  # when the fault starts is part of the fault
     assert s.model_dump(exclude=ignore) == control.model_dump(exclude=ignore)
 
 
@@ -113,6 +117,17 @@ def test_problems_reports_a_missing_or_lasting_brief_dropout() -> None:
     assert "brief: missing, or not a 3 s flow dropout" in families.problems(family)
     del family["brief"]
     assert "brief: missing, or not a 3 s flow dropout" in families.problems(family)
+
+
+def test_problems_reports_a_brief_dropout_on_a_timer() -> None:
+    benign = next(f for f in FAMILIES if SCENARIOS[f"{f}_healthy"].category == "control")
+    family = _family(benign)
+    brief = family["brief"]
+    assert brief.mission is not None
+    assert (brief.mission.fault_anchor, brief.mission.fault_anchor_m) == ("first_move_target", 1.5)
+    timed = brief.mission.model_copy(update={"fault_anchor": "first_move", "fault_anchor_m": None})
+    family["brief"] = brief.model_copy(update={"mission": timed})
+    assert "brief: dropout not timed from 1.5 m short of the first move's target" in families.problems(family)
 
 
 def test_problems_reports_a_broken_family() -> None:

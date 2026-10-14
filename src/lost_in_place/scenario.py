@@ -132,9 +132,21 @@ class Mission(_Strict):
     )
     hold_s: float = Field(10.0, ge=0, description="Hold at the last waypoint before landing")
     planner_calls: int = Field(40, gt=0, description="Planner call budget")
-    fault_anchor: Literal["arm", "first_move"] = Field(
-        "first_move", description="What fault step times count from; 'end' always counts from arming"
+    fault_anchor: Literal["arm", "first_move", "first_move_target"] = Field(
+        "first_move",
+        description="What fault step times count from: arming, the first executed move, or the estimate"
+        " coming within `fault_anchor_m` of the first executed move's target. 'end' always counts"
+        " from arming",
     )
+    fault_anchor_m: float | None = Field(
+        None, gt=0, description="For 'first_move_target': how close to the target the clock starts"
+    )
+
+    @model_validator(mode="after")
+    def _anchor_distance(self) -> Mission:
+        if (self.fault_anchor == "first_move_target") != (self.fault_anchor_m is not None):
+            raise ValueError("fault_anchor_m goes with fault_anchor 'first_move_target', and only with it")
+        return self
 
 
 class Scenario(_Strict):
