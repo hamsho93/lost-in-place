@@ -55,7 +55,7 @@ LOUD_AT_S = 2.5
 NOAID_TOUT_US = 10_000_000
 BRIEF_DROPOUT_S = 3.0
 # About 2 s of flight at 0.7 m/s before the first move arrives. In the Oct 14 canary, the next
-# planner decision came 1.6 to 2.1 s after the estimate passed 1.5 m from the target, where the
+# planner decision came 1.7 to 2.0 s after the estimate passed 1.5 m from the target, where the
 # dropout's 2 s mean flow quality would read 0 to 29 (1.4 m: up to 38), against the check's 50.
 BRIEF_ANCHOR_M = 1.5
 SIDE_GAP_M = 1.2
