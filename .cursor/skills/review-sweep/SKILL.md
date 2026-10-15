@@ -9,7 +9,7 @@ description: >-
 
 # Reviewing sweep results
 
-`lip report` gives the per-cell table. This skill covers what the table hides. Each check below caught a real problem in the E1 pilot (`docs/pilot.md`).
+`lip report` gives the per-cell table. This skill covers what the table hides. `lip stats` (`docs/analysis.md`) is the pre-registered inference; it is not a review tool, and it is never run on a confirmatory sweep that is still blinded. Each check below caught a real problem in the E1 pilot (`docs/pilot.md`).
 
 ## 1. Mirror, re-score and break down
 
