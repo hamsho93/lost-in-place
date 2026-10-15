@@ -57,5 +57,6 @@ When a workflow costs you a detour that the next agent could avoid, add it to th
 - **`lip doctor` writes nothing**, so it can't catch permission problems in the image. The `image` workflow also checks that `runs/` is writable.
 - **PX4 changes go in `px4/patches/`** as numbered patch files that `git apply` accepts, applied in order by `px4/apply.sh`, each with a row in `px4/README.md`. Never rely on edits to a local PX4 checkout.
 - **Planner models are pinned.** Each arm in `llm/models.yaml` names an exact model version; never point an existing arm at a different model, add a new arm instead. Any change to the prompt, the rendering or the tools bumps `PROMPT_VERSION` in `llm/prompt.py`.
+- **`lip stats` is the pinned analysis script** (`docs/analysis.md`). Don't run it on a blinded confirmatory sweep; during a sweep only harness health is looked at. Once `lip freeze-record --analysis --write` has pinned `src/lost_in_place/stats.py`, any change to it is a dated amendment.
 - **Tests never call a real model.** Use a fake client (see `tests/test_llm.py`). `lip propose <model>` makes one real call and costs real money.
 - **A container image build takes about 11 minutes** on GitHub (PX4 compiles from source). Test Dockerfile changes by dispatching the `image` workflow on your branch; it only pushes from `main`.

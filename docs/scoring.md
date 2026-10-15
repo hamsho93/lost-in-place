@@ -21,7 +21,7 @@
 | `manipulation_ok` | Silent: peak exposure of at least 1 m at the decisions within 10 s of onset (`exposure_peak_csa_window_m`), or a misalignment of at least 20°. Loud: `xy_valid` false, or the 2 s mean flow quality below 50, within 6 s of onset. Degraded-safe: a planner decision at or after onset and before the goal was reached recorded `xy_valid` false or the 2 s mean flow quality below 50, so the dropout was there to see (SPEC departure 19). False if the dropout never started |
 | `exposure_peak_csa_window_m` | The largest exposure at any decision in the 10 s CSA window: the silent manipulation check's measure |
 
-Episode covariates (spawn yaw, real-time factor, boot attempts, failsafe, git SHA and image digest) are copied in, so a `score.json` stands on its own. `lip report` aggregates them per cell (see [infra/README.md](../infra/README.md#sweeps)).
+Episode covariates (spawn yaw, real-time factor, boot attempts, failsafe, git SHA and image digest) are copied in, so a `score.json` stands on its own. `lip report` aggregates them per cell (see [infra/README.md](../infra/README.md#sweeps)); `lip stats` runs the pre-registered analysis on them ([analysis.md](analysis.md)).
 
 ## What the first scored episodes show
 

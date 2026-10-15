@@ -38,7 +38,7 @@ To run episodes on spot AWS Batch, see [`infra/`](infra/README.md). The first sm
 | `px4/` | Pinned PX4 commit and the patches we apply to it |
 | `docker/` | Headless image with PX4, Gazebo and the runner |
 | `infra/` | AWS CDK app: spot Batch queue, results bucket, budget guard |
-| `docs/` | [Simulation fidelity notes](docs/fidelity.md), [planners: adding a model or your own planner](docs/planners.md), [scoring](docs/scoring.md), [E1 harness pilot](docs/pilot.md) |
+| `docs/` | [Simulation fidelity notes](docs/fidelity.md), [planners: adding a model or your own planner](docs/planners.md), [scoring](docs/scoring.md), [the pre-registered analysis](docs/analysis.md), [E1 harness pilot](docs/pilot.md) |
 
 ## Credits and related work
 

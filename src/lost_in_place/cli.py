@@ -1,5 +1,6 @@
 """Command line: `lip worlds`, `lip run`, `lip analyze`, `lip manifest`, `lip run-manifest`, `lip report`,
-`lip doctor`, `lip models`, `lip propose`."""
+`lip stats`, `lip label-sample`, `lip label-agree`, `lip freeze-record`, `lip doctor`, `lip models`,
+`lip propose`."""
 
 from __future__ import annotations
 
@@ -225,8 +226,10 @@ def _cmd_label_agree(args: argparse.Namespace) -> int:
 def _cmd_freeze_record(args: argparse.Namespace) -> int:
     from lost_in_place import freeze
 
-    values = freeze.record(args.root, args.design, args.image_digest)
     spec = args.root / freeze.SPEC
+    if args.analysis:
+        return _analysis_record(args, spec)
+    values = freeze.record(args.root, args.design, args.image_digest)
     if args.check:
         problems = freeze.mismatches(spec.read_text(), values)
         for problem in problems:
@@ -237,6 +240,56 @@ def _cmd_freeze_record(args: argparse.Namespace) -> int:
     print("| Artifact | Hash |\n|---|---|")
     for row, value in values.items():
         print(f"| {row} | {f'`{value}`' if value else ''} |")
+    return 0
+
+
+def _analysis_record(args: argparse.Namespace, spec: Path) -> int:
+    """The analysis script's pin: print what the amendment-log entry names; `--write` adds its row;
+    `--check` fails unless the row is there and matches."""
+    from lost_in_place import freeze
+
+    digest = freeze.analysis_hash(args.root)
+    if args.check:
+        values = {freeze.ANALYSIS_ROW: digest}
+        problems = freeze.mismatches(spec.read_text(), values, require_analysis=True)
+        for problem in problems:
+            print(problem, file=sys.stderr)
+        return 1 if problems else 0
+    if args.write:
+        spec.write_text(freeze.write_analysis(spec.read_text(), args.root))
+        print(f"wrote {freeze.ANALYSIS_ROW} and refreshed '{freeze.ROWS[0]}' in {spec}", file=sys.stderr)
+    try:
+        sha = freeze.git_sha(args.root)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        sha = "(not a git checkout)"
+    print(f"path: {freeze.ANALYSIS_SCRIPT}\ngit SHA: {sha}\nSHA-256: {digest}")
+    return 0
+
+
+def _cmd_stats(args: argparse.Namespace) -> int:
+    from lost_in_place import stats
+
+    attempts, keys, inputs = stats.load_attempts(args.runs, args.manifest)
+    result = stats.analyse(
+        attempts,
+        keys,
+        resamples=args.resamples,
+        seed=args.seed,
+        inputs=inputs,
+        pin=stats.pin_status(args.root),
+    )
+    if args.out:
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.with_suffix(".json").write_text(stats.dumps(result))
+        args.out.with_suffix(".md").write_text(stats.markdown(result))
+        print(f"wrote {args.out.with_suffix('.json')} and {args.out.with_suffix('.md')}")
+    else:
+        print(stats.dumps(result) if args.json else stats.markdown(result), end="")
+    if result["analysis"].get("pinned") is False:
+        print(
+            "warning: this analysis script is not pinned in SPEC.md; do not unblind results with it",
+            file=sys.stderr,
+        )
     return 0
 
 
@@ -442,6 +495,32 @@ def build_parser() -> argparse.ArgumentParser:
     rep.add_argument("--json", action="store_true", help="full summary as JSON instead of a table")
     rep.set_defaults(func=_cmd_report)
 
+    st = sub.add_parser(
+        "stats",
+        help="the pre-registered analysis: family bootstrap intervals, Holm over the primaries, verdicts",
+    )
+    st.add_argument(
+        "runs",
+        nargs="+",
+        help="runs roots: local directories, or s3://bucket/runs (with --manifest, plus each sweep's prefix)",
+    )
+    st.add_argument(
+        "--manifest",
+        action="append",
+        default=[],
+        help="only these manifests' episodes; repeat it for E2's two sweeps",
+    )
+    st.add_argument(
+        "--resamples", type=int, default=10_000, help="family bootstrap resamples (default: 10000)"
+    )
+    st.add_argument("--seed", type=int, default=0, help="bootstrap seed (default: 0)")
+    st.add_argument(
+        "--root", type=Path, default=Path(), help="repo root with SPEC.md, to report the script's pin"
+    )
+    st.add_argument("--json", action="store_true", help="the full result as JSON instead of markdown")
+    st.add_argument("--out", type=Path, help="write <out>.json and <out>.md instead of printing")
+    st.set_defaults(func=_cmd_stats)
+
     ls = sub.add_parser(
         "label-sample", help="a blind hand-label sample of scored episodes, to check the scorer"
     )
@@ -463,6 +542,12 @@ def build_parser() -> argparse.ArgumentParser:
     fr.add_argument("--root", type=Path, default=Path(), help="repo root (default: .)")
     fr.add_argument("--design", type=Path, help="the experiment design document")
     fr.add_argument("--image-digest", help="the sweep image's digest, sha256:...")
+    fr.add_argument(
+        "--analysis",
+        action="store_true",
+        help="the analysis script's pin only: print its path, git SHA and SHA-256; with --write, add or"
+        " update its row (and this file's hash); with --check, fail unless the row is there and matches",
+    )
     mode = fr.add_mutually_exclusive_group()
     mode.add_argument("--write", action="store_true", help="fill in SPEC.md's freeze record")
     mode.add_argument("--check", action="store_true", help="fail if SPEC.md's record no longer matches")
