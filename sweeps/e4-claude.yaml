@@ -1,0 +1,12 @@
+# E4 (design A11): descriptive frontier arm, outside Holm. Claude Sonnet 4.6 through the DEXI adapter,
+# 60 E2 families x 5 states x O0/O1 x 2 seeds (E2's seeds), validator none = 1,200 episodes.
+# Run only after A11's freeze-record update, on the freeze-v2 image; at most 20 episodes in flight
+# (the account's Sonnet 4.6 quota is 50 requests a minute).
+name: e4-claude
+scenarios: [scenarios/e2/*.yaml]
+reps: 2
+planners: [dexi/claude-sonnet-4-6]
+validators: [none]
+observations: [O0, O1]
+latency_s: 2.0
+shuffle_seed: 0
