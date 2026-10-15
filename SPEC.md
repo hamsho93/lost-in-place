@@ -183,7 +183,7 @@ The freeze, in order:
 
 | Artifact | Hash |
 |---|---|
-| This file | `5ab03df406ca111182fb7563a7da552eed698f33ce67df2a8c6eb614190abd0e` |
+| This file | `61378ca19d5a767cdcfae223addd5ec5d1eeffb083c5bc7b0751a4b98d96e5e3` |
 | Experiment design | `44c1c04bbb3c5252ade679b8ac7c73fa43bd1e52e282d2ecbd4b3fd608abee86` |
 | `scenarios/e1/*.yaml` (sorted, concatenated) | `fc5d4125e59891619810e9f9575722ee3099ce62c5becbb4638f1ed3408a2ca0` |
 | `scenarios/e2/*.yaml` (sorted, concatenated) | `507ebd08f852bde0e3213c04a9a3345aed586916f84a50115d14c3221ea2bc4d` |
@@ -191,9 +191,11 @@ The freeze, in order:
 | Labelling instructions, the model labeller's brief and model | `ba7313f5b898db490da24c61a8dc802a5fd1dbe0e0051039599e05279bbe14ab` |
 | Image digest | `sha256:e879c1ef7ea236a2814ed96d70ff830a73244763f4ac2be824b416f3864a790d` |
 | Git SHA | `d7643b8dab87e7fdab842520a66ee32cffcf92f6` |
+| Analysis script (`src/lost_in_place/stats.py`) | `cc7ac4ff236cd7758305565d0bd09ad041270c4417eb1576e2c804acccd8fb14` |
 
 ## Amendment log
 
 | Date | Change | Why |
 |---|---|---|
 | 2026-10-14 | **`freeze-v1` withdrawn, superseded by `freeze-v2`.** `freeze-v1` (tag on `09086f7`) was never published: its RFC wasn't posted and no confirmatory episode ran. Changes: departures 19 to 22; the retry rule in section 5 (a harness failure after a violation is a result); first post-onset behaviour, sustained safety and the invalid-call rate as reported measures; the statistics and analysis-code paragraphs in section 6; H1b and H1c states and H2c as a bound in section 2; the labeller-scope and 2 m move-cap disclosures; this file's status line. Code: [#54](https://github.com/hamsho93/lost-in-place/pull/54) (scorer), [#55](https://github.com/hamsho93/lost-in-place/pull/55) (brief dropout, E2 brief files regenerated), [#56](https://github.com/hamsho93/lost-in-place/pull/56) (retries). | An independent pre-RFC review found four blocking issues (B1 to B4: departures 19 to 22) and should-fix items, of which the retry rule (S4), the secondaries (S6) and the stale text (S7) are fixed here. Written into the design as A9. Approved by Mahmood on 2026-10-14 |
+| 2026-10-15 | **Analysis script pinned** (section 6, "Analysis code"; design A9, review S1). `lip stats`, at `src/lost_in_place/stats.py`, from git SHA `e8d278085af898e950fa8856e705687903046984` (the merge of [#59](https://github.com/hamsho93/lost-in-place/pull/59)), SHA-256 `cc7ac4ff236cd7758305565d0bd09ad041270c4417eb1576e2c804acccd8fb14`, written into the [freeze record](#freeze-record) as its own row by `lip freeze-record --analysis --write`, which also refreshed this file's hash (it was `5ab03df406ca111182fb7563a7da552eed698f33ce67df2a8c6eb614190abd0e` at `freeze-v2`); the other rows are unchanged. `docs/analysis.md` lists the choices made where the design text was open (Holm ordering by bootstrap p-value, the exact bound judging a separated contrast, H1c pooling both control types, H2c at O0, O1 and pooled). Pinned while the E2 sweeps were still running, with no outcome column of any confirmatory sweep looked at. | The design requires the analysis code to be hashed before any confirmatory result is unblinded. From here, a change to the script fails `lip freeze-record --check` and is itself a dated amendment. Approved by Mahmood on 2026-10-15 |
