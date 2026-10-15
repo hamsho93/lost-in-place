@@ -7,11 +7,40 @@ from lost_in_place.llm import prompt
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC_TEXT = (ROOT / "SPEC.md").read_text()
-VALUES = {row: f"{i:064x}" for i, row in enumerate(freeze.ROWS)}
+VALUES = {row: f"{i:064x}" for i, row in enumerate(freeze.ALL_ROWS)}
+# A SPEC as it stood at freeze-v2, before the analysis script was pinned: the record has the
+# freeze-v2 rows only. Synthetic, so the pre-pin cases don't depend on the repo's SPEC.md.
+V2_VALUES = {row: VALUES[row] for row in freeze.ROWS}
+UNPINNED_SPEC = "\n".join(
+    [
+        "# A spec",
+        "",
+        "Body text, with a Fault model.",
+        "",
+        freeze.RECORD_HEADING,
+        "",
+        "The freeze, in order: hash, tag, publish.",
+        "",
+        "| Artifact | Hash |",
+        "|---|---|",
+        *(f"| {row} | |" for row in freeze.ROWS),
+        "",
+        "## Amendment log",
+        "",
+        "| Date | Change | Why |",
+        "|---|---|---|",
+        "",
+    ]
+)
 
 
 def test_spec_has_every_row_of_the_record() -> None:
-    assert set(freeze.recorded(SPEC_TEXT)) == set(freeze.ROWS)
+    assert set(freeze.recorded(SPEC_TEXT)) == set(freeze.ALL_ROWS)
+
+
+def test_spec_pins_the_current_analysis_script() -> None:
+    # A change to `stats.py` is a dated amendment that re-pins it (SPEC.md, amendment log 2026-10-15).
+    assert freeze.recorded(SPEC_TEXT)[freeze.ANALYSIS_ROW] == freeze.analysis_hash(ROOT)
 
 
 def test_writing_the_record_does_not_change_the_spec_hash() -> None:
@@ -74,10 +103,11 @@ def test_record_hashes_the_repo(tmp_path: Path) -> None:
     assert freeze.record(ROOT, None, None)["Experiment design"] == ""
 
 
-def test_the_freeze_v2_record_has_no_analysis_row_and_the_check_ignores_it_until_pinned() -> None:
-    assert freeze.ANALYSIS_ROW not in freeze.recorded(SPEC_TEXT)
-    written = freeze.write_record(SPEC_TEXT, VALUES)
-    now = {**VALUES, freeze.ANALYSIS_ROW: "a" * 64}
+def test_an_unpinned_record_has_no_analysis_row_and_the_check_ignores_it_until_pinned() -> None:
+    assert set(freeze.recorded(UNPINNED_SPEC)) == set(freeze.ROWS)
+    written = freeze.write_record(UNPINNED_SPEC, V2_VALUES)
+    assert freeze.ANALYSIS_ROW not in freeze.recorded(written)
+    now = {**V2_VALUES, freeze.ANALYSIS_ROW: "a" * 64}
     assert freeze.mismatches(written, now) == []
     assert freeze.mismatches(written, now, require_analysis=True) == [
         f"{freeze.ANALYSIS_ROW}: recorded (blank), now {'a' * 64}"
@@ -85,7 +115,7 @@ def test_the_freeze_v2_record_has_no_analysis_row_and_the_check_ignores_it_until
 
 
 def test_pinning_the_analysis_adds_its_row_and_refreshes_only_this_files_hash() -> None:
-    before = freeze.write_record(SPEC_TEXT, VALUES)
+    before = freeze.write_record(UNPINNED_SPEC, V2_VALUES)
     pinned = freeze.write_analysis(before, ROOT)
     recorded = freeze.recorded(pinned)
     assert recorded[freeze.ANALYSIS_ROW] == freeze.analysis_hash(ROOT)
@@ -122,13 +152,13 @@ def test_freeze_record_cli_pins_and_checks_the_analysis_script(
     root = tmp_path / "repo"
     (root / "src" / "lost_in_place").mkdir(parents=True)
     (root / freeze.ANALYSIS_SCRIPT).write_bytes((ROOT / freeze.ANALYSIS_SCRIPT).read_bytes())
-    (root / freeze.SPEC).write_text(SPEC_TEXT)
+    (root / freeze.SPEC).write_text(UNPINNED_SPEC)
     assert cli.main(["freeze-record", "--root", str(root), "--analysis", "--check"]) == 1
     assert "recorded (blank)" in capsys.readouterr().err
     assert cli.main(["freeze-record", "--root", str(root), "--analysis"]) == 0
     out = capsys.readouterr().out
     assert f"path: {freeze.ANALYSIS_SCRIPT}" in out and f"SHA-256: {freeze.analysis_hash(root)}" in out
-    assert (root / freeze.SPEC).read_text() == SPEC_TEXT  # printing changes nothing
+    assert (root / freeze.SPEC).read_text() == UNPINNED_SPEC  # printing changes nothing
     assert cli.main(["freeze-record", "--root", str(root), "--analysis", "--write"]) == 0
     capsys.readouterr()
     assert cli.main(["freeze-record", "--root", str(root), "--analysis", "--check"]) == 0
