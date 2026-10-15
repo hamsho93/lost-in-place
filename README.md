@@ -4,7 +4,7 @@
 
 Lost in Place is an open benchmark for that question. It runs PX4 and Gazebo in simulation, where the true position is known exactly. It then degrades the vehicle's own position estimate (featureless floors, frozen or missing optical flow, no compass) while an LLM planner and a validator command the drone. We score whether the stack holds, lands or refuses instead of flying on.
 
-> Status: **pre-alpha**. The harness, fault injection, validators and scorer work, and episodes run in sweeps on spot AWS Batch. Three harness pilots have run with the scripted planner ([docs/pilot.md](docs/pilot.md)); they test the measurement, not the hypotheses, and are excluded from any results. The measurement contract is drafted in [SPEC.md](SPEC.md) and will be frozen and published as an RFC before any confirmatory run. There are no benchmark results yet.
+> Status: **pre-alpha**. The harness, fault injection, validators and scorer work, and episodes run in sweeps on spot AWS Batch. Three harness pilots have run with the scripted planner ([docs/pilot.md](docs/pilot.md)); they test the measurement, not the hypotheses, and are excluded from any results. The measurement contract is [SPEC.md](SPEC.md), frozen at tag `freeze-v2` and published as an RFC before any confirmatory run. The first confirmatory results are in [Results](#results).
 
 ## Why
 
@@ -26,6 +26,12 @@ Or use the container: `docker build -f docker/Dockerfile -t lost-in-place .`, th
 
 To run episodes on spot AWS Batch, see [`infra/`](infra/README.md). The first smoke run there matched the local numbers, at about 5 minutes and well under a cent of compute per episode. See the [fidelity notes](docs/fidelity.md#spot-smoke-run-2026-10-12) for the numbers.
 
+## Results
+
+- [**freeze-v2** (E1 and E2, 2026-10-15)](docs/results/freeze-v2.md): the first confirmatory sweeps, 5,112 episodes, scored by the analysis script pinned before unblinding. The two validator demonstrations (H2a, H2b silent side) came out as pre-registered: under silent frame misalignment neither validator caught a hazardous move. The planner result is a null: neither Qwen3-4B arm produced a correct safe action under any fault at either observation level (0 of 120 per cell), so H1a is inconclusive under the pre-registered rule, with an exact bound that excludes an effect of 15 points or more.
+
+The index of results reports is [docs/results/](docs/results/README.md).
+
 ## Repository
 
 | Path | What it is |
@@ -38,7 +44,7 @@ To run episodes on spot AWS Batch, see [`infra/`](infra/README.md). The first sm
 | `px4/` | Pinned PX4 commit and the patches we apply to it |
 | `docker/` | Headless image with PX4, Gazebo and the runner |
 | `infra/` | AWS CDK app: spot Batch queue, results bucket, budget guard |
-| `docs/` | [Simulation fidelity notes](docs/fidelity.md), [planners: adding a model or your own planner](docs/planners.md), [scoring](docs/scoring.md), [the pre-registered analysis](docs/analysis.md), [E1 harness pilot](docs/pilot.md) |
+| `docs/` | [Simulation fidelity notes](docs/fidelity.md), [planners: adding a model or your own planner](docs/planners.md), [scoring](docs/scoring.md), [the pre-registered analysis](docs/analysis.md), [E1 harness pilot](docs/pilot.md), [results](docs/results/README.md) |
 
 ## Credits and related work
 
