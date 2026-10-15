@@ -476,13 +476,22 @@ def test_cli_writes_json_and_markdown_and_reports_the_pin(
     )
     assert code == 0
     captured = capsys.readouterr()
-    assert "not pinned" in captured.err
+    assert "not pinned" not in captured.err
     result = json.loads(out.with_suffix(".json").read_text())
     assert result["analysis"]["script"] == stats.SCRIPT and len(result["analysis"]["sha256"]) == 64
-    assert result["analysis"]["pinned"] is False  # the repo's SPEC.md has no analysis row yet
+    assert result["analysis"]["pinned"] is True  # the repo's SPEC.md pins this script (amendment 2026-10-15)
     assert result["analysis"]["resamples"] == 50
     assert out.with_suffix(".md").read_text() == stats.markdown(result)
+    # A checkout whose SPEC.md has not pinned the script is warned about.
+    unpinned = tmp_path / "unpinned"
+    (unpinned / "src" / "lost_in_place").mkdir(parents=True)
+    (unpinned / stats.SCRIPT).write_bytes((ROOT / stats.SCRIPT).read_bytes())
+    (unpinned / "SPEC.md").write_text("## Freeze record\n\n| Artifact | Hash |\n|---|---|\n| This file | |\n")
     assert (
-        cli.main(["stats", str(tmp_path / "runs"), "--resamples", "20", "--json", "--root", str(ROOT)]) == 0
+        cli.main(["stats", str(tmp_path / "runs"), "--resamples", "20", "--json", "--root", str(unpinned)])
+        == 0
     )
-    assert json.loads(capsys.readouterr().out)["inputs"]["runs"] == [str(tmp_path / "runs")]
+    captured = capsys.readouterr()
+    assert "not pinned" in captured.err
+    printed = json.loads(captured.out)
+    assert printed["inputs"]["runs"] == [str(tmp_path / "runs")] and printed["analysis"]["pinned"] is False
