@@ -10,6 +10,12 @@
 - **Labelling** is the same kind of bundle: the labelling instructions, the model labeller's
   brief and its pinned model.
 - **The image digest and the git SHA** are recorded as they are.
+- **The analysis script** (`lip stats`, `src/lost_in_place/stats.py`) is hashed as a file. Its row
+  is not part of the freeze-v2 table: the design pins the script by a dated amendment-log entry
+  before any confirmatory result is unblinded, and `lip freeze-record --analysis --write` adds
+  (or updates) the row then. `--check` compares the row once it exists; `--analysis --check` also
+  fails while it doesn't. Writing the row changes this file, so that command refreshes the "This
+  file" row too and touches nothing else.
 """
 
 from __future__ import annotations
@@ -34,6 +40,9 @@ ROWS = (
     "Image digest",
     "Git SHA",
 )
+ANALYSIS_SCRIPT = "src/lost_in_place/stats.py"
+ANALYSIS_ROW = f"Analysis script (`{ANALYSIS_SCRIPT}`)"
+ALL_ROWS = (*ROWS, ANALYSIS_ROW)
 _ROW = re.compile(r"^\| (?P<artifact>.+?) \| (?P<value>[^|]*?) ?\|$")
 
 
@@ -53,7 +62,7 @@ def blank_record(spec_text: str) -> str:
     start, end = _record_span(lines)
     for i in range(start, end):
         m = _ROW.match(lines[i])
-        if m and m["artifact"] in ROWS:
+        if m and m["artifact"] in ALL_ROWS:
             lines[i] = f"| {m['artifact']} | |"
     return "\n".join(lines)
 
@@ -139,11 +148,15 @@ def git_sha(root: Path) -> str:
     return sha.stdout.strip() + ("-dirty" if status.stdout.strip() else "")
 
 
+def analysis_hash(root: Path) -> str:
+    return sha256((root / ANALYSIS_SCRIPT).read_bytes())
+
+
 def record(root: Path, design: Path | None, image_digest: str | None) -> dict[str, str]:
     """The record's values by row; rows with nothing to hash are left empty."""
     return dict(
         zip(
-            ROWS,
+            ALL_ROWS,
             (
                 spec_hash((root / SPEC).read_text()),
                 sha256(design.read_bytes()) if design else "",
@@ -153,6 +166,7 @@ def record(root: Path, design: Path | None, image_digest: str | None) -> dict[st
                 labelling_hash(),
                 image_digest or "",
                 git_sha(root),
+                analysis_hash(root),
             ),
             strict=True,
         )
@@ -160,34 +174,54 @@ def record(root: Path, design: Path | None, image_digest: str | None) -> dict[st
 
 
 def recorded(spec_text: str) -> dict[str, str]:
-    """The values written in SPEC's freeze record."""
+    """The values written in SPEC's freeze record, by the rows it has."""
     lines = spec_text.split("\n")
     start, end = _record_span(lines)
     found = {}
     for line in lines[start:end]:
         m = _ROW.match(line)
-        if m and m["artifact"] in ROWS:
+        if m and m["artifact"] in ALL_ROWS:
             found[m["artifact"]] = m["value"].strip().strip("`")
     return found
 
 
-def write_record(spec_text: str, values: dict[str, str]) -> str:
+def _row(artifact: str, value: str) -> str:
+    return f"| {artifact} | `{value}` |" if value else f"| {artifact} | |"
+
+
+def write_record(spec_text: str, values: dict[str, str], rows: tuple[str, ...] = ALL_ROWS) -> str:
+    """Write `values` into the record's rows named in `rows`. A named row the table lacks is added at
+    its end when it has a value (the analysis row, after the freeze-v2 table)."""
     lines = spec_text.split("\n")
     start, end = _record_span(lines)
+    seen = set()
+    last = start
     for i in range(start, end):
         m = _ROW.match(lines[i])
-        if m and m["artifact"] in ROWS:
-            value = values.get(m["artifact"], "")
-            lines[i] = f"| {m['artifact']} | `{value}` |" if value else f"| {m['artifact']} | |"
+        if m and m["artifact"] in ALL_ROWS:
+            last = i
+            if m["artifact"] in rows:
+                seen.add(m["artifact"])
+                lines[i] = _row(m["artifact"], values.get(m["artifact"], ""))
+    missing = [row for row in rows if row not in seen and values.get(row)]
+    lines[last + 1 : last + 1] = [_row(row, values[row]) for row in missing]
     return "\n".join(lines)
 
 
-def mismatches(spec_text: str, values: dict[str, str]) -> list[str]:
+def write_analysis(spec_text: str, root: Path) -> str:
+    """Pin the analysis script: its row, plus this file's own hash, which the new row changes."""
+    with_row = write_record(spec_text, {ANALYSIS_ROW: analysis_hash(root)}, (ANALYSIS_ROW,))
+    return write_record(with_row, {ROWS[0]: spec_hash(with_row)}, (ROWS[0],))
+
+
+def mismatches(spec_text: str, values: dict[str, str], require_analysis: bool = False) -> list[str]:
     """Rows whose written value differs from `values`. Rows with nothing to compare are skipped, and
-    so is the git SHA: committing the record moves HEAD past the commit it names."""
+    so is the git SHA: committing the record moves HEAD past the commit it names. The analysis row
+    is compared once the record has it, or always with `require_analysis`."""
     written = recorded(spec_text)
+    rows = list(ROWS) + ([ANALYSIS_ROW] if require_analysis or ANALYSIS_ROW in written else [])
     return [
         f"{row}: recorded {written.get(row) or '(blank)'}, now {values[row]}"
-        for row in ROWS
+        for row in rows
         if row != "Git SHA" and values.get(row) and written.get(row) != values[row]
     ]

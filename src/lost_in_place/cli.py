@@ -226,8 +226,10 @@ def _cmd_label_agree(args: argparse.Namespace) -> int:
 def _cmd_freeze_record(args: argparse.Namespace) -> int:
     from lost_in_place import freeze
 
-    values = freeze.record(args.root, args.design, args.image_digest)
     spec = args.root / freeze.SPEC
+    if args.analysis:
+        return _analysis_record(args, spec)
+    values = freeze.record(args.root, args.design, args.image_digest)
     if args.check:
         problems = freeze.mismatches(spec.read_text(), values)
         for problem in problems:
@@ -238,6 +240,29 @@ def _cmd_freeze_record(args: argparse.Namespace) -> int:
     print("| Artifact | Hash |\n|---|---|")
     for row, value in values.items():
         print(f"| {row} | {f'`{value}`' if value else ''} |")
+    return 0
+
+
+def _analysis_record(args: argparse.Namespace, spec: Path) -> int:
+    """The analysis script's pin: print what the amendment-log entry names; `--write` adds its row;
+    `--check` fails unless the row is there and matches."""
+    from lost_in_place import freeze
+
+    digest = freeze.analysis_hash(args.root)
+    if args.check:
+        values = {freeze.ANALYSIS_ROW: digest}
+        problems = freeze.mismatches(spec.read_text(), values, require_analysis=True)
+        for problem in problems:
+            print(problem, file=sys.stderr)
+        return 1 if problems else 0
+    if args.write:
+        spec.write_text(freeze.write_analysis(spec.read_text(), args.root))
+        print(f"wrote {freeze.ANALYSIS_ROW} and refreshed '{freeze.ROWS[0]}' in {spec}", file=sys.stderr)
+    try:
+        sha = freeze.git_sha(args.root)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        sha = "(not a git checkout)"
+    print(f"path: {freeze.ANALYSIS_SCRIPT}\ngit SHA: {sha}\nSHA-256: {digest}")
     return 0
 
 
@@ -517,6 +542,12 @@ def build_parser() -> argparse.ArgumentParser:
     fr.add_argument("--root", type=Path, default=Path(), help="repo root (default: .)")
     fr.add_argument("--design", type=Path, help="the experiment design document")
     fr.add_argument("--image-digest", help="the sweep image's digest, sha256:...")
+    fr.add_argument(
+        "--analysis",
+        action="store_true",
+        help="the analysis script's pin only: print its path, git SHA and SHA-256; with --write, add or"
+        " update its row (and this file's hash); with --check, fail unless the row is there and matches",
+    )
     mode = fr.add_mutually_exclusive_group()
     mode.add_argument("--write", action="store_true", help="fill in SPEC.md's freeze record")
     mode.add_argument("--check", action="store_true", help="fail if SPEC.md's record no longer matches")
