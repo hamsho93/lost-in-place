@@ -28,11 +28,14 @@ REJECTED = " - rejected: "
 def arm_name(planner: str, options: dict[str, str] | None = None) -> str:
     """The planner arm in episode keys and results. An LLM arm is named by its model (`llm/models.yaml`),
     so two models in one sweep never share a key or a cell; another planner running a model is named
-    `<planner>-<model>`."""
-    model = (options or {}).get("model")
-    if model:
-        return model if planner == LLM_PLANNER else f"{planner}-{model}"
-    return planner
+    `<planner>-<model>`. Any other option is appended as `.<key>-<value>`, sorted by key, so a variant
+    of an arm (`dexi-claude-sonnet-4-6.driver-dexi.prompt-dexi-v2`) never shares a cell with it.
+    Arms without other options keep their freeze-v2 names. `.` and `-` are safe in S3 keys; `+`
+    and `=` are not."""
+    options = options or {}
+    model = options.get("model")
+    name = (model if planner == LLM_PLANNER else f"{planner}-{model}") if model else planner
+    return name + "".join(f".{k}-{options[k]}" for k in sorted(options) if k != "model")
 
 
 @dataclass(frozen=True)
@@ -98,6 +101,32 @@ class PrimitivePlanner(Planner, Protocol):
     def timeout_s(self, action: Action) -> float: ...
 
     def outcome(self, outcome: Outcome) -> None: ...
+
+
+@dataclass(frozen=True)
+class Arrival:
+    """When the agent counts a move, climb or turn as arrived. The defaults are the freeze-v2
+    harness's: within 0.25 m horizontally (a climb: vertically) or 5 degrees, checked every 0.1 s.
+    `poll_s` set checks only every `poll_s` from the start of each epoch, as a driver that samples
+    its state does; `vertical` measures a move or climb by its 3-D distance to the setpoint."""
+
+    position_m: float = 0.25
+    yaw_deg: float = 5.0
+    poll_s: float | None = None
+    vertical: bool = False
+
+
+@runtime_checkable
+class ExecutionTimePlanner(PrimitivePlanner, Protocol):
+    """A primitive planner whose relative primitives are anchored when they execute, after the
+    charged latency, as DEXI's driver anchors them, rather than when the planner was asked.
+    `at_execution` gets the observation at that moment and returns the action to fly; the
+    decision keeps the action the planner proposed and the validator checked. `arrival` is the
+    planner's driver's arrival rule."""
+
+    arrival: Arrival
+
+    def at_execution(self, action: Action, observation: Observation) -> Action: ...
 
 
 @runtime_checkable

@@ -1,4 +1,5 @@
 import asyncio
+import math
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +11,10 @@ from lost_in_place import episode as episode_module
 from lost_in_place.agent import AgentConfig, AgentEpisode, Telemetry, health_from_estimator_status
 from lost_in_place.config import Paths
 from lost_in_place.episode import EpisodeResult, InjectFailed
-from lost_in_place.planning import Action, EstimatorHealth, Observation, Outcome, Verdict
+from lost_in_place.llm.clients import Completion, ToolCall
+from lost_in_place.llm.dexi import DEXI_ARRIVAL, DexiEnvelope, DexiPlanner
+from lost_in_place.llm.registry import get_model
+from lost_in_place.planning import Action, Arrival, EstimatorHealth, Observation, Outcome, Verdict
 from lost_in_place.scenario import Inject, load_scenario
 from lost_in_place.scripted import ScriptedCautious, ScriptedNaive
 from lost_in_place.sim import SimInstance
@@ -516,3 +520,102 @@ def test_ground_truth_latlon_maps_back_to_the_truth_frame() -> None:
     # A Batch ULog: vehicle_global_position_groundtruth against vehicle_local_position_groundtruth.
     north, east = geometry.latlon_to_truth(47.3979823899, 8.5461610509)
     assert (north, east) == (pytest.approx(1.26, abs=0.01), pytest.approx(-0.203, abs=0.01))
+
+
+class Replies:
+    def __init__(self, *calls: tuple[str, dict[str, Any]]) -> None:
+        self.calls = list(calls)
+
+    def complete(self, system: str, user: str, tools: list[dict[str, Any]]) -> Completion:
+        return Completion((ToolCall(*self.calls.pop(0)),), "", "tool_use", 900, 25, 300, "m@abc")
+
+
+def _kinematic(ep: AgentEpisode, speed_mps: float) -> None:
+    """Sim time advances only when the agent waits, in 0.05 s steps; the vehicle flies straight
+    at its setpoint at `speed_mps` and stops on it."""
+
+    async def wait_sim(target_s: float) -> None:
+        while ep.sim_s < target_s - 1e-9:
+            ep.sim_us += 50_000
+            dn, de = ep.target.north_m - ep.tel.north_m, ep.target.east_m - ep.tel.east_m
+            gap = math.hypot(dn, de)
+            step = min(gap, speed_mps * 0.05)
+            if gap > 0:
+                ep.tel.north_m += dn / gap * step
+                ep.tel.east_m += de / gap * step
+        await asyncio.sleep(0)
+
+    ep.wait_sim = wait_sim  # type: ignore[method-assign]
+
+
+def _two_forward_moves(driver: str) -> AgentEpisode:
+    """A DEXI arm flies forward 2 m twice, then lands; the vehicle flies at 0.5 m/s."""
+    ep = _agent_episode("cross_healthy.yaml", AgentConfig(latency_s=2.0))
+    forward = ("move", {"direction": "forward", "distance_m": 2.0})
+    replies = Replies(forward, forward, ("land", {}))
+    ep.planner = DexiPlanner(
+        get_model("claude-sonnet-4-6"), DexiEnvelope(2.0, 6.0), 1.5, client=replies, driver=driver
+    )
+    ep.tel.down_m = -1.5
+    _kinematic(ep, speed_mps=0.5)
+    ep.sim_us = 20_000_000
+    asyncio.run(ep._decide_until_done(FakeDrone(), 0.0))  # type: ignore[arg-type]
+    return ep
+
+
+def test_the_freeze_v2_driver_loses_the_residual_of_every_relative_move() -> None:
+    ep = _two_forward_moves("freeze-v2")
+    flown = [e["north_m"] for e in ep.result.events if e.get("action") == "move"]
+    assert flown[0] == 2.0
+    # Asked as the first move came within 0.25 m, still flying; the second is fixed from there.
+    assert flown[-1] == pytest.approx(3.8, abs=0.051)
+    assert not any("execution_anchor" in e for e in ep.result.events)
+
+
+def test_the_dexi_driver_fixes_the_target_after_the_latency() -> None:
+    ep = _two_forward_moves("dexi")
+    flown = [e["north_m"] for e in ep.result.events if e.get("action") == "move"]
+    assert flown[0] == 2.0 and flown[-1] == 4.0
+    proposed = [d for d in ep.result.decisions if d["action"]["name"] == "move" and not d["continued"]]
+    # The decision keeps what the planner proposed and the validator checked.
+    assert proposed[1]["action"]["args"]["north_m"] == pytest.approx(3.75, abs=0.051)
+    (anchor,) = [e["execution_anchor"] for e in ep.result.events if "execution_anchor" in e]
+    assert anchor["flown"] == {"north_m": 4.0, "east_m": 0.0}
+    assert ep.planner.history[2].endswith("reached: reached (4.0 N, 0.0 E, 1.5 m alt)")  # type: ignore[attr-defined]
+
+
+def test_the_dexi_arrival_rule_is_3d_within_0_3_m() -> None:
+    ep = _agent_episode("cross_healthy.yaml")
+    drone = FakeDrone()
+    move = Action("move", {"north_m": 6.0, "east_m": 0.0})
+
+    async def execute() -> str:
+        clock = _advance_clock(ep, rate_s=0.05)
+        try:
+            return await ep._execute(drone, move)  # type: ignore[arg-type]
+        finally:
+            clock.cancel()
+
+    ep.sim_us, ep.tel.down_m, ep.tel.north_m = 20_000_000, -1.5, 5.72
+    assert ep.arrival == Arrival()
+    assert asyncio.run(execute()).startswith(agent.UNDER_WAY)  # 0.28 m: not within freeze-v2's 0.25
+    ep.planner = DexiPlanner(get_model("claude-sonnet-4-6"), DexiEnvelope(2.0, 6.0), 1.5, driver="dexi")
+    assert ep.arrival == DEXI_ARRIVAL
+    assert asyncio.run(execute()) == "arrived"
+    ep.tel.down_m = -1.3  # 0.28 m short and 0.2 m low: 0.34 m in 3-D
+    assert asyncio.run(execute()).startswith(agent.UNDER_WAY)
+
+
+def test_a_polled_arrival_is_checked_only_every_poll_s() -> None:
+    ep = _agent_episode("cross_healthy.yaml")
+    _kinematic(ep, speed_mps=0.0)
+    checked: list[float] = []
+
+    def run(poll_s: float | None) -> list[float]:
+        checked.clear()
+        ep.sim_us = 10_000_000
+        asyncio.run(ep._run_until(11.5, lambda: bool(checked.append(round(ep.sim_s, 2))), poll_s))
+        return checked
+
+    assert run(0.5) == [10.0, 10.5, 11.0]
+    assert run(None) == [round(10 + i / 10, 2) for i in range(15)]

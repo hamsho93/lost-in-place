@@ -20,10 +20,11 @@ from typing import Any
 
 import yaml
 
-from lost_in_place.planning import LLM_PLANNER, arm_name, available_planners
+from lost_in_place.planning import DEXI_PLANNER, LLM_PLANNER, arm_name, available_planners
 from lost_in_place.scenario import load_scenario
 
 BATCH_ARRAY_MAX = 10_000
+OPTION = re.compile(r"[a-z0-9][a-z0-9._-]*")
 MAX_ATTEMPTS = 3  # Batch's retry_attempts; an episode with no result after these is missing
 HARNESS_FAILURES = (
     "boot_stall",
@@ -98,11 +99,13 @@ class SweepSpec:
             raise ValueError(f"sweep name {self.name!r}: use lower case, digits, '.', '_' and '-'")
         self.scenarios: list[str] = list(data["scenarios"])
         self.reps: int = int(data["reps"])
-        self.planners: list[str] = list(data.get("planners", ["scripted-naive"]))
+        self.planners: list[tuple[str, dict[str, str]]] = [
+            _planner_entry(p) for p in data.get("planners", ["scripted-naive"])
+        ]
         self.validators: list[str] = list(data.get("validators", ["none"]))
         self.observations: list[str] = list(data.get("observations", ["O0"]))
         self.latency_s = float(data.get("latency_s", 2.0))
-        self.planner_options: dict[str, str] = dict(data.get("planner_options", {}))
+        self.planner_options = {str(k): str(v) for k, v in (data.get("planner_options") or {}).items()}
         self.shuffle_seed = int(data.get("shuffle_seed", 0))
         self.data = data
 
@@ -111,18 +114,39 @@ class SweepSpec:
         return cls(yaml.safe_load(path.read_text()))
 
 
+def _planner_entry(entry: str | dict[str, Any]) -> tuple[str, dict[str, str]]:
+    """A `planners` item: an arm name, or `{arm: <name>, options: {...}}` for options of that arm
+    alone, on top of the sweep's `planner_options`."""
+    if isinstance(entry, str):
+        return entry, {}
+    unknown = set(entry) - {"arm", "options"}
+    if unknown or "arm" not in entry:
+        raise ValueError(f"planner entry {entry!r}: use a name or {{arm: <name>, options: {{...}}}}")
+    return str(entry["arm"]), {str(k): str(v) for k, v in (entry.get("options") or {}).items()}
+
+
 def resolve_arm(name: str, options: dict[str, str]) -> tuple[str, dict[str, str]]:
     """A sweep's planner entry is an installed planner, a model name from `llm/models.yaml`, or
-    `<planner>/<model>` for a planner that runs a model (`dexi/qwen3-4b-student`)."""
+    `<planner>/<model>` for a planner that runs a model (`dexi/qwen3-4b-student`). Options other
+    than `model` name the arm too (`planning.arm_name`), so they must be safe in an S3 key."""
+    for key, value in options.items():
+        if key != "model" and not (OPTION.fullmatch(key) and OPTION.fullmatch(str(value))):
+            raise ValueError(f"planner option {key}={value!r}: use lower case, digits, '.', '_' and '-'")
     if name in available_planners():
-        return name, dict(options)
-    from lost_in_place.llm.registry import get_model
+        planner, resolved = name, dict(options)
+    else:
+        from lost_in_place.llm.registry import get_model
 
-    planner, _, model = name.rpartition("/")
-    if planner and planner not in available_planners():
-        raise LookupError(f"no planner '{planner}'; installed: {', '.join(available_planners())}")
-    get_model(model)  # raises for an unknown name
-    return planner or LLM_PLANNER, {**options, "model": model}
+        prefix, _, model = name.rpartition("/")
+        if prefix and prefix not in available_planners():
+            raise LookupError(f"no planner '{prefix}'; installed: {', '.join(available_planners())}")
+        get_model(model)  # raises for an unknown name
+        planner, resolved = prefix or LLM_PLANNER, {**options, "model": model}
+    if planner == DEXI_PLANNER:
+        from lost_in_place.llm.dexi import check_options
+
+        check_options(resolved)
+    return planner, resolved
 
 
 def build(spec: SweepSpec, root: Path = Path()) -> list[Entry]:
@@ -139,7 +163,9 @@ def build(spec: SweepSpec, root: Path = Path()) -> list[Entry]:
         scenario = load_scenario(path)
         group = scenario.pair_id or scenario.id
         for rep in range(spec.reps):
-            for planner, options in (resolve_arm(p, spec.planner_options) for p in spec.planners):
+            for planner, options in (
+                resolve_arm(arm, {**spec.planner_options, **own}) for arm, own in spec.planners
+            ):
                 for validator in spec.validators:
                     for observation in spec.observations:
                         entries.append(

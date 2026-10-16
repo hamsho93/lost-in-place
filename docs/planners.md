@@ -151,12 +151,34 @@ What changes from DEXI's own loop, and why:
 
 - **No system prompt and DEXI's six tools**, plus `refuse(reason)`, which the experiment design gives every LLM arm. DEXI's clients act on the first tool call, and so does this planner.
 - **The harness takes off first**, so the history starts with `1. take_off(alt_m=1.5) -> reached: took off, now at ... m`.
-- **Relative moves become absolute targets.** `move(direction, distance_m)` is flown from the estimated pose at decision time, along the current heading. `up` and `down` become a climb to an altitude. `rotate(deg)` becomes a heading.
+- **Relative moves become absolute targets.** `move(direction, distance_m)` is flown along the current heading; `up` and `down` become a climb to an altitude; `rotate(deg)` becomes a heading. When the target is fixed depends on the driver (below). The decision always records the target from the decision-time estimate, which is what the validator arm checked; DEXI's loop also validates against the state it prompted with.
 - **One decision is one completed primitive**, as in DEXI. The agent keeps flying an unfinished move, turn or climb without asking the model again, until it arrives, the validator rejects it, PX4 takes over, or it runs past DEXI's timeout (10 s plus 2 s per metre for a move, 30 s for a turn). Each further epoch is still checked by the validator arm, and recorded in `decisions` with `continued: true`. The latency charge and the world pause apply only to model calls. The scorer counts continued epochs as moves for catch and false alarm, but not as the planner's response to a fault onset (CSA).
 - **The history reads like DEXI's flights**, with the details `MavsdkDriver` reports: `reached (1.0 N, 3.0 E, 1.5 m alt)`, `rotated to heading -89 deg`, `held for 10 s`, `timeout: did not reach target ... within 14s`. A rejection reads `REJECTED by validator: <reason>`; a rejected continuation reads `failed: stopped by the validator: <reason>`.
 - **DEXI's own validator isn't applied.** The benchmark's validator arms replace it. The planner only rejects what can't be flown at all, in DEXI's words: no tool call, an unknown tool, a malformed argument, `take_off` in the air, `mission_complete` before landing, or a descent below 0.3 m. Those count as invalid proposals.
 - **The envelope line** shows DEXI's altitude cap (2 m), move cap (2 m) and hold cap (30 s), and a geofence box: the smallest box around the take-off point that keeps every waypoint 0.5 m inside, rounded up to 0.5 m (±4.5 to 6 m in E2). The student saw boxes of ±2.5 to 5 m. A box around the whole room would be ±8 to 9 m, further from anything it has seen.
 - **At O1**, the same estimator-health lines as `llm.prompt` follow the state line. DEXI's prompt has no health fields of its own.
+
+### Prompt versions and drivers
+
+Two planner options pick the variant. The defaults are what the freeze-v2 sweeps (E2, E4) flew, so their manifests replay unchanged on any image.
+
+| Option | Values | What it changes |
+|---|---|---|
+| `prompt` | `dexi-9b2e7a7` (default) | DEXI's prompt verbatim, frozen in the freeze record. It says "A safety validator checks every action" even under validator `none` |
+| | `dexi-v2` | The same prompt, with that sentence only when a validator arm is configured. Under `none` the sentence is gone, and the adapter's own rejections read `REJECTED: <reason>` instead of `REJECTED by validator: <reason>`. Decisions record `prompt_version: dexi-v2` |
+| `driver` | `freeze-v2` (default) | The target of a relative move or turn is fixed from the estimate at decision time, before the 2 s latency. A move arrives within 0.25 m horizontally (a turn within 5°), checked every 0.1 s. Each relative move loses about 0.2 m ([fidelity.md](fidelity.md#known-issues-and-how-we-handle-them)) |
+| | `dexi` | As DEXI's `MavsdkDriver` at `9b2e7a7`: the target is fixed from the estimate when the primitive executes, after the latency, rounded as `MavsdkDriver.state` rounds it, and the history's `reached (...)` names that target. A move or climb arrives within 0.3 m in 3-D, a turn within 8°, sampled every 0.5 s. The agent logs `execution_anchor` (proposed and flown targets) in the events. `hold` still holds where the vehicle is when it executes |
+
+On the command line: `--planner-opt prompt=dexi-v2 --planner-opt driver=dexi`. In a sweep spec, `planner_options` applies to every arm, or a `planners` entry carries options of its own:
+
+```yaml
+planners:
+  - dexi/claude-sonnet-4-6                     # as E4 flew it
+  - arm: dexi/claude-sonnet-4-6
+    options: {prompt: dexi-v2, driver: dexi}
+```
+
+Options other than `model` name the arm, sorted by key, so the variant never shares a cell with the original: `dexi-claude-sonnet-4-6.driver-dexi.prompt-dexi-v2`. `lip manifest` rejects an unknown option or value. The options need an image built from this code; the freeze-v2 image (`e879c1ef`) knows neither.
 
 ## Plugging in a planner that lives in another repo
 
