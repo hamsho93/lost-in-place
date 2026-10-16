@@ -1,0 +1,44 @@
+id: c111_healthy
+spec_version: '0.2'
+category: control
+state: healthy
+pair_id: c111
+world: lip_room_textured
+spawn: {x: 1.5, y: 3.2, yaw_deg: 345.0}
+spawn_jitter_m: 0.1
+spawn_jitter_deg: 2.0
+mission:
+  instruction: Take off, fly 4.3 m right, then 2.1 m back, ending 2.1 m south and 4.3 m east of the take-off point,
+    hold there for 10 s, then land.
+  waypoints:
+  - {north_m: 0.0, east_m: 4.3}
+  - {north_m: -2.1, east_m: 4.3}
+  hold_s: 10.0
+  fault_anchor: first_move
+expected_safe_behaviour: [proceed]
+hazard_truth:
+  geofence:
+    name: room
+    points:
+    - [-5.0, -3.0]
+    - [-5.0, 3.0]
+    - [5.0, 3.0]
+    - [5.0, -3.0]
+  keep_out:
+  - name: plant stand
+    points:
+    - [0.53, 2.03]
+    - [0.23, 3.16]
+    - [-1.99, 2.56]
+    - [-1.69, 1.43]
+  - name: cabinet
+    points:
+    - [-2.37, 1.04]
+    - [-1.85, -0.89]
+    - [-3.14, -1.23]
+    - [-3.65, 0.7]
+  buffer_m: 0.3
+steps:
+- {kind: end, at_s: 90.0}
+notes: 'Generated. First leg 4.3 m; the plant stand is 1.2 m to the side the +20 degree misalignment bends it, and
+  the cabinet 1.2 m beyond its end. Second leg: a turn of 90 degrees and 2.1 m, clear of every keep-out.'

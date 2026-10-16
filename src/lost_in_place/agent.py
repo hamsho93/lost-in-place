@@ -14,6 +14,8 @@ Each decision:
    ends; each further epoch is still checked by the validator and recorded as `continued`.
    An `ExecutionTimePlanner` (the DEXI arms with `driver=dexi`) turns a relative primitive into
    its target here, from the estimate after the latency, and brings its driver's arrival rule.
+   Every executed move, turn or climb is logged as an `execution_anchor` event (proposed and flown
+   targets, with both times), and its decision gets `flown_args` and `executed_sim_us`.
 
 Faults are scheduled from arming, from the first executed move, or from the estimate coming within
 `mission.fault_anchor_m` of that move's target (`mission.fault_anchor`).
@@ -51,7 +53,7 @@ from lost_in_place.planning import (
     Planner,
     PrimitivePlanner,
     Verdict,
-    check_observation_level,
+    check_planner_level,
     load_planner,
     shows_health,
 )
@@ -89,7 +91,7 @@ class AgentConfig:
     epoch_s: float = 1.5
 
     def __post_init__(self) -> None:
-        check_observation_level(self.observation)
+        check_planner_level(self.planner, self.observation, self.planner_options, self.validator)
 
 
 def make_planner(config: AgentConfig, scenario: Scenario) -> Planner:
@@ -99,6 +101,7 @@ def make_planner(config: AgentConfig, scenario: Scenario) -> Planner:
     elif config.planner == DEXI_PLANNER:
         options["scenario"] = scenario
         options["validator"] = config.validator
+        options["observation"] = config.observation
     return load_planner(config.planner, **options)
 
 
@@ -380,15 +383,34 @@ class AgentEpisode(_Episode):
                 self.history.append(history_entry(self.sim_s - start, action, verdict))
                 self.log(loop_end=action.name)
                 return
-            if verdict.ok and isinstance(self.planner, ExecutionTimePlanner):
-                proposed, action = action, self.planner.at_execution(action, self.observe())
-                if action != proposed:
-                    self.log(execution_anchor={"proposed": proposed.args, "flown": action.args})
+            if verdict.ok:
+                proposed = action
+                if isinstance(self.planner, ExecutionTimePlanner):
+                    action = self.planner.at_execution(action, self.observe())
+                self._anchor_execution(calls, proposed, action)
             began = self.sim_s
             status = await self._execute(drone, action if verdict.ok else self._hold())
             self.history.append(history_entry(self.sim_s - start, action, verdict, status))
             if isinstance(self.planner, PrimitivePlanner):
                 await self._finish_primitive(drone, start, end, calls, began, action, verdict, status)
+
+    def _anchor_execution(self, index: int, proposed: Action, flown: Action) -> None:
+        """Record what decision `index` flew and when: it was proposed before the charged latency, so
+        a fault can start in between, and an `ExecutionTimePlanner` may have re-anchored it."""
+        decision = self.result.decisions[-1]
+        assert decision["index"] == index and not decision["continued"]
+        decision["flown_args"], decision["executed_sim_us"] = flown.args, self.sim_us
+        if flown.name != "hold" or flown != proposed:
+            self.log(
+                execution_anchor={
+                    "decision_index": index,
+                    "name": flown.name,
+                    "proposed_sim_s": round(decision["sim_us"] / 1e6, 3),
+                    "executed_sim_s": round(self.sim_us / 1e6, 3),
+                    "proposed": proposed.args,
+                    "flown": flown.args,
+                }
+            )
 
     def _hold(self) -> Action:
         return Action("hold", {"seconds": self.config.epoch_s})
@@ -425,7 +447,19 @@ class AgentEpisode(_Episode):
         """The validator's check of an unfinished primitive's next epoch; the planner isn't asked."""
         obs, health, truth = self.observe(), self.health(), self.truth()
         verdict = self.validator.check(action, replace(obs, health=health), truth)
-        self._record(index, self.sim_s, obs, action, verdict, health, truth, continued=True)
+        segment = next(d for d in reversed(self.result.decisions) if not d["continued"])
+        self._record(
+            index,
+            self.sim_s,
+            obs,
+            action,
+            verdict,
+            health,
+            truth,
+            continued=True,
+            flown_args=segment["flown_args"],
+            executed_sim_us=segment["executed_sim_us"],
+        )
         return verdict
 
     def truth(self) -> Truth | None:
@@ -471,6 +505,8 @@ class AgentEpisode(_Episode):
         planner_wall_s: float = 0.0,
         paused: bool = False,
         continued: bool = False,
+        flown_args: dict[str, Any] | None = None,
+        executed_sim_us: int | None = None,
     ) -> None:
         self.result.decisions.append(
             {
@@ -489,6 +525,11 @@ class AgentEpisode(_Episode):
                 # A further epoch of decision `index`'s primitive, checked by the validator but not
                 # proposed again (`PrimitivePlanner`).
                 "continued": continued,
+                # The executed segment: the target flown and when it started, after the latency.
+                # None when nothing of the proposal flew (rejected, land, refuse). A continued epoch
+                # carries its segment's.
+                "flown_args": flown_args,
+                "executed_sim_us": executed_sim_us,
             }
         )
 

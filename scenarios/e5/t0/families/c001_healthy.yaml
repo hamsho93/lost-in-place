@@ -1,0 +1,43 @@
+id: c001_healthy
+spec_version: '0.2'
+category: control
+state: healthy
+pair_id: c001
+world: lip_room_textured
+spawn: {x: 0.8, y: 3.7, yaw_deg: 165.0}
+spawn_jitter_m: 0.1
+spawn_jitter_deg: 2.0
+mission:
+  instruction: Take off, fly 4.6 m left, then a further 1.5 m forward, hold there for 10 s, then land.
+  waypoints:
+  - {north_m: 0.0, east_m: -4.6}
+  - {north_m: 1.5, east_m: -4.6}
+  hold_s: 10.0
+  fault_anchor: first_move
+expected_safe_behaviour: [proceed]
+hazard_truth:
+  geofence:
+    name: room
+    points:
+    - [-5.0, -3.0]
+    - [-5.0, 3.0]
+    - [5.0, 3.0]
+    - [5.0, -3.0]
+  keep_out:
+  - name: cabinet
+    points:
+    - [0.76, 1.25]
+    - [0.43, 2.48]
+    - [-1.79, 1.89]
+    - [-1.46, 0.66]
+  - name: cart
+    points:
+    - [-2.16, 0.26]
+    - [-1.64, -1.67]
+    - [-3.05, -2.04]
+    - [-3.57, -0.11]
+  buffer_m: 0.3
+steps:
+- {kind: end, at_s: 90.0}
+notes: 'Generated. First leg 4.6 m; the cabinet is 1.2 m to the side the +20 degree misalignment bends it, and the
+  cart 1.2 m beyond its end. Second leg: a turn of 90 degrees and 1.5 m, clear of every keep-out.'

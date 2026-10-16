@@ -41,6 +41,7 @@ class Completion:
     output_tokens: int
     latency_ms: int
     model_id: str  # what was actually invoked, after any profile mapping
+    reasoning: str = ""  # the model's reasoning when the API returns it apart from the text
 
 
 class ChatClient(Protocol):
@@ -54,6 +55,15 @@ class BedrockConverseClient:
         self.spec = spec
         profiles = json.loads(env.get(BEDROCK_PROFILES_ENV) or "{}")
         self.model_id: str = profiles.get(spec.model_id, spec.model_id)
+        # The runtime endpoint is chosen by spec.region, and Bedrock only serves a profile from
+        # the region it lives in, so a profile made in the stack's region can't serve this entry.
+        if self.model_id.startswith("arn:"):
+            region = self.model_id.split(":")[3]
+            if region != spec.region:
+                raise LookupError(
+                    f"model '{spec.name}': its {BEDROCK_PROFILES_ENV} profile is in {region}, "
+                    f"but the entry calls {spec.region}"
+                )
         self._client = client
 
     @classmethod
@@ -76,11 +86,14 @@ class BedrockConverseClient:
         inference: dict[str, Any] = {"maxTokens": self.spec.max_tokens}
         if self.spec.temperature is not None:
             inference["temperature"] = self.spec.temperature
-        return {
+        request: dict[str, Any] = {
             "modelId": self.model_id,
             **({"system": [{"text": system}]} if system else {}),
             "messages": [{"role": "user", "content": [{"text": user}]}],
-            "toolConfig": {
+        }
+        # Converse rejects an empty tool list, so a call without tools (a probe) sends no toolConfig.
+        if tools:
+            request["toolConfig"] = {
                 "tools": [
                     {
                         "toolSpec": {
@@ -92,9 +105,11 @@ class BedrockConverseClient:
                     for t in tools
                 ],
                 "toolChoice": {self.spec.tool_choice: {}},
-            },
-            "inferenceConfig": inference,
-        }
+            }
+        request["inferenceConfig"] = inference
+        if self.spec.additional_request_fields:
+            request["additionalModelRequestFields"] = dict(self.spec.additional_request_fields)
+        return request
 
     def complete(self, system: str, user: str, tools: list[dict[str, Any]]) -> Completion:
         started = time.monotonic()
@@ -113,7 +128,19 @@ class BedrockConverseClient:
             output_tokens=int(usage.get("outputTokens", 0)),
             latency_ms=int(response.get("metrics", {}).get("latencyMs", (time.monotonic() - started) * 1000)),
             model_id=self.model_id,
+            reasoning="".join(
+                _reasoning(block["reasoningContent"]) for block in content if "reasoningContent" in block
+            ),
         )
+
+
+def _reasoning(block: dict[str, Any]) -> str:
+    """A Converse `reasoningContent` block's text. A provider may return it encrypted instead, or,
+    like Claude 5.x by default (thinking display "omitted"), as an empty text with a signature."""
+    if "reasoningText" in block:
+        text = str(block["reasoningText"].get("text", ""))
+        return text or ("[omitted reasoning]" if block["reasoningText"].get("signature") else "")
+    return "[redacted reasoning]" if "redactedContent" in block else ""
 
 
 # {model name in models.yaml: base URL}, overriding the registry's base_url, so the same arm can
@@ -178,8 +205,14 @@ class OpenAICompatibleClient:
             **self.spec.extra_body,
             "model": self.spec.model_id,
             "messages": [*messages, {"role": "user", "content": user}],
-            "tools": [{"type": "function", "function": tool} for tool in tools],
-            "tool_choice": "required" if self.spec.tool_choice == "any" else "auto",
+            **(
+                {
+                    "tools": [{"type": "function", "function": tool} for tool in tools],
+                    "tool_choice": "required" if self.spec.tool_choice == "any" else "auto",
+                }
+                if tools
+                else {}
+            ),
             "max_tokens": self.spec.max_tokens,
         }
         if self.spec.temperature is not None:
@@ -385,10 +418,17 @@ class BedrockImportedClient:
         )
 
 
+def _scripted(spec: ModelSpec) -> ChatClient:
+    from lost_in_place.llm.scripted_dexi import ScriptedRuleClient  # it imports this module
+
+    return ScriptedRuleClient.from_spec(spec)
+
+
 CLIENTS: dict[str, Callable[[ModelSpec], ChatClient]] = {
     "bedrock": BedrockConverseClient.from_spec,
     "openai_compatible": OpenAICompatibleClient.from_spec,
     "bedrock_imported": BedrockImportedClient.from_spec,
+    "scripted": _scripted,
 }
 
 

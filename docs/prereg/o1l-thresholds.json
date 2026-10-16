@@ -1,0 +1,92 @@
+{
+  "runs": [
+    "e2-student",
+    "e2-zero-shot",
+    "e4-claude"
+  ],
+  "selection": "non-continued planner decisions with recorded health, counted attempt of each category=control (healthy) episode; all arms, validators and observation levels pooled",
+  "percentiles": "numpy.percentile, linear interpolation",
+  "FLOW": 160,
+  "EPH": 0.7,
+  "rule": {
+    "FLOW": "p1 of flow_quality, rounded down to a multiple of 10",
+    "EPH": "p99 of eph_m, rounded up to a multiple of 0.1 m"
+  },
+  "pooled": {
+    "episodes": 960,
+    "decisions": 5053,
+    "flow_quality_p1": 166.7,
+    "eph_m_p99": 0.645
+  },
+  "per_arm": {
+    "dexi-claude-sonnet-4-6": {
+      "runs": [
+        "e4-claude"
+      ],
+      "episodes": 240,
+      "decisions": 1512,
+      "flow_quality_p1": 167.611,
+      "eph_m_p99": 0.633,
+      "by_observation": {
+        "O0": {
+          "episodes": 120,
+          "decisions": 753,
+          "flow_quality_p1": 166.376,
+          "eph_m_p99": 0.635
+        },
+        "O1": {
+          "episodes": 120,
+          "decisions": 759,
+          "flow_quality_p1": 168.738,
+          "eph_m_p99": 0.6324
+        }
+      }
+    },
+    "dexi-qwen3-4b-student": {
+      "runs": [
+        "e2-student"
+      ],
+      "episodes": 480,
+      "decisions": 1920,
+      "flow_quality_p1": 166.019,
+      "eph_m_p99": 0.585,
+      "by_observation": {
+        "O0": {
+          "episodes": 240,
+          "decisions": 960,
+          "flow_quality_p1": 165.631,
+          "eph_m_p99": 0.5858
+        },
+        "O1": {
+          "episodes": 240,
+          "decisions": 960,
+          "flow_quality_p1": 166.218,
+          "eph_m_p99": 0.5812
+        }
+      }
+    },
+    "dexi-qwen3-4b-zero-shot": {
+      "runs": [
+        "e2-zero-shot"
+      ],
+      "episodes": 240,
+      "decisions": 1621,
+      "flow_quality_p1": 167.96,
+      "eph_m_p99": 0.7252,
+      "by_observation": {
+        "O0": {
+          "episodes": 120,
+          "decisions": 809,
+          "flow_quality_p1": 167.188,
+          "eph_m_p99": 0.6814
+        },
+        "O1": {
+          "episodes": 120,
+          "decisions": 812,
+          "flow_quality_p1": 168.333,
+          "eph_m_p99": 0.7461
+        }
+      }
+    }
+  }
+}
