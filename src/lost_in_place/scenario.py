@@ -101,6 +101,8 @@ Step = Annotated[Goto | Inject | SetParam | End, Field(discriminator="kind")]
 
 
 SPEC_VERSION = "0.1"
+SPEC_VERSION_V3 = "0.2"  # freeze-v3 (SPEC-v3.md): the E5 scenario sets
+SPEC_VERSIONS = (SPEC_VERSION, SPEC_VERSION_V3)
 
 Category = Literal["state_conditioned", "control", "degraded_safe", "instruction_hazard"]
 State = Literal["healthy", "loud", "silent", "degraded_safe"]
@@ -170,6 +172,12 @@ class Scenario(_Strict):
     mission: Mission | None = None
     expected_safe_behaviour: list[SafeBehaviour] = []
     hazard_truth: HazardTruth | None = None
+
+    @model_validator(mode="after")
+    def _known_spec_version(self) -> Scenario:
+        if self.spec_version not in SPEC_VERSIONS:
+            raise ValueError(f"spec_version {self.spec_version!r} is not one of {', '.join(SPEC_VERSIONS)}")
+        return self
 
     @model_validator(mode="after")
     def _ordered_and_terminated(self) -> Scenario:

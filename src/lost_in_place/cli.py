@@ -375,13 +375,55 @@ def _cmd_propose(args: argparse.Namespace) -> int:
 def _cmd_families(args: argparse.Namespace) -> int:
     from lost_in_place.families import generate
 
+    if args.e5:
+        return _families_e5(args)
+    if args.count is None or args.check:
+        print("lip families: --count is required, and --check goes with --e5", file=sys.stderr)
+        return 2
     for i in range(args.start, args.start + args.count):
         family = generate(
-            f"{args.prefix}{i:02d}", args.seed, benign=args.benign, loud_anchored=args.loud_anchor
+            f"{args.prefix or 'g'}{i:02d}",
+            0 if args.seed is None else args.seed,
+            benign=args.benign,
+            loud_anchored=args.loud_anchor,
         )
-        for path in family.write(args.out):
+        for path in family.write(args.out or Path("scenarios/e1")):
             print(path)
     return 0
+
+
+def _families_e5(args: argparse.Namespace) -> int:
+    import collections
+    import tempfile
+
+    from lost_in_place import families
+
+    fixed = {"--count": args.count, "--start": args.start or None, "--prefix": args.prefix}
+    fixed |= {"--benign": args.benign or None, "--loud-anchor": args.loud_anchor or None}
+    if given := [flag for flag, value in fixed.items() if value is not None]:
+        print(f"lip families: --e5 draws a fixed set; drop {', '.join(given)}", file=sys.stderr)
+        return 2
+    out: Path = args.out or Path("scenarios/e5")
+    draw = families.draw_e5(args.prior, families.E5_SEED if args.seed is None else args.seed)
+    strata = collections.Counter(families.wording_stratum(f.scenarios()["healthy"]) for f in draw.families)
+    n = len(draw.families)
+    for template in families.TEMPLATES:
+        shares = ", ".join(f"{k} {strata[k]}/{n} ({strata[k] / n:.1%})" for k in sorted(strata, key=str))
+        print(f"{template}: {n} families, {len(draw.canaries)} canaries, {n} timed; strata {shares}")
+    skipped = {k: v for k, v in draw.duplicates.items() if v}
+    print(f"duplicates rejected: {sum(skipped.values())} {skipped}")
+    if not args.check:
+        families.write_e5(draw, out)
+        return 0
+    with tempfile.TemporaryDirectory() as tmp:
+        fresh = Path(tmp)
+        families.write_e5(draw, fresh)
+        want = {p.relative_to(fresh): p.read_bytes() for p in fresh.rglob("*.yaml")}
+        have = {p.relative_to(out): p.read_bytes() for p in out.rglob("*.yaml")}
+    bad = sorted(str(p) for p in want.keys() | have.keys() if want.get(p) != have.get(p))
+    for path in bad:
+        print(f"differs, missing or extra: {out / path}", file=sys.stderr)
+    return 1 if bad else 0
 
 
 def _instance_arg(value: str) -> int | None:
@@ -411,11 +453,15 @@ def build_parser() -> argparse.ArgumentParser:
     fam = sub.add_parser(
         "families", help="generate scenario families (four matched states each; five with --benign)"
     )
-    fam.add_argument("--count", type=int, required=True, help="how many families")
+    fam.add_argument("--count", type=int, help="how many families (required without --e5)")
     fam.add_argument("--start", type=int, default=0, help="number of the first family (default: 0)")
-    fam.add_argument("--prefix", default="g", help="family names are <prefix><number> (default: g)")
-    fam.add_argument("--seed", type=int, default=0, help="the same seed and names give the same families")
-    fam.add_argument("--out", type=Path, default=Path("scenarios/e1"))
+    fam.add_argument("--prefix", help="family names are <prefix><number> (default: g)")
+    fam.add_argument(
+        "--seed",
+        type=int,
+        help="the same seed and names give the same families (default: 0; 7 with --e5)",
+    )
+    fam.add_argument("--out", type=Path, help="default: scenarios/e1; scenarios/e5 with --e5")
     fam.add_argument(
         "--benign",
         action="store_true",
@@ -424,8 +470,25 @@ def build_parser() -> argparse.ArgumentParser:
     fam.add_argument(
         "--loud-anchor",
         action="store_true",
-        help="start the loud fault when the estimate is 2 m from the first move's target (scenarios/v3),"
-        " not 2.5 s into the move (E1, E2)",
+        help="start the loud fault when the estimate is 2 m from the first move's target"
+        " (scenarios/smoke-audit-fixes), not 2.5 s into the move (E1, E2)",
+    )
+    fam.add_argument(
+        "--e5",
+        action="store_true",
+        help="draw E5's fixed set (c000-c159, canaries k000-k005, deduplicated) and write it under"
+        " both templates to <out>/{t0,t1}/{families,canary,timed}; prints the wording strata",
+    )
+    fam.add_argument(
+        "--prior",
+        type=Path,
+        default=Path("scenarios"),
+        help="with --e5: the directory holding the sets E5 must not repeat (default: scenarios)",
+    )
+    fam.add_argument(
+        "--check",
+        action="store_true",
+        help="with --e5: compare with <out> instead of writing; exit 1 if any differ",
     )
     fam.set_defaults(func=_cmd_families)
 
