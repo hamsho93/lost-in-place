@@ -22,11 +22,11 @@ Read `infra/AGENTS.md` first. The account is shared, so its rules come before an
 
 ```bash
 cd infra
-npx -y aws-cdk@2 diff LostInPlaceSim --no-change-set -c alertEmail=<owner's alert email> -c budgetUsd=450 -c maxVcpus=<n> -c imageTag=sha256:<digest>
+npx -y aws-cdk@2 diff LostInPlaceSim --no-change-set -c alertEmail=<owner's alert email> -c budgetUsd=450 -c maxVcpus=<n> -c imageTag=sha256:<digest> -c useast2Profiles="$east2"
 npx -y aws-cdk@2 deploy LostInPlaceSim <same -c flags> --require-approval never
 ```
 
-Pass every context key on every deploy. CDK doesn't remember them, so a deploy without `alertEmail` deletes the budget alert's email subscription. Say in the PR or doc exactly what the diff changed.
+Pass every context key on every deploy. CDK doesn't remember them, so a deploy without `alertEmail` deletes the budget alert's email subscription, and one without `useast2Profiles` (built as in `infra/README.md`, "Models in another region") drops the Sonnet 5.5 and Haiku 5.5 grants. Say in the PR or doc exactly what the diff changed.
 
 ## 3. Canary on Batch, not locally
 
