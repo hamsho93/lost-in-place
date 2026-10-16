@@ -268,6 +268,8 @@ def _pinned_script_record(args: argparse.Namespace, spec: Path, row: str) -> int
 
 
 def _cmd_stats(args: argparse.Namespace) -> int:
+    if args.design == "v3":
+        return _cmd_stats_v3(args)
     from lost_in_place import stats
 
     attempts, keys, inputs = stats.load_attempts(args.runs, args.manifest)
@@ -291,6 +293,38 @@ def _cmd_stats(args: argparse.Namespace) -> int:
             "warning: this analysis script is not pinned in SPEC.md; do not unblind results with it",
             file=sys.stderr,
         )
+    return 0
+
+
+def _cmd_stats_v3(args: argparse.Namespace) -> int:
+    from lost_in_place import stats_v3
+
+    status = stats_v3.gate(args.root)
+    if not status["open"]:
+        for problem in status["problems"]:
+            print(f"refusing to print E5 outcomes: {problem}", file=sys.stderr)
+        return 3
+    try:
+        design = stats_v3.read_design((args.root / stats_v3.SPEC_V3).read_text())
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    data, inputs = stats_v3.load(args.runs, args.manifest)
+    result = stats_v3.analyse(
+        data,
+        design,
+        resamples=args.resamples,
+        seed=args.seed,
+        inputs=inputs,
+        pin={"sha256": status["sha256"], "pinned": True},
+    )
+    if args.out:
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.with_suffix(".json").write_text(stats_v3.dumps(result))
+        args.out.with_suffix(".md").write_text(stats_v3.markdown(result))
+        print(f"wrote {args.out.with_suffix('.json')} and {args.out.with_suffix('.md')}")
+    else:
+        print(stats_v3.dumps(result) if args.json else stats_v3.markdown(result), end="")
     return 0
 
 
@@ -532,6 +566,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     st.add_argument("--json", action="store_true", help="the full result as JSON instead of markdown")
     st.add_argument("--out", type=Path, help="write <out>.json and <out>.md instead of printing")
+    st.add_argument(
+        "--design",
+        choices=["v2", "v3"],
+        default="v2",
+        help="v2: freeze-v2's analysis (stats.py, default); v3: E5's (stats_v3.py), which refuses to run"
+        " until SPEC-v3.md pins it and docs/prereg/freeze-v3-signoff.md exists",
+    )
     st.set_defaults(func=_cmd_stats)
 
     ls = sub.add_parser(
