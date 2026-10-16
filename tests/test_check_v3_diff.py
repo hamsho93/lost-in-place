@@ -321,3 +321,121 @@ def test_the_design_markers_are_freeze_v3s() -> None:
     design = ROOT / freeze.DESIGN_V3
     if design.exists():
         assert check_v3_diff.skeleton(design.read_text())[1] == 3
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "tests/fixtures/dexi_ladder/O1-L_loud.txt",
+        "tests/fixtures/dexi_ladder/O2_loud.txt",
+        "tests/fixtures/dexi_9b2e7a7/tools.json",
+        "tests/fixtures/qwen3_thinking_render.txt",
+        "tests/fixtures/qwen3_thinking_request.json",
+        "tests/fixtures/wording_probe.json",
+        "tests/fixtures/sonnet_golden_prompt.txt",
+    ],
+)
+def test_frozen_render_and_probe_fixtures_may_not_change(path: str) -> None:
+    assert check_v3_diff.rule(path) == ("frozen render or probe fixture", False)
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["tests/test_agent.py", "tests/test_fix.py", "tests/fixtures/scoring/healthy_geometric/score.json"],
+)
+def test_other_tests_and_fixtures_are_a_harness_fixs(path: str) -> None:
+    assert check_v3_diff.rule(path) == ("A-6 harness: tests of a harness fix", True)
+
+
+@pytest.mark.usefixtures("same_bundles")
+def test_a_golden_render_edit_fails(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    _edit(repo, "tests/fixtures/dexi_ladder/O1_loud.txt", lambda t: t + "edited\n")
+    _edit(repo, "tests/test_fix.py", lambda _: "def test_fix() -> None: ...\n")
+    code, out = _run(repo, capsys)
+    assert code == 1 and "`tests/fixtures/dexi_ladder/O1_loud.txt` (A): frozen render or probe fixture" in out
+    assert "`tests/test_fix.py` (A)" not in out.split("**FAIL**")[1]
+
+
+CLI_TEXT = (ROOT / check_v3_diff.CLI).read_text()
+STATS_OPTION = (
+    '    st.add_argument("--out", type=Path, help="write <out>.json and <out>.md instead of printing")\n'
+)
+STATS_V3 = (
+    "\n\ndef _cmd_stats_v3(args: argparse.Namespace) -> int:\n"
+    "    from lost_in_place import stats_v3\n\n"
+    "    print(stats_v3.markdown(stats_v3.analyse(args.runs)))\n"
+    "    return 0\n"
+)
+
+
+def test_cli_edits_for_the_stats_pin_pass() -> None:
+    assert STATS_OPTION in CLI_TEXT
+    after = CLI_TEXT.replace(
+        STATS_OPTION, STATS_OPTION + '    st.add_argument("--design", choices=["v2", "v3"], default="v2")\n'
+    )
+    after = after.replace("\n\ndef _analyze(", STATS_V3 + "\n\ndef _analyze(", 1)
+    problems, count = check_v3_diff.cli_changes(CLI_TEXT, after)
+    assert (problems, count) == ([], 2 + 3)
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "where"),
+    [
+        (
+            '"--planner", default="scripted-naive"',
+            '"--planner", default="scripted-cautious"',
+            "`build_parser`",
+        ),
+        (
+            '        "--validator",\n        default="none",',
+            '        "--validator",\n        default="oracle",',
+            "`build_parser`",
+        ),
+        (
+            "def _agent_config(args: argparse.Namespace) -> AgentConfig:\n",
+            "def _agent_config(args: argparse.Namespace) -> AgentConfig:\n    args.observation = 'O1'\n",
+            "`_agent_config`",
+        ),
+        (
+            "def _cmd_propose(args: argparse.Namespace) -> int:\n",
+            "def _cmd_propose(args: argparse.Namespace) -> int:\n    args = _tweak(args)\n",
+            "`_cmd_propose`",
+        ),
+    ],
+    ids=["planner-default", "validator-default", "agent-config", "propose"],
+)
+def test_cli_edits_on_a_rendering_path_fail(old: str, new: str, where: str) -> None:
+    assert old in CLI_TEXT
+    after = CLI_TEXT.replace(old, new, 1)
+    problems, _ = check_v3_diff.cli_changes(CLI_TEXT, after)
+    assert any(p.startswith(where) for p in problems), problems
+
+
+def test_a_new_helper_is_on_the_path_when_it_names_a_rendering_option() -> None:
+    import ast
+
+    helper = "\n\ndef _tweak(args):\n    args.prompt_version = 'dexi-9b2e7a7'\n    return args\n"
+    caller = "\n\ndef _cmd_other(args):\n    return _tweak(args)\n"
+    tree = ast.parse(CLI_TEXT + helper + caller)
+    assert {"_tweak", "_cmd_other", "_cmd_propose", "_agent_config"} <= check_v3_diff.rendering_functions(
+        tree
+    )
+    assert "_cmd_stats" not in check_v3_diff.rendering_functions(tree)
+    problems, _ = check_v3_diff.cli_changes(CLI_TEXT, CLI_TEXT + caller)
+    assert problems == []
+    problems, _ = check_v3_diff.cli_changes(CLI_TEXT, CLI_TEXT + helper + caller)
+    assert any(p.startswith("`_tweak`") for p in problems) and any(
+        p.startswith("`_cmd_other`") for p in problems
+    )
+
+
+@pytest.mark.usefixtures("same_bundles")
+def test_the_check_reads_cli_py_at_both_refs(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    _edit(
+        repo, check_v3_diff.CLI, lambda t: t.replace("\n\ndef _analyze(", STATS_V3 + "\n\ndef _analyze(", 1)
+    )
+    code, out = _run(repo, capsys)
+    assert code == 0 and "none on a prompt or probe rendering path" in out, out
+    _edit(repo, check_v3_diff.CLI, lambda t: t.replace('default="scripted-naive"', 'default="llm"', 1))
+    code, out = _run(repo, capsys)
+    assert code == 1 and "changes a prompt or probe rendering path" in out and "`build_parser`" in out

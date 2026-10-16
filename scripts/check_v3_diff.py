@@ -19,7 +19,13 @@ It fails if, between the two refs:
   renders for each design level and prompt version across a sweep of health values, several histories
   and the T0 and T1 instructions of a sample of the E5 families and every canary, so a rendering
   change anywhere on that path fails, not only at the bundle's exemplars;
-- any file under `scenarios/` changed;
+- any file under `scenarios/` changed, or a frozen render or probe fixture under `tests/fixtures/`
+  (`FROZEN_FIXTURES`, or a name with render, golden, probe, prompt or wording in it);
+- `cli.py` changed on a prompt or probe rendering path (`RENDERING`): a function there naming such
+  an identifier or option, or calling one that does, may not change at all; the parser's statements
+  may change only where they name none. This is a syntactic check: a change that reaches a rendering
+  path only through data (a file written for the planner to read) is not caught here, but a change
+  to what is rendered still fails the bundle hash;
 - any other file changed that is on neither list: A-6's harness code (`HARNESS`) or A-7's
   mechanical fill-ins (`FILL_INS`). This file is on neither, so it can't be loosened in between.
 
@@ -31,7 +37,9 @@ the bundle hash: `llm/dexi.py` holds both DEXI's driver and the prompt texts. Ex
 from __future__ import annotations
 
 import argparse
+import ast
 import concurrent.futures
+import copy
 import dataclasses
 import difflib
 import json
@@ -86,6 +94,30 @@ HARNESS = {
     "infra": ("infra/", "docker/", "px4/", ".github/workflows/"),
     "tests of a harness fix": ("tests/",),
 }
+
+# Frozen text under tests/, which a harness fix's tests may not change: the golden renders of what an
+# arm is shown, and any fixture of a render or a probe.
+FROZEN_FIXTURES = (
+    "tests/fixtures/dexi_ladder/",
+    "tests/fixtures/dexi_9b2e7a7/",
+    "tests/fixtures/qwen3_instruct_render.txt",
+    "tests/fixtures/qwen3_thinking_render.txt",
+    "tests/fixtures/qwen3_thinking_request.json",
+)
+_FROZEN_NAME = re.compile(r"render|golden|probe|prompt|wording", re.IGNORECASE)
+
+# A-7 allows `cli.py` for the stats_v3 pin (`lip stats --design v3`), but not on a prompt or probe
+# rendering path. A function naming one of these, or calling or passing one that does, is on it and
+# may not change. The parser, which the pin has to extend, is checked statement by statement: a
+# changed statement may not name one either.
+CLI = "src/lost_in_place/cli.py"
+PARSER = "build_parser"
+RENDERING = re.compile(
+    r"prompt|observation|validator|driver|planner|propose|render|template|health|probe|wording"
+    r"|instruction|mission|dexi|model|agent_?config|fly",
+    re.IGNORECASE,
+)
+_WORD = re.compile(r"[-\w.:/]+")
 
 # A-7: the mechanical fill-ins. The first two are checked further below.
 FILL_INS = {
@@ -147,6 +179,10 @@ def rule(path: str) -> tuple[str, bool]:
     """Which list allows a changed path, and whether it is allowed at all."""
     if path.startswith(SCENARIOS):
         return "scenario directory", False
+    if any(_covers(p, path) for p in FROZEN_FIXTURES) or (
+        path.startswith("tests/fixtures/") and _FROZEN_NAME.search(path)
+    ):
+        return "frozen render or probe fixture", False
     for lists, label in ((HARNESS, "A-6 harness"), (FILL_INS, "A-7 fill-in")):
         for category, patterns in lists.items():
             if any(_covers(p, path) for p in patterns):
@@ -279,6 +315,99 @@ def check_spec(repo: Path, pre: str, head: str, result: Result) -> None:
         result.notes.append(f"`{SPEC_V3}`: unchanged outside its freeze record's values")
 
 
+_FUNCTION = (ast.FunctionDef, ast.AsyncFunctionDef)
+
+
+def _tokens(node: ast.AST) -> set[str]:
+    """The names a node uses or binds, and its one-word string constants (option names, choices)."""
+    out: set[str] = set()
+    for n in ast.walk(node):
+        if isinstance(n, ast.Name):
+            out.add(n.id)
+        elif isinstance(n, ast.Attribute):
+            out.add(n.attr)
+        elif isinstance(n, (*_FUNCTION, ast.ClassDef)):
+            out.add(n.name)
+        elif isinstance(n, ast.arg) or (isinstance(n, ast.keyword) and n.arg):
+            out.add(n.arg)
+        elif isinstance(n, ast.alias):
+            out.update(name for name in (n.name, n.asname) if name)
+        elif isinstance(n, ast.Constant) and isinstance(n.value, str) and _WORD.fullmatch(n.value):
+            out.add(n.value)
+    return out
+
+
+def rendering_functions(tree: ast.Module) -> set[str]:
+    """The module's functions on a prompt or probe rendering path: those naming one, and those that
+    call or pass one."""
+    used = {n.name: _tokens(n) for n in tree.body if isinstance(n, _FUNCTION)}
+    path = {name for name, tokens in used.items() if any(RENDERING.search(t) for t in tokens)}
+    while grown := {name for name, tokens in used.items() if name not in path and tokens & path}:
+        path |= grown
+    return path
+
+
+def _units(tree: ast.Module) -> dict[str, list[ast.AST]]:
+    """The module's statements by where they are: each function's signature and body statements,
+    and the statements outside any function."""
+    units: dict[str, list[ast.AST]] = {"module level": []}
+    for node in tree.body:
+        if isinstance(node, _FUNCTION):
+            signature = copy.copy(node)
+            signature.body = []
+            units[node.name] = [signature, *node.body]
+        else:
+            units["module level"].append(node)
+    return units
+
+
+def cli_changes(before: str, after: str) -> tuple[list[str], int]:
+    """The changed statements of `cli.py` that are on a prompt or probe rendering path, described,
+    and the number of changed statements."""
+    trees = ast.parse(before), ast.parse(after)
+    path = rendering_functions(trees[0]) | rendering_functions(trees[1])
+    units = _units(trees[0]), _units(trees[1])
+    problems, count = [], 0
+    for where in dict.fromkeys([*units[0], *units[1]]):
+        old, new = units[0].get(where, []), units[1].get(where, [])
+        whole = where in path and where != PARSER
+        label = where if where == "module level" else f"`{where}`"
+        matcher = difflib.SequenceMatcher(
+            a=[ast.dump(s) for s in old], b=[ast.dump(s) for s in new], autojunk=False
+        )
+        for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+            if tag == "equal":
+                continue
+            for side, statements in (("pre", old[i1:i2]), ("head", new[j1:j2])):
+                for statement in statements:
+                    count += 1
+                    line = getattr(statement, "lineno", "?")
+                    named = sorted(t for t in _tokens(statement) if RENDERING.search(t) or t in path)
+                    if whole:
+                        problems.append(
+                            f"{label}, line {line} at {side}: the function is on a rendering path"
+                        )
+                    elif named:
+                        problems.append(f"{label}, line {line} at {side}: names {', '.join(named[:4])}")
+    return problems, count
+
+
+def check_cli(repo: Path, pre: str, head: str, result: Result) -> None:
+    before, after = show(repo, pre, CLI), show(repo, head, CLI)
+    if before == after:
+        return
+    try:
+        problems, count = cli_changes(before or "", after or "")
+    except SyntaxError as e:
+        result.failures.append(f"`{CLI}`: can't parse it: {e}")
+        return
+    if problems:
+        shown = "\n".join(f"    {p}" for p in problems[:12])
+        result.failures.append(f"`{CLI}` changes a prompt or probe rendering path:\n{shown}")
+    else:
+        result.notes.append(f"`{CLI}`: {count} changed statements, none on a prompt or probe rendering path")
+
+
 def check_bundles(repo: Path, pre: str, head: str, result: Result) -> None:
     with concurrent.futures.ThreadPoolExecutor(2) as pool:
         before, after = pool.map(lambda sha: bundle_hashes(repo, sha), (pre, head))
@@ -306,6 +435,7 @@ def check(repo: Path, pre_ref: str, head_ref: str) -> Result:
             result.failures.append(f"`{path}` ({status}): {where}")
     check_design(repo, pre, head, result)
     check_spec(repo, pre, head, result)
+    check_cli(repo, pre, head, result)
     check_bundles(repo, pre, head, result)
     return result
 
