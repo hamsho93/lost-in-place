@@ -57,3 +57,5 @@ uv run lip freeze-record --check ...           # the pre-sweep check: compares t
 ```
 
 The order for the amendment: write the dated amendment-log entry in SPEC.md first, then run `--analysis --write` (so the refreshed "This file" hash covers the entry), then commit SPEC.md alone. The row's value is blanked for SPEC's own hash, like the other rows, so writing it doesn't move that hash; adding the row line does, which is why the command refreshes "This file" and nothing else. A later change to `stats.py` fails `--check` and is itself an amendment.
+
+E4's supplement (`scripts/e4_supplement.py`: design A11's O1−O0 contrasts, 54-family set, stop-short distribution and 1.5 m false-refusal sensitivity, built on this script's functions) is pinned the same way, with `--e4-supplement` in place of `--analysis`. Its row follows the analysis row. It was pinned after E4's outcomes were in (amendment log, 2026-10-16), so the pin records it rather than pre-registers it.

@@ -43,6 +43,13 @@ def test_spec_pins_the_current_analysis_script() -> None:
     assert freeze.recorded(SPEC_TEXT)[freeze.ANALYSIS_ROW] == freeze.analysis_hash(ROOT)
 
 
+def test_spec_pins_the_current_e4_supplement() -> None:
+    # Pinned by the amendment-log entry of 2026-10-16; a change to the script re-pins it.
+    assert freeze.recorded(SPEC_TEXT)[freeze.E4_SUPPLEMENT_ROW] == freeze.script_hash(
+        ROOT, freeze.E4_SUPPLEMENT_ROW
+    )
+
+
 def test_writing_the_record_does_not_change_the_spec_hash() -> None:
     written = freeze.write_record(SPEC_TEXT, VALUES)
     assert written != SPEC_TEXT
@@ -138,6 +145,31 @@ def test_pinning_the_analysis_adds_its_row_and_refreshes_only_this_files_hash() 
     assert freeze.write_analysis(pinned, ROOT) == pinned
 
 
+def test_pinning_the_e4_supplement_adds_its_row_after_the_analysis_row() -> None:
+    analysis = freeze.write_analysis(freeze.write_record(UNPINNED_SPEC, V2_VALUES), ROOT)
+    pinned = freeze.write_pin(analysis, ROOT, freeze.E4_SUPPLEMENT_ROW)
+    recorded = freeze.recorded(pinned)
+    supplement = freeze.script_hash(ROOT, freeze.E4_SUPPLEMENT_ROW)
+    assert recorded[freeze.E4_SUPPLEMENT_ROW] == supplement
+    assert recorded["This file"] == freeze.spec_hash(pinned) != freeze.recorded(analysis)["This file"]
+    assert {row: recorded[row] for row in freeze.ROWS[1:]} == {row: VALUES[row] for row in freeze.ROWS[1:]}
+    lines = pinned.split("\n")
+    i = next(i for i, line in enumerate(lines) if line.startswith(f"| {freeze.E4_SUPPLEMENT_ROW} |"))
+    assert lines[i - 1].startswith(f"| {freeze.ANALYSIS_ROW} |") and lines[i + 1] == ""
+    # The check ignores the row until it's written, then compares it.
+    base = {**VALUES, freeze.ANALYSIS_ROW: freeze.analysis_hash(ROOT)}
+    before = {**base, "This file": freeze.recorded(analysis)["This file"]}
+    assert freeze.mismatches(analysis, {**before, freeze.E4_SUPPLEMENT_ROW: "d" * 64}) == []
+    assert freeze.mismatches(analysis, before, require=(freeze.E4_SUPPLEMENT_ROW,)) == [
+        f"{freeze.E4_SUPPLEMENT_ROW}: recorded (blank), now {VALUES[freeze.E4_SUPPLEMENT_ROW]}"
+    ]
+    now = {**base, "This file": recorded["This file"], freeze.E4_SUPPLEMENT_ROW: supplement}
+    assert freeze.mismatches(pinned, now) == []
+    changed = {**now, freeze.E4_SUPPLEMENT_ROW: "d" * 64}
+    assert [m.split(":")[0] for m in freeze.mismatches(pinned, changed)] == [freeze.E4_SUPPLEMENT_ROW]
+    assert freeze.write_pin(pinned, ROOT, freeze.E4_SUPPLEMENT_ROW) == pinned
+
+
 def test_the_analysis_value_does_not_enter_the_spec_hash() -> None:
     pinned = freeze.write_analysis(SPEC_TEXT, ROOT)
     other = freeze.write_record(pinned, {freeze.ANALYSIS_ROW: "c" * 64}, (freeze.ANALYSIS_ROW,))
@@ -165,3 +197,25 @@ def test_freeze_record_cli_pins_and_checks_the_analysis_script(
     (root / freeze.ANALYSIS_SCRIPT).write_bytes(b"# changed\n")
     assert cli.main(["freeze-record", "--root", str(root), "--analysis", "--check"]) == 1
     assert freeze.ANALYSIS_ROW in capsys.readouterr().err
+
+
+def test_freeze_record_cli_pins_and_checks_the_e4_supplement(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from lost_in_place import cli
+
+    root = tmp_path / "repo"
+    (root / "scripts").mkdir(parents=True)
+    script = root / freeze.E4_SUPPLEMENT_SCRIPT
+    script.write_bytes((ROOT / freeze.E4_SUPPLEMENT_SCRIPT).read_bytes())
+    (root / freeze.SPEC).write_text(UNPINNED_SPEC)
+    args = ["freeze-record", "--root", str(root), "--e4-supplement"]
+    assert cli.main([*args, "--check"]) == 1
+    assert "recorded (blank)" in capsys.readouterr().err
+    assert cli.main([*args, "--write"]) == 0
+    out = capsys.readouterr().out
+    assert f"path: {freeze.E4_SUPPLEMENT_SCRIPT}" in out
+    assert cli.main([*args, "--check"]) == 0
+    script.write_bytes(b"# changed\n")
+    assert cli.main([*args, "--check"]) == 1
+    assert freeze.E4_SUPPLEMENT_ROW in capsys.readouterr().err

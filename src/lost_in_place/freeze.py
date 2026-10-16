@@ -16,6 +16,8 @@
   (or updates) the row then. `--check` compares the row once it exists; `--analysis --check` also
   fails while it doesn't. Writing the row changes this file, so that command refreshes the "This
   file" row too and touches nothing else.
+- **The E4 supplement** (`scripts/e4_supplement.py`, design A11's additions to E4's report) is
+  pinned the same way, by `lip freeze-record --e4-supplement --write`, after the analysis row.
 """
 
 from __future__ import annotations
@@ -42,7 +44,11 @@ ROWS = (
 )
 ANALYSIS_SCRIPT = "src/lost_in_place/stats.py"
 ANALYSIS_ROW = f"Analysis script (`{ANALYSIS_SCRIPT}`)"
-ALL_ROWS = (*ROWS, ANALYSIS_ROW)
+E4_SUPPLEMENT_SCRIPT = "scripts/e4_supplement.py"
+E4_SUPPLEMENT_ROW = f"E4 supplement script (`{E4_SUPPLEMENT_SCRIPT}`)"
+# Scripts pinned by a dated amendment after the freeze, in the order their rows follow the table.
+PINNED_SCRIPTS = {ANALYSIS_ROW: ANALYSIS_SCRIPT, E4_SUPPLEMENT_ROW: E4_SUPPLEMENT_SCRIPT}
+ALL_ROWS = (*ROWS, *PINNED_SCRIPTS)
 _ROW = re.compile(r"^\| (?P<artifact>.+?) \| (?P<value>[^|]*?) ?\|$")
 
 
@@ -148,8 +154,12 @@ def git_sha(root: Path) -> str:
     return sha.stdout.strip() + ("-dirty" if status.stdout.strip() else "")
 
 
+def script_hash(root: Path, row: str) -> str:
+    return sha256((root / PINNED_SCRIPTS[row]).read_bytes())
+
+
 def analysis_hash(root: Path) -> str:
-    return sha256((root / ANALYSIS_SCRIPT).read_bytes())
+    return script_hash(root, ANALYSIS_ROW)
 
 
 def record(root: Path, design: Path | None, image_digest: str | None) -> dict[str, str]:
@@ -166,7 +176,7 @@ def record(root: Path, design: Path | None, image_digest: str | None) -> dict[st
                 labelling_hash(),
                 image_digest or "",
                 git_sha(root),
-                analysis_hash(root),
+                *(script_hash(root, row) for row in PINNED_SCRIPTS),
             ),
             strict=True,
         )
@@ -191,7 +201,7 @@ def _row(artifact: str, value: str) -> str:
 
 def write_record(spec_text: str, values: dict[str, str], rows: tuple[str, ...] = ALL_ROWS) -> str:
     """Write `values` into the record's rows named in `rows`. A named row the table lacks is added at
-    its end when it has a value (the analysis row, after the freeze-v2 table)."""
+    its end when it has a value (a pinned script's row, after the freeze-v2 table)."""
     lines = spec_text.split("\n")
     start, end = _record_span(lines)
     seen = set()
@@ -208,18 +218,26 @@ def write_record(spec_text: str, values: dict[str, str], rows: tuple[str, ...] =
     return "\n".join(lines)
 
 
-def write_analysis(spec_text: str, root: Path) -> str:
-    """Pin the analysis script: its row, plus this file's own hash, which the new row changes."""
-    with_row = write_record(spec_text, {ANALYSIS_ROW: analysis_hash(root)}, (ANALYSIS_ROW,))
+def write_pin(spec_text: str, root: Path, row: str) -> str:
+    """Pin a script: its row, plus this file's own hash, which the new row changes."""
+    with_row = write_record(spec_text, {row: script_hash(root, row)}, (row,))
     return write_record(with_row, {ROWS[0]: spec_hash(with_row)}, (ROWS[0],))
 
 
-def mismatches(spec_text: str, values: dict[str, str], require_analysis: bool = False) -> list[str]:
+def write_analysis(spec_text: str, root: Path) -> str:
+    return write_pin(spec_text, root, ANALYSIS_ROW)
+
+
+def mismatches(
+    spec_text: str, values: dict[str, str], require_analysis: bool = False, require: tuple[str, ...] = ()
+) -> list[str]:
     """Rows whose written value differs from `values`. Rows with nothing to compare are skipped, and
-    so is the git SHA: committing the record moves HEAD past the commit it names. The analysis row
-    is compared once the record has it, or always with `require_analysis`."""
+    so is the git SHA: committing the record moves HEAD past the commit it names. A pinned script's
+    row is compared once the record has it, or always when named in `require` (`require_analysis`
+    names the analysis row)."""
     written = recorded(spec_text)
-    rows = list(ROWS) + ([ANALYSIS_ROW] if require_analysis or ANALYSIS_ROW in written else [])
+    required = {*require, *((ANALYSIS_ROW,) if require_analysis else ())}
+    rows = [*ROWS, *(row for row in PINNED_SCRIPTS if row in written or row in required)]
     return [
         f"{row}: recorded {written.get(row) or '(blank)'}, now {values[row]}"
         for row in rows
