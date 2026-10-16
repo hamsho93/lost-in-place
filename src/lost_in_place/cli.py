@@ -270,6 +270,9 @@ def _pinned_script_record(args: argparse.Namespace, spec: Path, row: str) -> int
 def _cmd_stats(args: argparse.Namespace) -> int:
     if args.design == "v3":
         return _cmd_stats_v3(args)
+    if args.gates or args.canary or args.n is not None:
+        print("--gates, --canary and --n go with --design v3", file=sys.stderr)
+        return 1
     from lost_in_place import stats
 
     attempts, keys, inputs = stats.load_attempts(args.runs, args.manifest)
@@ -296,9 +299,33 @@ def _cmd_stats(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_stats_gates(args: argparse.Namespace) -> int:
+    from lost_in_place import stats_v3
+
+    if args.out or (args.canary and args.n is not None):
+        print("--gates prints its rows; it takes neither --out nor, with --canary, --n", file=sys.stderr)
+        return 1
+    try:
+        n = args.n if args.n is not None else stats_v3.recorded_n(args.root)
+        result = stats_v3.gates_check(args.runs, args.manifest, n, canary=args.canary)
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    print(
+        json.dumps(result, indent=1) if args.json else stats_v3.gates_markdown(result),
+        end="\n" if args.json else "",
+    )
+    return 0 if result["pass"] else 2
+
+
 def _cmd_stats_v3(args: argparse.Namespace) -> int:
     from lost_in_place import stats_v3
 
+    if args.gates:
+        return _cmd_stats_gates(args)
+    if args.canary or args.n is not None:
+        print("--canary and --n go with --gates", file=sys.stderr)
+        return 1
     status = stats_v3.gate(args.root)
     if not status["open"]:
         print(stats_v3.refusal(status), file=sys.stderr)
@@ -578,6 +605,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="v2: freeze-v2's analysis (stats.py, default); v3: E5's (stats_v3.py), which refuses to run"
         " until SPEC-v3.md pins it and docs/prereg/freeze-v3-signoff.md and"
         " docs/prereg/freeze-v3-unblind.md exist",
+    )
+    st.add_argument(
+        "--gates",
+        action="store_true",
+        help="with --design v3: only the scripted control's section 6 gates (S-1), on scripted arms only;"
+        " exit 0 all pass, 2 a gate failed, 1 bad input or incomplete cells",
+    )
+    st.add_argument("--canary", action="store_true", help="with --gates: the canary version, on k000-k005")
+    st.add_argument(
+        "--n", type=int, help="with --gates: families per cell (default: SPEC-v3.md's Families (N))"
     )
     st.set_defaults(func=_cmd_stats)
 
