@@ -341,7 +341,7 @@ def test_a_target_anchor_starts_the_fault_clock_near_the_first_moves_target() ->
 @pytest.mark.parametrize("step_m", [2.0, 5.0])
 def test_a_v3_loud_fault_starts_2_m_from_the_first_moves_target(step_m: float) -> None:
     """The 2 m steps' fault starts with the step; a whole leg's when 2 m of it remain."""
-    ep = _agent_episode("b00_loud.yaml", root=Path(__file__).parents[1] / "scenarios" / "v3")
+    ep = _agent_episode("b00_loud.yaml", root=Path(__file__).parents[1] / "scenarios" / "smoke-audit-fixes")
     drone = FakeDrone()
 
     async def scenario() -> float:
