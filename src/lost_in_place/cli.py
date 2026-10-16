@@ -268,6 +268,11 @@ def _pinned_script_record(args: argparse.Namespace, spec: Path, row: str) -> int
 
 
 def _cmd_stats(args: argparse.Namespace) -> int:
+    if args.design == "v3":
+        return _cmd_stats_v3(args)
+    if args.gates or args.canary or args.n is not None:
+        print("--gates, --canary and --n go with --design v3", file=sys.stderr)
+        return 1
     from lost_in_place import stats
 
     attempts, keys, inputs = stats.load_attempts(args.runs, args.manifest)
@@ -291,6 +296,76 @@ def _cmd_stats(args: argparse.Namespace) -> int:
             "warning: this analysis script is not pinned in SPEC.md; do not unblind results with it",
             file=sys.stderr,
         )
+    return 0
+
+
+def _cmd_stats_gates(args: argparse.Namespace) -> int:
+    from lost_in_place import stats_v3
+
+    if args.out or (args.canary and args.n is not None):
+        print("--gates prints its rows; it takes neither --out nor, with --canary, --n", file=sys.stderr)
+        return 1
+    try:
+        n = args.n if args.n is not None else stats_v3.recorded_n(args.root)
+        result = stats_v3.gates_check(args.runs, args.manifest, n, canary=args.canary)
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    print(
+        json.dumps(result, indent=1) if args.json else stats_v3.gates_markdown(result),
+        end="\n" if args.json else "",
+    )
+    return 0 if result["pass"] else 2
+
+
+def _cmd_stats_v3(args: argparse.Namespace) -> int:
+    from lost_in_place import stats_v3
+
+    if args.gates:
+        return _cmd_stats_gates(args)
+    if args.canary or args.n is not None:
+        print("--canary and --n go with --gates", file=sys.stderr)
+        return 1
+    status = stats_v3.gate(args.root)
+    if not status["open"]:
+        print(stats_v3.refusal(status), file=sys.stderr)
+        return 3
+    try:
+        design = stats_v3.read_design((args.root / stats_v3.SPEC_V3).read_text())
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    try:
+        data, inputs = stats_v3.load(args.runs, args.manifest)
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    for cell, count in sorted(data.off_ladder.items()):
+        print(f"excluded {count} episodes off the ladder: {cell}", file=sys.stderr)
+    try:
+        result = stats_v3.analyse(
+            data,
+            design,
+            resamples=args.resamples,
+            seed=args.seed,
+            inputs=inputs,
+            pin={"sha256": status["sha256"], "pinned": True},
+        )
+    except stats_v3.Unsettled as exc:
+        print(f"refusing to print E5 outcomes: {exc}", file=sys.stderr)
+        return 3
+    for arm, count in result["inputs"]["incomplete_episodes"].items():
+        print(
+            f"{arm} has {count} incomplete episodes (attempted, no result, fewer than 3 attempts)",
+            file=sys.stderr,
+        )
+    if args.out:
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.with_suffix(".json").write_text(stats_v3.dumps(result))
+        args.out.with_suffix(".md").write_text(stats_v3.markdown(result))
+        print(f"wrote {args.out.with_suffix('.json')} and {args.out.with_suffix('.md')}")
+    else:
+        print(stats_v3.dumps(result) if args.json else stats_v3.markdown(result), end="")
     return 0
 
 
@@ -670,6 +745,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     st.add_argument("--json", action="store_true", help="the full result as JSON instead of markdown")
     st.add_argument("--out", type=Path, help="write <out>.json and <out>.md instead of printing")
+    st.add_argument(
+        "--design",
+        choices=["v2", "v3"],
+        default="v2",
+        help="v2: freeze-v2's analysis (stats.py, default); v3: E5's (stats_v3.py), which refuses to run"
+        " until SPEC-v3.md pins it and docs/prereg/freeze-v3-signoff.md and"
+        " docs/prereg/freeze-v3-unblind.md exist",
+    )
+    st.add_argument(
+        "--gates",
+        action="store_true",
+        help="with --design v3: only the scripted control's section 6 gates (S-1), on scripted arms only;"
+        " exit 0 all pass, 2 a gate failed, 1 bad input or incomplete cells",
+    )
+    st.add_argument("--canary", action="store_true", help="with --gates: the canary version, on k000-k005")
+    st.add_argument(
+        "--n", type=int, help="with --gates: families per cell (default: SPEC-v3.md's Families (N))"
+    )
     st.set_defaults(func=_cmd_stats)
 
     ls = sub.add_parser(
