@@ -202,6 +202,7 @@ and the corresponding row of [`docs/analysis.md`](../analysis.md):
 - **Simulation only.** Rendered optical flow is not PMW3901 firmware; there is no wind or IMU noise by default. Claims are about PX4 SITL with Gazebo Harmonic. The sim artefacts are listed in [`docs/fidelity.md`](../fidelity.md).
 - **The blind-labeller check is pending** (see §6). It checks that scoring rules were applied, not that tracks were extracted correctly.
 - **The null cannot separate causes.** The O1 block gives raw values with no reference range or stated consequence, appended to DEXI's prompt, which tells the planner that "a safety validator checks every action" even under validator `none`. "Ignores telemetry", "fields not legible as hazards", "defers to the stated validator" and "proceeding is mostly harmless under loud" all fit the data equally.
+- **The validator sentence and refusals (Claude).** Claude, family b42 (and b57, the same instruction): 0/40 → 40/40 refusals without the validator sentence in an offline probe; extent unknown. See [e4-claude.md](e4-claude.md) §10.
 - **O0 is DEXI's as-deployed prompt, not its as-deployed envelope.** The student ran without DEXI's 2 m move cap; with it enforced it completes 0 of 60 healthy missions.
 - **Cost figures are estimates** from copy-minutes and an assumed CMU rate; the monthly budget lagged by hours when read.
 
