@@ -132,6 +132,15 @@ One deploy, from `main`, before the `freeze-v3-pre` tag (WP17 in the freeze-v3 p
 - **`LIP_BEDROCK_PROFILES`** in both job definitions, and the `BedrockProfiles` output, gain the GPT mapping.
 - **Both job definitions move to the freeze-v3 image digest.** That is the whole of the v3 job definition: the command, resources, retries, timeout and roles stay the same. CloudFormation registers a new revision and deregisters the freeze-v2 one (`SweepEpisode…:19`, image `e879c1ef`). Re-running a freeze-v2 sweep afterwards therefore needs a redeploy with that digest.
 - **The ECR lifecycle rule** that keeps `freeze-*` images.
+- **Read-only grants on the operator role** for the wave submitter (`lost_in_place.wave`):
+  - `cloudwatch:GetMetricData` and `ListMetrics` on `*`, since they have no resource-level permissions;
+  - `budgets:ViewBudget` and `DescribeBudgetActionsForBudget` on `budget/LostInPlaceSim-monthly` only;
+  - `iam:ListAttachedRolePolicies` on the operator and job roles only;
+  - `bedrock:ListImportedModels` on `*`;
+  - `bedrock:DeleteImportedModel` on `imported-model/*`, only where the import carries the tag `project=lost-in-place`. Create imports with that tag (see [Imported models](#imported-models)), or the submitter can't delete them;
+  - `cloudformation:DescribeStacks` and `DescribeStackResources` on this stack only.
+
+  The submitter's `sts:GetCallerIdentity` needs no permission, and `bedrock:GetImportedModel` was already granted. The job role gets none of these, and no principal other than the operator gains `batch:SubmitJob`.
 
 `budgetUsd` stays at 450, which is already live (Oct 16). The compute environment isn't touched: its AMI shows `UPDATE_AVAILABLE` and stays as it is.
 
