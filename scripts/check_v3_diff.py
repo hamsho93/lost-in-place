@@ -14,7 +14,11 @@ It fails if, between the two refs:
   exactly `<!-- end filled at freeze -->`; the marker text inside a longer line is prose;
 - `SPEC-v3.md` changed anywhere but the values of its freeze record's table;
 - the v3 prompt bundle's hash (`freeze.prompt_hash_v3()`) or the probe prompts' hash
-  (`freeze.probe_hash_v3()`) changed, or can't be computed. Each is computed from its own ref's code;
+  (`freeze.probe_hash_v3()`) changed, or can't be computed. Each is computed from its own ref's code
+  and scenarios. The bundle holds the render grid (`prompt_grid`): every prompt DEXI's planner
+  renders for each design level and prompt version across a sweep of health values, several histories
+  and the T0 and T1 instructions of a sample of the E5 families and every canary, so a rendering
+  change anywhere on that path fails, not only at the bundle's exemplars;
 - any file under `scenarios/` changed;
 - any other file changed that is on neither list: A-6's harness code (`HARNESS`) or A-7's
   mechanical fill-ins (`FILL_INS`). This file is on neither, so it can't be loosened in between.
@@ -27,6 +31,7 @@ the bundle hash: `llm/dexi.py` holds both DEXI's driver and the prompt texts. Ex
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import dataclasses
 import difflib
 import json
@@ -35,6 +40,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
 
 DESIGN = "docs/prereg/freeze-v3-design.md"
 SPEC_V3 = "SPEC-v3.md"
@@ -92,22 +98,36 @@ FILL_INS = {
     ),
 }
 
-# Run in a fresh interpreter on one ref's tree, so each hash comes from that ref's own code.
+# Run in a fresh interpreter on one ref's tree, so each hash comes from that ref's own code. Besides
+# the two hashes it prints a digest per part of the bundle, so a mismatch says where.
 _HASHES = """
-import json, sys
+import hashlib, json, sys
 from pathlib import Path
 root = Path(sys.argv[1]).resolve()
 sys.path.insert(0, str(root / "src"))
 from lost_in_place import freeze
 if not Path(freeze.__file__).resolve().is_relative_to(root):
     raise SystemExit(f"imported {freeze.__file__}, not the ref's code")
+
+def digest(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
 out = {}
-calls = {"prompt bundle v3": freeze.prompt_hash_v3, "probe prompts v3": lambda: freeze.probe_hash_v3(root)}
-for name, call in calls.items():
-    try:
-        out[name] = call()
-    except Exception as e:
-        out[name] = f"error: {type(e).__name__}: {e}"
+try:
+    bundle = freeze.prompt_bundle_v3(root)
+    out["prompt bundle v3"] = freeze.sha256(freeze._canonical(bundle))
+    grid = bundle.get("render_grid", {})
+    parts = {key: digest(value) for key, value in bundle.items() if key != "render_grid"}
+    parts |= {f"render grid {pair}": h for pair, h in grid.get("by_pair", {}).items()}
+    parts |= {f"wire render {name}": h for name, h in grid.get("wire", {}).items()}
+    parts["render grid scenarios"] = digest(grid.get("scenarios"))
+    out["parts"], out["prompts"] = parts, grid.get("prompts", 0)
+except Exception as e:
+    out["prompt bundle v3"] = f"error: {type(e).__name__}: {e}"
+try:
+    out["probe prompts v3"] = freeze.probe_hash_v3(root)
+except Exception as e:
+    out["probe prompts v3"] = f"error: {type(e).__name__}: {e}"
 print(json.dumps(out))
 """
 
@@ -197,7 +217,15 @@ def changed(repo: Path, pre: str, head: str) -> list[tuple[str, str]]:
     return [(fields[i], fields[i + 1]) for i in range(0, len(fields) - 1, 2)]
 
 
-def bundle_hashes(repo: Path, sha: str) -> dict[str, str]:
+_BY_TREE: dict[str, dict[str, Any]] = {}
+
+
+def bundle_hashes(repo: Path, sha: str) -> dict[str, Any]:
+    """The bundle and probe hashes computed from `sha`'s own tree. A tree's result is kept for the
+    process: the same tree is the same code and the same scenarios."""
+    tree = _git(repo, "rev-parse", f"{sha}^{{tree}}").strip()
+    if tree in _BY_TREE:
+        return _BY_TREE[tree]
     with tempfile.TemporaryDirectory(prefix="check-v3-") as tmp:
         archive = subprocess.run(["git", "archive", sha], cwd=repo, check=True, capture_output=True)
         subprocess.run(["tar", "-x", "-C", tmp], input=archive.stdout, check=True)
@@ -207,7 +235,8 @@ def bundle_hashes(repo: Path, sha: str) -> dict[str, str]:
     if done.returncode:
         tail = (done.stderr.strip().splitlines() or ["no output"])[-1]
         return {"prompt bundle v3": f"error: {tail}", "probe prompts v3": f"error: {tail}"}
-    hashes: dict[str, str] = json.loads(done.stdout)
+    hashes: dict[str, Any] = json.loads(done.stdout)
+    _BY_TREE[tree] = hashes
     return hashes
 
 
@@ -251,15 +280,20 @@ def check_spec(repo: Path, pre: str, head: str, result: Result) -> None:
 
 
 def check_bundles(repo: Path, pre: str, head: str, result: Result) -> None:
-    before, after = bundle_hashes(repo, pre), bundle_hashes(repo, head)
+    with concurrent.futures.ThreadPoolExecutor(2) as pool:
+        before, after = pool.map(lambda sha: bundle_hashes(repo, sha), (pre, head))
     for name in ("prompt bundle v3", "probe prompts v3"):
         b, a = before.get(name, "error: not computed"), after.get(name, "error: not computed")
         if b.startswith("error") or a.startswith("error"):
             result.failures.append(f"{name}: can't compute it (pre: {b}; head: {a})")
         elif b != a:
-            result.failures.append(f"{name} changed: `{b}` at pre, `{a}` at head")
+            parts_b, parts_a = before.get("parts", {}), after.get("parts", {})
+            where = sorted(p for p in {*parts_b, *parts_a} if parts_b.get(p) != parts_a.get(p))
+            detail = f"; differs in: {', '.join(where)}" if where else ""
+            result.failures.append(f"{name} changed: `{b}` at pre, `{a}` at head{detail}")
         else:
-            result.notes.append(f"{name}: `{a}` at both refs")
+            extra = f" ({after['prompts']} prompts rendered from each ref)" if after.get("prompts") else ""
+            result.notes.append(f"{name}: `{a}` at both refs{extra}")
 
 
 def check(repo: Path, pre_ref: str, head_ref: str) -> Result:

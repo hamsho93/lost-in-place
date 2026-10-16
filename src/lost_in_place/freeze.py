@@ -46,6 +46,7 @@ from pathlib import Path
 from typing import Any
 
 SPEC = "SPEC.md"
+REPO_ROOT = Path(__file__).resolve().parents[2]
 RECORD_HEADING = "## Freeze record"
 ROWS = (
     "This file",
@@ -192,12 +193,21 @@ def render_v3(instruction: str, observation: str, prompt_version: str, state: st
     )
 
 
-def prompt_bundle_v3() -> dict[str, Any]:
+def prompt_bundle_v3(root: Path | None = None) -> dict[str, Any]:
     """Freeze-v3's prompts: every observation level under both DEXI prompt versions and validator
     `none`, rendered in both wording templates at a healthy, a brief and a loud decision, with the
-    rung texts, the ladder and the tools. A pair the adapter refuses is listed as rejected."""
+    rung texts, the ladder and the tools. A pair the adapter refuses is listed as rejected. The
+    render grid (`prompt_grid.render_grid`) adds the digests of every prompt DEXI's planner renders
+    across health values, histories and the committed E5 families' instructions under `root`
+    (default: this checkout)."""
+    from lost_in_place import prompt_grid
     from lost_in_place.llm import dexi, prompt
     from lost_in_place.planning import OBSERVATION_LEVELS
+
+    try:
+        grid = prompt_grid.render_grid(root or REPO_ROOT)
+    except (FileNotFoundError, ImportError) as e:
+        raise MissingArtifact(f"render grid: {e}") from e
 
     pairs, rejected = {}, []
     for version in dexi.PROMPT_VERSIONS:
@@ -230,6 +240,7 @@ def prompt_bundle_v3() -> dict[str, Any]:
             for wording, instruction in V3_INSTRUCTIONS.items()
         },
         "chat_templates": {p.name: p.read_text() for p in sorted(templates.glob("*.jinja"))},
+        "render_grid": grid,
     }
 
 
@@ -241,8 +252,8 @@ def prompt_hash() -> str:
     return sha256(_canonical(prompt_bundle()))
 
 
-def prompt_hash_v3() -> str:
-    return sha256(_canonical(prompt_bundle_v3()))
+def prompt_hash_v3(root: Path | None = None) -> str:
+    return sha256(_canonical(prompt_bundle_v3(root)))
 
 
 def labelling_hash() -> str:
@@ -565,7 +576,7 @@ def record_v3(
     items |= {
         ROWS[0]: functools.partial(_spec_v3_hash, root),
         DESIGN_ROW_V3: functools.partial(_file_hash, design or root / DESIGN_V3),
-        PROMPT_ROW_V3: prompt_hash_v3,
+        PROMPT_ROW_V3: functools.partial(prompt_hash_v3, root),
         PROBE_ROW_V3: functools.partial(probe_hash_v3, root),
         LABELLING_ROW: labelling_hash,
         MODELS_ROW: functools.partial(_file_hash, root / MODEL_REGISTRY),
@@ -621,7 +632,7 @@ def tag_hashes(root: Path, image_digest: str | None) -> tuple[dict[str, str], di
     items: dict[str, Callable[[], str]] = {
         DESIGN_ROW_V3: functools.partial(_file_hash, root / DESIGN_V3),
         f"`{SPEC_V3}` (freeze record values blank)": functools.partial(_spec_v3_hash, root),
-        PROMPT_ROW_V3: prompt_hash_v3,
+        PROMPT_ROW_V3: functools.partial(prompt_hash_v3, root),
         PROBE_ROW_V3: functools.partial(probe_hash_v3, root),
         **{
             f"`{E5_SCENARIOS}/{t}/{name}/*.yaml` (sorted, concatenated)": functools.partial(

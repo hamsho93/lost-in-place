@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from lost_in_place import cli, freeze
+from lost_in_place import cli, freeze, prompt_grid
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC_V3_TEXT = (ROOT / freeze.SPEC_V3).read_text()
@@ -49,7 +49,8 @@ def _git(root: Path, *args: str) -> None:
 
 @pytest.fixture
 def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A checkout with every artifact the v3 record hashes, and a probe text read from a script."""
+    """A checkout with every artifact the v3 record hashes, and a probe text read from a script. The
+    render grid needs the committed E5 families, so it is stubbed here; `test_prompt_grid` covers it."""
     root = tmp_path / "repo"
     files = {
         freeze.DESIGN_V3: "design\n",
@@ -69,6 +70,7 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         (root / path).write_text(text)
     shutil.copy(ROOT / freeze.SPEC_V3, root / freeze.SPEC_V3)
     monkeypatch.setattr(freeze, "PROBE_TEXTS", {"wording-check": "scripts/probe_text.py:TEXT"})
+    monkeypatch.setattr(prompt_grid, "render_grid", lambda root: {"sha256": "grid"})
     _git(root, "init", "-q")
     _git(root, "add", ".")
     _git(root, "commit", "-q", "-m", "pre")
