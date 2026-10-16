@@ -1,6 +1,8 @@
 import asyncio
 import json
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, get_args
 
 import pytest
@@ -21,6 +23,12 @@ from lost_in_place.planning import ActionName, EstimatorHealth, Observation, Pla
 
 SPEC = ModelSpec(name="test-model", provider="bedrock", model_id="us.example.model-v1", temperature=0)
 OBS = Observation(goal="hover", north_m=1.234, east_m=-0.5, altitude_m=1.5, heading_deg=90, battery_pct=88)
+
+
+def profile_arn(region: str, profile: str) -> str:
+    return f"arn:aws:bedrock:{region}:000000000000:application-inference-profile/{profile}"
+
+
 HEALTH = EstimatorHealth(
     xy_valid=True, eph_m=0.05, flow_quality=0, innovation_check_failing=False, heading_reference=False
 )
@@ -110,10 +118,10 @@ def test_planner_records_invalid_replies(calls: tuple[ToolCall, ...]) -> None:
 
 
 def test_bedrock_request_uses_tagged_profile_when_mapped() -> None:
-    env = {BEDROCK_PROFILES_ENV: json.dumps({"us.example.model-v1": "arn:aws:bedrock:profile/abc"})}
+    env = {BEDROCK_PROFILES_ENV: json.dumps({"us.example.model-v1": profile_arn("us-east-1", "abc")})}
     client = BedrockConverseClient(SPEC, client=object(), env=env)
     request = client.request("system", "user", tool_specs())
-    assert request["modelId"] == "arn:aws:bedrock:profile/abc"
+    assert request["modelId"] == profile_arn("us-east-1", "abc")
     assert request["toolConfig"]["toolChoice"] == {"any": {}}
     assert request["inferenceConfig"] == {"maxTokens": 512, "temperature": 0}
     assert request["toolConfig"]["tools"][0]["toolSpec"]["inputSchema"]["json"]["type"] == "object"
@@ -192,10 +200,10 @@ def test_gpt_sol_fallbacks_change_one_setting_each_in_the_stated_order() -> None
 
 
 def test_gpt_sol_request_carries_the_effort_and_goes_through_the_tagged_profile() -> None:
-    env = {BEDROCK_PROFILES_ENV: json.dumps({"us.openai.gpt-6.1-sol": "arn:aws:bedrock:profile/sol"})}
+    env = {BEDROCK_PROFILES_ENV: json.dumps({"us.openai.gpt-6.1-sol": profile_arn("us-east-1", "sol")})}
     client = BedrockConverseClient(get_model("gpt-6.1-sol"), client=object(), env=env)
     request = client.request("", "user", tool_specs())
-    assert request["modelId"] == "arn:aws:bedrock:profile/sol"
+    assert request["modelId"] == profile_arn("us-east-1", "sol")
     assert request["additionalModelRequestFields"] == {"reasoning_effort": "low"}
     assert request["inferenceConfig"] == {"maxTokens": 4096, "temperature": 0}
     assert request["toolConfig"]["toolChoice"] == {"any": {}}
@@ -247,11 +255,114 @@ def test_reasoning_is_recorded_in_the_decision() -> None:
     assert stub.requests[0]["additionalModelRequestFields"] == {"reasoning_effort": "low"}
 
 
+SONNET_5_5 = ("claude-sonnet-5-5", "claude-sonnet-5-5-fb1", "claude-sonnet-5-5-fb2")
+EFFORT_LOW = {"output_config": {"effort": "low"}}
+
+
+def test_sonnet_5_5_entry_is_the_one_the_fifth_arm_spec_states() -> None:
+    assert get_model("claude-sonnet-5-5").model_dump(exclude={"name", "notes"}) == {
+        "provider": "bedrock",
+        "model_id": "us.anthropic.claude-sonnet-5-5",
+        "region": "us-east-2",
+        "max_tokens": 4096,
+        "temperature": 0,
+        "tool_choice": "auto",
+        "additional_request_fields": EFFORT_LOW,
+        "base_url": None,
+        "api_key_env": None,
+        "extra_body": {},
+        "chat_template": None,
+    }
+
+
+def test_sonnet_5_5_fallbacks_drop_temperature_then_effort() -> None:
+    chain = [get_model(n) for n in SONNET_5_5]
+    assert [(s.temperature, s.additional_request_fields) for s in chain] == [
+        (0, EFFORT_LOW),
+        (None, EFFORT_LOW),
+        (None, {}),
+    ]
+    assert {(s.provider, s.model_id, s.region, s.max_tokens, s.tool_choice) for s in chain} == {
+        ("bedrock", "us.anthropic.claude-sonnet-5-5", "us-east-2", 4096, "auto")
+    }
+
+
+def test_haiku_5_5_smoke_entry_has_the_sonnet_fb1_settings() -> None:
+    haiku, sonnet = get_model("claude-haiku-5-5"), get_model("claude-sonnet-5-5-fb1")
+    assert (haiku.model_id, haiku.temperature) == ("us.anthropic.claude-haiku-5-5", None)
+    assert haiku.model_dump(exclude={"name", "notes", "model_id"}) == sonnet.model_dump(
+        exclude={"name", "notes", "model_id"}
+    )
+
+
+def test_sonnet_5_5_requests_carry_effort_low_and_fb1_sends_no_temperature() -> None:
+    base, fb1, fb2 = (
+        BedrockConverseClient(get_model(n), client=object(), env={}).request("s", "u", tool_specs())
+        for n in SONNET_5_5
+    )
+    assert base["additionalModelRequestFields"] == EFFORT_LOW
+    assert base["inferenceConfig"] == {"maxTokens": 4096, "temperature": 0}
+    assert base["toolConfig"]["toolChoice"] == {"auto": {}}
+    assert fb1["additionalModelRequestFields"] == EFFORT_LOW
+    assert fb1["inferenceConfig"] == {"maxTokens": 4096}
+    assert "additionalModelRequestFields" not in fb2 and fb2["inferenceConfig"] == {"maxTokens": 4096}
+
+
+def test_a_us_east_2_profile_is_called_on_the_us_east_2_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    stub = _converse_stub([{"toolUse": {"toolUseId": "t1", "name": "land", "input": {}}}])
+    opened: list[tuple[str, str]] = []
+
+    def client(service: str, region_name: str, config: Any) -> Any:
+        opened.append((service, region_name))
+        return stub
+
+    monkeypatch.setitem(sys.modules, "boto3", SimpleNamespace(client=client))
+    monkeypatch.setitem(sys.modules, "botocore", SimpleNamespace())
+    monkeypatch.setitem(sys.modules, "botocore.config", SimpleNamespace(Config=lambda **_: None))
+    arn = profile_arn("us-east-2", "sonnet55")
+    env = {BEDROCK_PROFILES_ENV: json.dumps({"us.anthropic.claude-sonnet-5-5": arn})}
+    completion = BedrockConverseClient(get_model("claude-sonnet-5-5-fb1"), env=env).complete(
+        "s", "u", tool_specs()
+    )
+    assert opened == [("bedrock-runtime", "us-east-2")]
+    assert stub.requests[0]["modelId"] == arn == completion.model_id
+
+
+def test_a_profile_from_another_region_is_refused() -> None:
+    env = {
+        BEDROCK_PROFILES_ENV: json.dumps({"us.anthropic.claude-sonnet-5-5": profile_arn("us-east-1", "x")})
+    }
+    with pytest.raises(LookupError, match="profile is in us-east-1, but the entry calls us-east-2"):
+        BedrockConverseClient(get_model("claude-sonnet-5-5"), client=object(), env=env)
+
+
+@pytest.mark.parametrize(
+    ("block", "reasoning"),
+    [
+        ({"reasoningText": {"text": "Flow is 0; hold.", "signature": "sig"}}, "Flow is 0; hold."),
+        ({"reasoningText": {"text": "", "signature": "sig"}}, "[omitted reasoning]"),
+        ({"redactedContent": b"\x00"}, "[redacted reasoning]"),
+    ],
+    ids=["summarized", "omitted", "redacted"],
+)
+def test_claude_thinking_blocks_are_kept_in_the_trace(block: dict[str, Any], reasoning: str) -> None:
+    stub = _converse_stub(
+        [
+            {"reasoningContent": block},
+            {"toolUse": {"toolUseId": "t1", "name": "hold", "input": {"seconds": 2, "reason": "settle"}}},
+        ]
+    )
+    spec = get_model("claude-sonnet-5-5-fb1")
+    planner = LLMPlanner(spec, client=BedrockConverseClient(spec, client=stub, env={}))
+    asyncio.run(planner.propose(OBS))
+    assert (planner.decisions[0].reasoning, planner.decisions[0].text) == (reasoning, "")
+
+
 def test_registry_ships_a_claude_arm_on_a_known_provider() -> None:
     models = load_models()
     assert "claude-sonnet-4-6" in models
     assert all(spec.provider in clients.CLIENTS for spec in models.values())
-    with pytest.raises(LookupError, match="known: claude-sonnet-4-6"):
+    with pytest.raises(LookupError, match=r"known: .*claude-sonnet-4-6"):
         get_model("gpt-unknown")
 
 

@@ -19,11 +19,13 @@ The scripted control (`dexi/rule-2m`, `dexi/rule-leg`) flies section 6's cells o
 loud O1 and O0, timed loud O1 (`timed/`), brief O1, healthy O1 and flowscale O1.
 
 Canary sweeps, committed for both templates before the pre tag: each LLM entry on k000-k005 at the 7
-loud and 6 brief levels (78 episodes), one file per GPT-6.1 Sol entry so whichever the smoke call
-accepts is already there; and the scripted canary, the G-S cell (loud O1) at both cadences plus
-`scripted-cautious` at loud O1 (18 episodes).
+loud and 6 brief levels (78 episodes), one file per GPT-6.1 Sol and Claude Sonnet 5.5 entry so
+whichever the smoke call accepts is already there (never the smoke-only `claude-haiku-5-5`); and the
+scripted canary, the G-S cell (loud O1) at both cadences plus `scripted-cautious` at loud O1 (18
+episodes).
 
-    uv run python scripts/e5_sweeps.py wave --template t1 --n 120 [--arms ...] [--gpt gpt-6.1-sol-fb1]
+    uv run python scripts/e5_sweeps.py wave --template t1 --n 120 [--arms ...] [--gpt gpt-6.1-sol-fb1] \\
+        [--sonnet55 claude-sonnet-5-5-fb1]
     uv run python scripts/e5_sweeps.py canary [--check]
 """
 
@@ -52,10 +54,14 @@ CANARY_FAMILIES = 6
 LLM_MODELS = ("qwen3-4b-student", "qwen3-4b-zero-shot", "claude-sonnet-4-6")
 GPT_ARM = "gpt-6.1-sol"
 GPT_ENTRIES = (GPT_ARM, f"{GPT_ARM}-fb1", f"{GPT_ARM}-fb2", f"{GPT_ARM}-fb3")
+SONNET55_ARM = "claude-sonnet-5-5"
+SONNET55_ENTRIES = (SONNET55_ARM, f"{SONNET55_ARM}-fb1", f"{SONNET55_ARM}-fb2")
+# The arms whose registry entry is the one their smoke call accepted (sections 9.2 and 9.3).
+SMOKED = {GPT_ARM: GPT_ENTRIES, SONNET55_ARM: SONNET55_ENTRIES}
 SCRIPTED_ARM = "scripted"
 SCRIPTED_MODELS = ("rule-2m", "rule-leg")
 CAUTIOUS = "scripted-cautious"
-ARMS = (*LLM_MODELS, GPT_ARM, SCRIPTED_ARM)
+ARMS = (*LLM_MODELS, GPT_ARM, SONNET55_ARM, SCRIPTED_ARM)
 
 SIX = ("O0", "O1", "O1-L", "O1-N", "O1-R", "O1-V")
 LEVELS: dict[str, tuple[str, ...]] = {
@@ -194,12 +200,23 @@ def count(data: dict[str, Any], root: Path = ROOT) -> int:
     return len(manifest.build(manifest.SweepSpec(data), root))
 
 
-def wave(template: str, n: int, arms: tuple[str, ...], gpt: str, root: Path = ROOT) -> dict[str, str]:
-    """`{file name: YAML text}` of the wave sweeps; raises unless each has section 10.1's count."""
+def wave(
+    template: str,
+    n: int,
+    arms: tuple[str, ...],
+    gpt: str = GPT_ARM,
+    root: Path = ROOT,
+    sonnet55: str = SONNET55_ARM,
+) -> dict[str, str]:
+    """`{file name: YAML text}` of the wave sweeps; raises unless each has section 10.1's count. `gpt`
+    and `sonnet55` are the registry entries those arms' smoke calls accepted; the file and sweep keep
+    the arm's name."""
     if template not in TEMPLATES or n not in NS:
         raise ValueError(f"template {template!r}, N {n}: use one of {TEMPLATES} and one of {NS}")
-    if gpt not in GPT_ENTRIES:
-        raise ValueError(f"GPT-6.1 Sol entry {gpt!r}: use one of {', '.join(GPT_ENTRIES)}")
+    entries = {GPT_ARM: gpt, SONNET55_ARM: sonnet55}
+    for arm, entry in entries.items():
+        if entry not in SMOKED[arm]:
+            raise ValueError(f"{arm} entry {entry!r}: use one of {', '.join(SMOKED[arm])}")
     unknown = set(arms) - set(ARMS)
     if unknown or not arms:
         raise ValueError(f"arms {sorted(unknown)}: choose from {', '.join(ARMS)}")
@@ -211,7 +228,7 @@ def wave(template: str, n: int, arms: tuple[str, ...], gpt: str, root: Path = RO
             data, kind = scripted_sweep(template, n), "scripted"
             what = "the scripted DEXI-cadence control (design section 6), both cadences"
         else:
-            model = gpt if arm == GPT_ARM else arm
+            model = entries.get(arm, arm)
             data, kind = llm_sweep(model, template, n, arm), "llm"
             what = f"LLM arm dexi/{model} at every ladder level of its state (design section 5)"
         episodes = count(data, root)
@@ -229,7 +246,7 @@ def canary(root: Path = ROOT) -> dict[str, str]:
     """`{file name: YAML text}` of the canary sweeps for both templates."""
     out = {}
     for template in TEMPLATES:
-        for model in (*LLM_MODELS, *GPT_ENTRIES):
+        for model in (*LLM_MODELS, *GPT_ENTRIES, *SONNET55_ENTRIES):
             data = canary_llm_sweep(model, template)
             what = f"dexi/{model} on k000-k005 at the 7 loud and 6 brief levels"
             out[f"{template}-{model}.yaml"] = _checked(data, "llm", what, template, root)
@@ -275,14 +292,23 @@ def main(argv: list[str] | None = None) -> int:
     w.add_argument("--template", required=True, choices=TEMPLATES)
     w.add_argument("--n", required=True, type=int, choices=NS)
     w.add_argument("--arms", nargs="+", default=list(ARMS), choices=ARMS)
-    w.add_argument("--gpt", default=GPT_ARM, choices=GPT_ENTRIES, help="the entry the smoke call accepted")
+    w.add_argument("--gpt", default=GPT_ARM, choices=GPT_ENTRIES, help="the entry GPT's smoke call accepted")
+    w.add_argument(
+        "--sonnet55",
+        default=SONNET55_ARM,
+        choices=SONNET55_ENTRIES,
+        help="the entry Sonnet 5.5's smoke call accepted",
+    )
     w.add_argument("--out", type=Path, default=WAVE_OUT)
     w.add_argument("--check", action="store_true", help="compare with --out instead of writing")
     c = sub.add_parser("canary", help="the canary sweeps for both templates")
     c.add_argument("--out", type=Path, default=CANARY_OUT)
     c.add_argument("--check", action="store_true", help="compare with --out instead of writing")
     args = parser.parse_args(argv)
-    files = wave(args.template, args.n, tuple(args.arms), args.gpt) if args.cmd == "wave" else canary()
+    if args.cmd == "wave":
+        files = wave(args.template, args.n, tuple(args.arms), args.gpt, sonnet55=args.sonnet55)
+    else:
+        files = canary()
     return write(files, args.out, args.check)
 
 
