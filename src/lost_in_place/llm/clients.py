@@ -418,10 +418,17 @@ class BedrockImportedClient:
         )
 
 
+def _scripted(spec: ModelSpec) -> ChatClient:
+    from lost_in_place.llm.scripted_dexi import ScriptedRuleClient  # it imports this module
+
+    return ScriptedRuleClient.from_spec(spec)
+
+
 CLIENTS: dict[str, Callable[[ModelSpec], ChatClient]] = {
     "bedrock": BedrockConverseClient.from_spec,
     "openai_compatible": OpenAICompatibleClient.from_spec,
     "bedrock_imported": BedrockImportedClient.from_spec,
+    "scripted": _scripted,
 }
 
 

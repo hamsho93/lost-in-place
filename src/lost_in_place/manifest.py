@@ -152,7 +152,10 @@ def resolve_arm(name: str, options: dict[str, str]) -> tuple[str, dict[str, str]
         prefix, _, model = name.rpartition("/")
         if prefix and prefix not in available_planners():
             raise LookupError(f"no planner '{prefix}'; installed: {', '.join(available_planners())}")
-        get_model(model)  # raises for an unknown name
+        from lost_in_place.llm.scripted_dexi import SCRIPTED_PROVIDER
+
+        if get_model(model).provider == SCRIPTED_PROVIDER and prefix != DEXI_PLANNER:
+            raise ValueError(f"'{model}' is scripted on DEXI's prompt: use '{DEXI_PLANNER}/{model}'")
         planner, resolved = prefix or LLM_PLANNER, {**options, "model": model}
     if planner == DEXI_PLANNER:
         from lost_in_place.llm.dexi import check_options
