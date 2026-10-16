@@ -8,6 +8,7 @@ import pytest
 from lost_in_place import cli
 from lost_in_place.llm import clients
 from lost_in_place.llm.clients import BEDROCK_PROFILES_ENV, BedrockConverseClient, Completion, ToolCall
+from lost_in_place.llm.dexi import TOOLS as DEXI_TOOLS
 from lost_in_place.llm.planner import LLMPlanner
 from lost_in_place.llm.prompt import (
     TOOLS,
@@ -179,3 +180,20 @@ def test_propose_command_prints_the_decision(
     decision = json.loads(capsys.readouterr().out)
     assert decision["action"]["name"] == "land"
     assert "Optical flow quality: 0 of 255" in decision["user_prompt"]
+
+
+def test_a_converse_call_without_tools_has_no_tool_config() -> None:
+    spec = get_model("claude-sonnet-4-6")
+    client = BedrockConverseClient(spec, client=object(), env={})
+    assert "toolConfig" not in client.request("", "hi", [])
+    with_tools = client.request("", "hi", DEXI_TOOLS)
+    assert list(with_tools) == ["modelId", "messages", "toolConfig", "inferenceConfig"]
+    assert len(with_tools["toolConfig"]["tools"]) == len(DEXI_TOOLS)
+
+
+def test_an_openai_compatible_call_without_tools_has_no_tool_fields() -> None:
+    spec = ModelSpec(name="m", provider="openai_compatible", model_id="m", base_url="http://x", temperature=0)
+    client = clients.OpenAICompatibleClient(spec, env={})
+    assert list(client.request("", "hi", [])) == ["model", "messages", "max_tokens", "temperature"]
+    keys = ["model", "messages", "tools", "tool_choice", "max_tokens", "temperature"]
+    assert list(client.request("", "hi", DEXI_TOOLS)) == keys

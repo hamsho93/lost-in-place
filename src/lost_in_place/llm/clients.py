@@ -76,23 +76,25 @@ class BedrockConverseClient:
         inference: dict[str, Any] = {"maxTokens": self.spec.max_tokens}
         if self.spec.temperature is not None:
             inference["temperature"] = self.spec.temperature
+        tool_config = {
+            "tools": [
+                {
+                    "toolSpec": {
+                        "name": t["name"],
+                        "description": t["description"],
+                        "inputSchema": {"json": t["parameters"]},
+                    }
+                }
+                for t in tools
+            ],
+            "toolChoice": {self.spec.tool_choice: {}},
+        }
         return {
             "modelId": self.model_id,
             **({"system": [{"text": system}]} if system else {}),
             "messages": [{"role": "user", "content": [{"text": user}]}],
-            "toolConfig": {
-                "tools": [
-                    {
-                        "toolSpec": {
-                            "name": t["name"],
-                            "description": t["description"],
-                            "inputSchema": {"json": t["parameters"]},
-                        }
-                    }
-                    for t in tools
-                ],
-                "toolChoice": {self.spec.tool_choice: {}},
-            },
+            # Converse rejects an empty tool list; a call with no tools is a plain text question.
+            **({"toolConfig": tool_config} if tools else {}),
             "inferenceConfig": inference,
         }
 
@@ -178,8 +180,14 @@ class OpenAICompatibleClient:
             **self.spec.extra_body,
             "model": self.spec.model_id,
             "messages": [*messages, {"role": "user", "content": user}],
-            "tools": [{"type": "function", "function": tool} for tool in tools],
-            "tool_choice": "required" if self.spec.tool_choice == "any" else "auto",
+            **(
+                {
+                    "tools": [{"type": "function", "function": tool} for tool in tools],
+                    "tool_choice": "required" if self.spec.tool_choice == "any" else "auto",
+                }
+                if tools
+                else {}
+            ),
             "max_tokens": self.spec.max_tokens,
         }
         if self.spec.temperature is not None:
