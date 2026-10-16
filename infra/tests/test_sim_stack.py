@@ -6,6 +6,7 @@ import pytest
 from aws_cdk.assertions import Match, Template
 
 from lost_in_place_infra.sim_stack import (
+    FROZEN_IMAGE_TAG_PREFIX,
     GITHUB_OIDC_HOST,
     SimSettings,
     SimStack,
@@ -456,6 +457,23 @@ def test_job_definition_can_pin_an_image_digest() -> None:
     assert len(jobs) == 2
     for job in jobs:
         assert f"@{digest}" in json.dumps(job["Properties"]["ContainerProperties"]["Image"])
+
+
+def test_frozen_images_outlive_the_keep_ten_rule(template: Template) -> None:
+    [repo] = template.find_resources("AWS::ECR::Repository").values()
+    rules = json.loads(repo["Properties"]["LifecyclePolicy"]["LifecyclePolicyText"])["rules"]
+    assert [(r["rulePriority"], r["selection"]) for r in rules] == [
+        (
+            1,
+            {
+                "tagStatus": "tagged",
+                "tagPrefixList": [FROZEN_IMAGE_TAG_PREFIX],
+                "countType": "imageCountMoreThan",
+                "countNumber": 100,
+            },
+        ),
+        (2, {"tagStatus": "any", "countType": "imageCountMoreThan", "countNumber": 10}),
+    ]
 
 
 def test_sweep_jobs_run_one_manifest_entry_each(template: Template) -> None:

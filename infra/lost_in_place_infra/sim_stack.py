@@ -63,6 +63,7 @@ PROJECT_TAG_KEY = "project"
 PROJECT_TAG_VALUE = "lost-in-place"
 GITHUB_OIDC_HOST = "token.actions.githubusercontent.com"
 BEDROCK_PROFILES_ENV = "LIP_BEDROCK_PROFILES"  # read by lost_in_place.llm.clients
+FROZEN_IMAGE_TAG_PREFIX = "freeze-"
 
 
 @dataclass(frozen=True)
@@ -149,7 +150,17 @@ class SimStack(Stack):
             "Images",
             image_scan_on_push=True,
             removal_policy=RemovalPolicy.RETAIN,
-            lifecycle_rules=[ecr.LifecycleRule(max_image_count=10)],
+            lifecycle_rules=[
+                # A frozen design's record names its image by digest; a lower-priority rule can't
+                # expire an image this rule matches, so retagging it freeze-* keeps it pullable.
+                ecr.LifecycleRule(
+                    rule_priority=1,
+                    tag_status=ecr.TagStatus.TAGGED,
+                    tag_prefix_list=[FROZEN_IMAGE_TAG_PREFIX],
+                    max_image_count=100,
+                ),
+                ecr.LifecycleRule(rule_priority=2, max_image_count=10),
+            ],
         )
 
         # Public subnets and no NAT gateway: instances pull images and write results directly.

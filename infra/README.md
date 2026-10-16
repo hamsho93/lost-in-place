@@ -3,7 +3,7 @@
 One stack, `LostInPlaceSim`, in us-east-1. It contains:
 
 - **Spot AWS Batch.** Intel x86 instances (c7i, m7i, c6i; `xlarge` and `2xlarge` only, so two to four episodes share a host and no episode starts on a fresh 2-vCPU instance; AMD `c7a` is excluded, see [fidelity notes](../docs/fidelity.md)), 2 vCPU and 3 GB per episode, up to `maxVcpus`. A job gets up to 3 attempts. Batch retries when a spot instance is reclaimed, and also when the episode exits non-zero, because Batch retries whenever no `evaluateOnExit` rule matches.
-- **ECR repository** for the image built from `docker/Dockerfile`.
+- **ECR repository** for the image built from `docker/Dockerfile`. It keeps the 10 newest images, plus every image with a `freeze-` tag (up to 100), so a frozen design's image stays pullable however many builds follow it. Build provenance counts too: a `docker buildx` push with attestations takes three of the ten slots.
 - **S3 bucket** for results: private, encrypted, TLS only. Runs move to Glacier Instant Retrieval after 30 days.
 - **Cost guard:**
   - a monthly AWS Budget that counts only resources tagged `project=lost-in-place`, with alerts at 50, 80 and 100% of actual spend and 100% of forecast spend;
