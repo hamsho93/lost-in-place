@@ -108,6 +108,15 @@ def test_the_plan_sends_claude_everything_and_gpt_one_prompt_per_family(
     assert len({c["id"] for c in gpt}) == len(gpt)
     probe = next(c for c in gpt if c["kind"] == "probe")
     assert probe["tools"] is False and probe["prompt"].endswith("\n\n" + PROBE_QUESTION)
+    assert p0.repeats("claude-sonnet-5-5", "auto") == 1 and p0.repeats("claude-sonnet-5-5-fb1", "auto") == 2
+    sonnet = p0.plan(prompts, "claude-sonnet-5-5-fb1", "auto", 2)
+    assert [{k: c[k] for k in c if k != "prompt"} for c in sonnet] == [
+        {k: c[k] for k in c if k != "prompt"} for c in gpt
+    ]
+    estimate = p0.estimate(prompts)
+    assert set(estimate) == {"claude-sonnet-4-6", "gpt-6.1-sol", "gpt-6.1-sol-fb2", "claude-sonnet-5-5-fb1"}
+    assert estimate["claude-sonnet-5-5-fb1"]["calls"] == estimate["gpt-6.1-sol-fb2"]["calls"] == len(gpt)
+    assert estimate["claude-sonnet-5-5-fb1"]["usd"] > estimate["gpt-6.1-sol-fb2"]["usd"]
 
 
 ARGS: dict[str, dict[str, Any]] = {
