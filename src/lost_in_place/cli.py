@@ -235,6 +235,7 @@ def _cmd_freeze_record(args: argparse.Namespace) -> int:
             ("--template", args.template),
             ("--n", args.n),
             ("--arms", args.arms),
+            ("--drop", args.drop),
         )
         if value
     ]
@@ -285,7 +286,8 @@ def _pinned_script_record(args: argparse.Namespace, spec: Path, row: str) -> int
 def _freeze_record_v3(args: argparse.Namespace) -> int:
     """SPEC-v3.md's record. `--write` needs the adaptation outcomes and the image digest and refuses
     a missing artifact or a dirty checkout; `--check` reads the outcomes from the record;
-    `--tag-message` prints the `freeze-v3-pre` hash list. A missing artifact exits 1."""
+    `--tag-message` prints the `freeze-v3-pre` hash list; `--drop` marks recorded arms dropped. A
+    missing artifact exits 1."""
     from lost_in_place import freeze
 
     if args.analysis or args.e4_supplement:
@@ -306,6 +308,14 @@ def _freeze_record_v3(args: argparse.Namespace) -> int:
         print(f"no {spec}", file=sys.stderr)
         return 1
     given = [args.template, args.n, args.arms]
+    if args.drop:
+        if any(v is not None for v in given):
+            print(
+                "--drop reads the outcomes from the record; it takes no --template, --n or --arms",
+                file=sys.stderr,
+            )
+            return 2
+        return _drop_arms_v3(args.root, spec, args.drop)
     if any(v is not None for v in given) and None in given:
         print("--template, --n and --arms go together", file=sys.stderr)
         return 2
@@ -322,6 +332,10 @@ def _freeze_record_v3(args: argparse.Namespace) -> int:
             print(e, file=sys.stderr)
             return 1
         adaptation = None
+    unknown = freeze.unknown_arms(args.root, adaptation) if adaptation is not None else []
+    if unknown:
+        print(f"not in {freeze.MODEL_REGISTRY}: {', '.join(unknown)}", file=sys.stderr)
+        return 1
     if args.write and not args.image_digest:
         print("--write needs --image-digest", file=sys.stderr)
         return 2
@@ -349,6 +363,30 @@ def _freeze_record_v3(args: argparse.Namespace) -> int:
         shown = f"`{value}`" if value else ("(missing)" if row in missing else "")
         print(f"| {row} | {shown} |")
     return 1 if problems else 0
+
+
+def _drop_arms_v3(root: Path, spec: Path, arms: str) -> int:
+    """Mark recorded confirmatory arms dropped (a deferred arm whose month was not approved, design
+    section 10.4): only the record's dropped-arms row changes; the arms stay in m, as tagged."""
+    from lost_in_place import freeze
+
+    text = spec.read_text()
+    try:
+        adaptation = freeze.adaptation_from_record(text).drop(freeze.parse_arms(arms))
+    except ValueError as e:
+        print(e, file=sys.stderr)
+        return 1
+    unknown = freeze.unknown_arms(root, adaptation)
+    if unknown:
+        print(f"not in {freeze.MODEL_REGISTRY}: {', '.join(unknown)}", file=sys.stderr)
+        return 1
+    values = adaptation.values()
+    spec.write_text(freeze.write_record_v3(text, freeze.recorded_v3(text) | values))
+    print(
+        f"{freeze.DROPPED_ROW}: {values[freeze.DROPPED_ROW]}; {freeze.M_ROW} stays {adaptation.m}",
+        file=sys.stderr,
+    )
+    return 0
 
 
 def _cmd_stats(args: argparse.Namespace) -> int:
@@ -737,11 +775,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="v3: print the freeze-v3-pre tag message's SHA-256 list (design section 2.1); exit 1 if any"
         " artifact is missing",
     )
+    mode.add_argument(
+        "--drop",
+        metavar="ARMS",
+        help="v3: mark recorded confirmatory arms dropped, comma-separated (a deferred month not approved,"
+        " design section 10.4); writes only the Dropped arms row, and m stays as tagged",
+    )
     v3 = fr.add_argument_group("freeze-v3 adaptation outcomes (with --freeze v3; required by --write)")
     v3.add_argument("--template", choices=["t0", "t1"], help="the wording template chosen by A-1")
     v3.add_argument("--n", type=int, choices=[120, 160], help="families per cell, by A-2")
     v3.add_argument(
-        "--arms", help="the confirmatory arm keys, comma-separated (A-3, A-4); m = 4 x their number"
+        "--arms",
+        help="the 1 to 5 confirmatory arms (A-3, A-4), comma-separated registry model names: the base"
+        " entry or the one fallback entry it flies, e.g. claude-sonnet-4-6,qwen3-4b-student,"
+        "qwen3-4b-zero-shot,gpt-6.1-sol,claude-sonnet-5-5; m = 4 x their number (up to 20)",
     )
     fr.set_defaults(func=_cmd_freeze_record)
 

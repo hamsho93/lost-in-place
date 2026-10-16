@@ -398,6 +398,15 @@ ANALYSIS_ROW_V3 = f"Analysis script (`{ANALYSIS_SCRIPT_V3}`)"
 N_ROW = "Families (N)"
 ARMS_ROW = "Confirmatory arms"
 M_ROW = "Wave-wide m"
+DROPPED_ROW = "Dropped arms"
+NO_ARMS = "none"
+PRIMARIES_PER_ARM = 4
+MAX_ARMS = 5
+# Registry entries that are never a confirmatory arm: the scripted controls and the smoke-only model.
+SCRIPTED_ARMS = ("rule-2m", "rule-leg", "scripted-cautious", "scripted-naive")
+SMOKE_ONLY = ("claude-haiku-5-5",)
+_FALLBACK = re.compile(r"-fb[0-9]+$")
+_ARM_NAME = re.compile(r"[a-z0-9][a-z0-9.-]*")
 V3_ROWS = (
     ROWS[0],
     DESIGN_ROW_V3,
@@ -414,6 +423,7 @@ V3_ROWS = (
     N_ROW,
     ARMS_ROW,
     M_ROW,
+    DROPPED_ROW,
 )
 
 
@@ -437,34 +447,61 @@ class MissingArtifact(LookupError):
 
 
 def parse_arms(text: str) -> tuple[str, ...]:
-    return tuple(sorted(arm.strip().strip("`") for arm in text.split(",") if arm.strip()))
+    """Comma-separated arms, sorted; `none` is no arm."""
+    arms = tuple(sorted(arm.strip().strip("`") for arm in text.split(",") if arm.strip()))
+    return () if arms == (NO_ARMS,) else arms
+
+
+def base_arm(entry: str) -> str:
+    """The arm a registry entry flies as: a pre-declared fallback entry `<arm>-fb<k>` is `<arm>`, as
+    in `stats_v3.base_arm`."""
+    return _FALLBACK.sub("", entry)
 
 
 @dataclasses.dataclass(frozen=True)
 class Adaptation:
     """The adaptation outcomes the v3 record holds as values (design section 2.3): the wording
-    template (A-1), N (A-2) and the confirmatory arms (A-3, A-4), whose count fixes m (A-5)."""
+    template (A-1), N (A-2) and the confirmatory arms (A-3, A-4), whose count fixes m (A-5). An arm is
+    a registry model, named by its base entry or the one fallback entry it flies (`stats_v3` reads
+    either); it flies every ladder level. A dropped arm (a deferred arm whose month was not approved,
+    section 10.4) stays an arm and in m, as tagged."""
 
     template: str
     n: int
     arms: tuple[str, ...]
+    dropped: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.template not in E5_TEMPLATES:
             raise ValueError(f"template must be one of {', '.join(E5_TEMPLATES)}, got {self.template!r}")
         if self.n not in FAMILY_COUNTS:
             raise ValueError(f"N must be one of {', '.join(map(str, FAMILY_COUNTS))}, got {self.n}")
-        if not self.arms:
-            raise ValueError("no confirmatory arms")
-        if len(set(self.arms)) != len(self.arms):
-            raise ValueError(f"duplicate confirmatory arm in {', '.join(self.arms)}")
-        bad = [arm for arm in self.arms if not arm or any(c in arm for c in " `|,")]
+        if not 1 <= len(self.arms) <= MAX_ARMS:
+            raise ValueError(f"there are 1 to {MAX_ARMS} confirmatory arms, got {len(self.arms)}")
+        keys = [arm for arm in self.arms if arm.startswith("dexi-") and ".driver-" in arm]
+        if keys:
+            raise ValueError(
+                f"name the model, not an arm key: {', '.join(keys)} (an arm flies every ladder level)"
+            )
+        bad = [arm for arm in (*self.arms, *self.dropped) if not _ARM_NAME.fullmatch(arm)]
         if bad:
-            raise ValueError(f"not an arm key: {', '.join(map(repr, bad))}")
+            raise ValueError(f"not a registry model name: {', '.join(map(repr, bad))}")
+        bases = [base_arm(arm) for arm in self.arms]
+        twice = sorted({b for b in bases if bases.count(b) > 1})
+        if twice:
+            raise ValueError(f"one base arm named twice: {', '.join(twice)} (in {', '.join(self.arms)})")
+        never = [arm for arm in self.arms if base_arm(arm) in (*SCRIPTED_ARMS, *SMOKE_ONLY)]
+        if never:
+            raise ValueError(
+                f"never a confirmatory arm (a scripted control or smoke-only): {', '.join(never)}"
+            )
+        stray = [arm for arm in self.dropped if base_arm(arm) not in bases]
+        if stray or len(set(map(base_arm, self.dropped))) != len(self.dropped):
+            raise ValueError(f"dropped arms must be confirmatory arms, once each: {', '.join(self.dropped)}")
 
     @property
     def m(self) -> int:
-        return 4 * len(self.arms)
+        return PRIMARIES_PER_ARM * len(self.arms)
 
     def values(self) -> dict[str, str]:
         return {
@@ -472,7 +509,11 @@ class Adaptation:
             N_ROW: str(self.n),
             ARMS_ROW: ", ".join(sorted(self.arms)),
             M_ROW: str(self.m),
+            DROPPED_ROW: ", ".join(sorted(self.dropped)) or NO_ARMS,
         }
+
+    def drop(self, arms: tuple[str, ...]) -> Adaptation:
+        return dataclasses.replace(self, dropped=tuple(sorted({*self.dropped, *arms})))
 
 
 def spec_hash_v3(spec_text: str) -> str:
@@ -486,19 +527,31 @@ def recorded_v3(spec_text: str) -> dict[str, str]:
 def adaptation_from_record(spec_text: str) -> Adaptation:
     """The adaptation outcomes written in the v3 record; raises if any is blank or inconsistent."""
     written = recorded_v3(spec_text)
-    blank = [row for row in (TEMPLATE_ROW, N_ROW, ARMS_ROW, M_ROW) if not written.get(row)]
+    blank = [row for row in (TEMPLATE_ROW, N_ROW, ARMS_ROW, M_ROW, DROPPED_ROW) if not written.get(row)]
     if blank:
         raise ValueError(f"{SPEC_V3}'s freeze record has no value for {', '.join(blank)}")
     try:
         n, m = int(written[N_ROW]), int(written[M_ROW])
     except ValueError:
         raise ValueError(f"{N_ROW} and {M_ROW} must be integers in {SPEC_V3}'s freeze record") from None
-    adaptation = Adaptation(written[TEMPLATE_ROW], n, parse_arms(written[ARMS_ROW]))
+    adaptation = Adaptation(
+        written[TEMPLATE_ROW], n, parse_arms(written[ARMS_ROW]), parse_arms(written[DROPPED_ROW])
+    )
     if m != adaptation.m:
         raise ValueError(
-            f"{M_ROW} is {m}, but 4 x {len(adaptation.arms)} confirmatory arms is {adaptation.m}"
+            f"{M_ROW} is {m}, but {PRIMARIES_PER_ARM} x {len(adaptation.arms)} confirmatory arms"
+            f" is {adaptation.m}"
         )
     return adaptation
+
+
+def unknown_arms(root: Path, adaptation: Adaptation) -> list[str]:
+    """The adaptation's confirmatory arms that aren't entries of `root`'s model registry."""
+    from lost_in_place.llm.registry import load_models
+
+    path = root / MODEL_REGISTRY
+    models = load_models(path) if path.is_file() else {}
+    return [arm for arm in adaptation.arms if arm not in models]
 
 
 def _load_attribute(root: Path, source: str) -> Any:

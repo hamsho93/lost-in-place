@@ -137,15 +137,16 @@ Settled by the adaptation pull request under the design's rules A-1 to A-7, and 
 
 ## Freeze record
 
-Filled in at the freeze by `lip freeze-record --freeze v3 --write` (`src/lost_in_place/freeze.py`, `V3_ROWS`). Each value is a SHA-256, except six. The wording template, N, the confirmatory arms and the wave-wide m are the adaptation outcomes (design §2.3, A-1 to A-5), and m must be 4 × the number of arms; the image digest and the git SHA are recorded as they are. This file is hashed with every value in the table blank, so writing them doesn't change its hash. Each scenario row is that directory's YAML files sorted by name, concatenated, for the template `<t>` in the wording-template row; the sweeps row is the same for `sweeps/e5/`. The prompt-bundle row hashes the canonical JSON of `freeze.prompt_bundle_v3()`, which holds the render grid (`src/lost_in_place/prompt_grid.py`): the digest of every prompt DEXI's planner renders for each observation level and prompt version under validator `none`, across a sweep of estimator health (flow quality and position uncertainty at and around the thresholds and the health lines' rounding, every flag), histories with every result and the elision, and the T0 and T1 instructions of every tenth E5 family and every canary, plus every Bedrock entry's request rendered from a sample of them. The probe-prompts row hashes the frozen text that probes send besides an arm's prompt (`freeze.PROBE_TEXTS`: the wording check's question, and any other probe's text listed there before `freeze-v3-pre`). The labelling row is freeze-v2's bundle. `lip stats --design v3` reads the analysis row, the confirmatory arms, m and N from this table.
+Filled in at the freeze by `lip freeze-record --freeze v3 --write` (`src/lost_in_place/freeze.py`, `V3_ROWS`). Each value is a SHA-256, except seven. The wording template, N, the confirmatory arms and the wave-wide m are the adaptation outcomes (design §2.3, A-1 to A-5): 1 to 5 arms, each a model in the registry named by its base entry or the one fallback entry it flies (never two entries of one arm, a scripted control or the smoke-only `claude-haiku-5-5`), and m is 4 × the number of arms, up to 20. The dropped-arms row is `none` at the freeze; a deferred arm whose month is not approved (design §10.4) is listed there later, stays in m as tagged and gets no verdicts. A deferred arm needs no row: `lip stats --design v3` refuses to print outcomes while a confirmatory arm that isn't dropped has no results. The image digest and the git SHA are recorded as they are. This file is hashed with every value in the table blank, so writing them doesn't change its hash. Each scenario row is that directory's YAML files sorted by name, concatenated, for the template `<t>` in the wording-template row; the sweeps row is the same for `sweeps/e5/`. The prompt-bundle row hashes the canonical JSON of `freeze.prompt_bundle_v3()`, which holds the render grid (`src/lost_in_place/prompt_grid.py`): the digest of every prompt DEXI's planner renders for each observation level and prompt version under validator `none`, across a sweep of estimator health (flow quality and position uncertainty at and around the thresholds and the health lines' rounding, every flag), histories with every result and the elision, and the T0 and T1 instructions of every tenth E5 family and every canary, plus every Bedrock entry's request rendered from a sample of them. The probe-prompts row hashes the frozen text that probes send besides an arm's prompt (`freeze.PROBE_TEXTS`: the wording check's question, and any other probe's text listed there before `freeze-v3-pre`). The labelling row is freeze-v2's bundle. `lip stats --design v3` reads the analysis row, the confirmatory arms, m, N and the dropped arms from this table.
 
 The freeze, in order:
 
 1. Tag `freeze-v3-pre` on `main`. Its message is the output of `lip freeze-record --freeze v3 --image-digest <digest> --tag-message` (the hashes listed in design §2.1), and it is released (design §2.2).
 2. Run the pre-freeze work (design §11).
-3. In the adaptation pull request, on a clean checkout, run `lip freeze-record --freeze v3 --template <t> --n <N> --arms <arm keys, comma-separated> --image-digest <digest> --write`. `scripts/check_v3_diff.py freeze-v3-pre HEAD`, run from the `freeze-v3-pre` copy of the script, must pass.
+3. In the adaptation pull request, on a clean checkout, run `lip freeze-record --freeze v3 --template <t> --n <N> --arms <models, comma-separated> --image-digest <digest> --write`. `scripts/check_v3_diff.py freeze-v3-pre HEAD`, run from the `freeze-v3-pre` copy of the script, must pass.
 4. Commit this file alone as the freeze commit, and tag it `freeze-v3`.
 5. Before each arm of the wave, `lip freeze-record --freeze v3 --image-digest <digest> --check` must pass. It reads the adaptation outcomes from this table, and, as for freeze-v2, doesn't compare the git SHA.
+6. If a deferred arm's month is not approved (design §10.4), `lip freeze-record --freeze v3 --drop <model>` writes it into the dropped-arms row, and nothing else; commit that alone.
 
 | Artifact | Hash |
 |---|---|
@@ -166,6 +167,7 @@ The freeze, in order:
 | Families (N) | |
 | Confirmatory arms | |
 | Wave-wide m | |
+| Dropped arms | |
 
 ## Amendment log
 
