@@ -144,6 +144,110 @@ def test_bedrock_response_parsing() -> None:
     assert (completion.text, completion.input_tokens, completion.latency_ms) == ("Holding.", 900, 1500)
 
 
+def _converse_stub(content: list[dict[str, Any]]) -> Any:
+    class Stub:
+        def __init__(self) -> None:
+            self.requests: list[dict[str, Any]] = []
+
+        def converse(self, **request: Any) -> dict[str, Any]:
+            self.requests.append(request)
+            return {
+                "output": {"message": {"content": content}},
+                "stopReason": "tool_use",
+                "usage": {"inputTokens": 1500, "outputTokens": 240},
+                "metrics": {"latencyMs": 2100},
+            }
+
+    return Stub()
+
+
+def test_gpt_sol_entry_is_the_one_freeze_v3_states() -> None:
+    spec = get_model("gpt-6.1-sol")
+    assert spec.model_dump(exclude={"name", "notes"}) == {
+        "provider": "bedrock",
+        "model_id": "us.openai.gpt-6.1-sol",
+        "region": "us-east-1",
+        "max_tokens": 4096,
+        "temperature": 0,
+        "tool_choice": "any",
+        "additional_request_fields": {"reasoning_effort": "low"},
+        "base_url": None,
+        "api_key_env": None,
+        "extra_body": {},
+        "chat_template": None,
+    }
+
+
+def test_gpt_sol_fallbacks_change_one_setting_each_in_the_stated_order() -> None:
+    chain = [get_model(n) for n in ("gpt-6.1-sol", "gpt-6.1-sol-fb1", "gpt-6.1-sol-fb2", "gpt-6.1-sol-fb3")]
+    settings = [(s.tool_choice, s.temperature, s.additional_request_fields) for s in chain]
+    assert settings == [
+        ("any", 0, {"reasoning_effort": "low"}),
+        ("auto", 0, {"reasoning_effort": "low"}),
+        ("auto", None, {"reasoning_effort": "low"}),
+        ("auto", None, {}),
+    ]
+    assert {(s.provider, s.model_id, s.max_tokens, s.region) for s in chain} == {
+        ("bedrock", "us.openai.gpt-6.1-sol", 4096, "us-east-1")
+    }
+
+
+def test_gpt_sol_request_carries_the_effort_and_goes_through_the_tagged_profile() -> None:
+    env = {BEDROCK_PROFILES_ENV: json.dumps({"us.openai.gpt-6.1-sol": "arn:aws:bedrock:profile/sol"})}
+    client = BedrockConverseClient(get_model("gpt-6.1-sol"), client=object(), env=env)
+    request = client.request("", "user", tool_specs())
+    assert request["modelId"] == "arn:aws:bedrock:profile/sol"
+    assert request["additionalModelRequestFields"] == {"reasoning_effort": "low"}
+    assert request["inferenceConfig"] == {"maxTokens": 4096, "temperature": 0}
+    assert request["toolConfig"]["toolChoice"] == {"any": {}}
+    fb3 = BedrockConverseClient(get_model("gpt-6.1-sol-fb3"), client=object(), env=env).request("", "u", [])
+    assert "additionalModelRequestFields" not in fb3 and fb3["inferenceConfig"] == {"maxTokens": 4096}
+
+
+def test_requests_without_extra_fields_are_unchanged() -> None:
+    request = BedrockConverseClient(get_model("claude-sonnet-4-6"), client=object(), env={}).request(
+        "system", "user", tool_specs()
+    )
+    assert list(request) == ["modelId", "system", "messages", "toolConfig", "inferenceConfig"]
+    assert request["inferenceConfig"] == {"maxTokens": 512, "temperature": 0}
+
+
+def test_a_call_without_tools_sends_no_tool_config() -> None:
+    request = BedrockConverseClient(SPEC, client=object(), env={}).request("", "Answer yes or no.", [])
+    assert "toolConfig" not in request
+
+
+def test_reasoning_content_is_kept_apart_from_the_text() -> None:
+    stub = _converse_stub(
+        [
+            {"reasoningContent": {"reasoningText": {"text": "Flow is 0, so ", "signature": "sig"}}},
+            {"reasoningContent": {"redactedContent": b"\x00"}},
+            {"text": "Holding."},
+            {"toolUse": {"toolUseId": "t1", "name": "hold", "input": {"seconds": 2}}},
+        ]
+    )
+    completion = BedrockConverseClient(get_model("gpt-6.1-sol"), client=stub, env={}).complete(
+        "", "u", tool_specs()
+    )
+    assert completion.text == "Holding."
+    assert completion.reasoning == "Flow is 0, so [redacted reasoning]"
+    assert completion.tool_calls == (ToolCall("hold", {"seconds": 2}),)
+
+
+def test_reasoning_is_recorded_in_the_decision() -> None:
+    stub = _converse_stub(
+        [
+            {"reasoningContent": {"reasoningText": {"text": "Settle first."}}},
+            {"toolUse": {"toolUseId": "t1", "name": "hold", "input": {"seconds": 2, "reason": "settle"}}},
+        ]
+    )
+    spec = get_model("gpt-6.1-sol")
+    planner = LLMPlanner(spec, client=BedrockConverseClient(spec, client=stub, env={}))
+    asyncio.run(planner.propose(OBS))
+    assert planner.decisions[0].reasoning == "Settle first."
+    assert stub.requests[0]["additionalModelRequestFields"] == {"reasoning_effort": "low"}
+
+
 def test_registry_ships_a_claude_arm_on_a_known_provider() -> None:
     models = load_models()
     assert "claude-sonnet-4-6" in models
@@ -197,3 +301,27 @@ def test_an_openai_compatible_call_without_tools_has_no_tool_fields() -> None:
     assert list(client.request("", "hi", [])) == ["model", "messages", "max_tokens", "temperature"]
     keys = ["model", "messages", "tools", "tool_choice", "max_tokens", "temperature"]
     assert list(client.request("", "hi", DEXI_TOOLS)) == keys
+
+
+def test_propose_on_dexis_tools_logs_the_settings_it_sent(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    sent: list[ModelSpec] = []
+
+    def fake(spec: ModelSpec) -> FakeClient:
+        sent.append(spec)
+        return FakeClient(ToolCall("move", {"direction": "left", "distance_m": 2.0}))
+
+    monkeypatch.setitem(clients.CLIENTS, "bedrock", fake)
+    goal = "Take off, fly 4.0 m left, then a further 1.8 m forward, hold there for 10 s, then land."
+    args = ["propose", "gpt-6.1-sol-fb1", "--planner", "dexi", "--health", "healthy", "--goal", goal]
+    assert cli.main(args) == 0
+    out = capsys.readouterr()
+    decision = json.loads(out.out)
+    assert decision["action"]["args"] == {"north_m": 0.0, "east_m": -2.0}
+    assert decision["prompt_version"] == "dexi-v2" and decision["model"] == "gpt-6.1-sol-fb1"
+    assert "A safety validator" not in decision["user_prompt"]
+    assert "- Optical flow quality: 180 of 255" in decision["user_prompt"]
+    logged = json.loads(out.err)
+    assert logged["planner"] == "dexi" and logged["model"]["tool_choice"] == "auto"
+    assert sent == [get_model("gpt-6.1-sol-fb1")]

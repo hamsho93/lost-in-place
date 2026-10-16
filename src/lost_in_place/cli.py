@@ -341,6 +341,7 @@ def _cmd_propose(args: argparse.Namespace) -> int:
     import asyncio
     from dataclasses import asdict
 
+    from lost_in_place.llm.dexi import DEXI_DRIVER, DexiEnvelope, DexiPlanner
     from lost_in_place.llm.planner import LLMPlanner
     from lost_in_place.llm.prompt import InvalidProposal
     from lost_in_place.llm.registry import get_model
@@ -362,7 +363,15 @@ def _cmd_propose(args: argparse.Namespace) -> int:
         history=("take_off altitude_m=1.5: done",),
         health=sample_health[args.health],
     )
-    planner = LLMPlanner(get_model(args.model))
+    spec = get_model(args.model)
+    # The settings this call sends, so a smoke call's log shows which registry entry was tried.
+    print(json.dumps({"model": spec.model_dump(exclude={"notes"}), "planner": args.planner}), file=sys.stderr)
+    planner: LLMPlanner | DexiPlanner
+    if args.planner == "dexi":
+        envelope = DexiEnvelope(max_alt_m=2.0, geofence_m=5.5)
+        planner = DexiPlanner(spec, envelope, 1.5, prompt_version=args.prompt, driver=DEXI_DRIVER)
+    else:
+        planner = LLMPlanner(spec)
     status = 0
     try:
         asyncio.run(planner.propose(observation))
@@ -717,6 +726,15 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["none", "healthy", "degraded"],
         default="none",
         help="estimator-health block: none (as deployed) or a sample healthy/degraded one",
+    )
+    propose.add_argument(
+        "--planner",
+        choices=["llm", "dexi"],
+        default="llm",
+        help="the prompt and tools: the generic LLM planner's, or DEXI's (driver dexi, validator none)",
+    )
+    propose.add_argument(
+        "--prompt", default="dexi-v2", help="with --planner dexi: the DEXI prompt version (default dexi-v2)"
     )
     propose.set_defaults(func=_cmd_propose)
     return parser

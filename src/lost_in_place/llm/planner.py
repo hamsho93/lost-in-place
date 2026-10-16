@@ -40,6 +40,7 @@ class Decision:
     latency_ms: int = 0
     action: dict[str, Any] | None = None
     error: str = ""
+    reasoning: str = ""
 
 
 class LLMPlanner:
@@ -63,6 +64,7 @@ class LLMPlanner:
             input_tokens=completion.input_tokens,
             output_tokens=completion.output_tokens,
             latency_ms=completion.latency_ms,
+            reasoning=completion.reasoning,
         )
         self.decisions.append(decision)
         try:

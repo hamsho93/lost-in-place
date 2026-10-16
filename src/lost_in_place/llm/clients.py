@@ -41,6 +41,7 @@ class Completion:
     output_tokens: int
     latency_ms: int
     model_id: str  # what was actually invoked, after any profile mapping
+    reasoning: str = ""  # the model's reasoning when the API returns it apart from the text
 
 
 class ChatClient(Protocol):
@@ -76,27 +77,30 @@ class BedrockConverseClient:
         inference: dict[str, Any] = {"maxTokens": self.spec.max_tokens}
         if self.spec.temperature is not None:
             inference["temperature"] = self.spec.temperature
-        tool_config = {
-            "tools": [
-                {
-                    "toolSpec": {
-                        "name": t["name"],
-                        "description": t["description"],
-                        "inputSchema": {"json": t["parameters"]},
-                    }
-                }
-                for t in tools
-            ],
-            "toolChoice": {self.spec.tool_choice: {}},
-        }
-        return {
+        request: dict[str, Any] = {
             "modelId": self.model_id,
             **({"system": [{"text": system}]} if system else {}),
             "messages": [{"role": "user", "content": [{"text": user}]}],
-            # Converse rejects an empty tool list; a call with no tools is a plain text question.
-            **({"toolConfig": tool_config} if tools else {}),
-            "inferenceConfig": inference,
         }
+        # Converse rejects an empty tool list, so a call without tools (a probe) sends no toolConfig.
+        if tools:
+            request["toolConfig"] = {
+                "tools": [
+                    {
+                        "toolSpec": {
+                            "name": t["name"],
+                            "description": t["description"],
+                            "inputSchema": {"json": t["parameters"]},
+                        }
+                    }
+                    for t in tools
+                ],
+                "toolChoice": {self.spec.tool_choice: {}},
+            }
+        request["inferenceConfig"] = inference
+        if self.spec.additional_request_fields:
+            request["additionalModelRequestFields"] = dict(self.spec.additional_request_fields)
+        return request
 
     def complete(self, system: str, user: str, tools: list[dict[str, Any]]) -> Completion:
         started = time.monotonic()
@@ -115,7 +119,17 @@ class BedrockConverseClient:
             output_tokens=int(usage.get("outputTokens", 0)),
             latency_ms=int(response.get("metrics", {}).get("latencyMs", (time.monotonic() - started) * 1000)),
             model_id=self.model_id,
+            reasoning="".join(
+                _reasoning(block["reasoningContent"]) for block in content if "reasoningContent" in block
+            ),
         )
+
+
+def _reasoning(block: dict[str, Any]) -> str:
+    """A Converse `reasoningContent` block's text; a provider may return it encrypted instead."""
+    if "reasoningText" in block:
+        return str(block["reasoningText"].get("text", ""))
+    return "[redacted reasoning]" if "redactedContent" in block else ""
 
 
 # {model name in models.yaml: base URL}, overriding the registry's base_url, so the same arm can
