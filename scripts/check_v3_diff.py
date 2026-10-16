@@ -328,8 +328,8 @@ def _tokens(node: ast.AST) -> set[str]:
             out.add(n.attr)
         elif isinstance(n, (*_FUNCTION, ast.ClassDef)):
             out.add(n.name)
-        elif isinstance(n, ast.arg) or (isinstance(n, ast.keyword) and n.arg):
-            out.add(n.arg)
+        elif isinstance(n, (ast.arg, ast.keyword)):
+            out.update([n.arg] if n.arg else [])
         elif isinstance(n, ast.alias):
             out.update(name for name in (n.name, n.asname) if name)
         elif isinstance(n, ast.Constant) and isinstance(n.value, str) and _WORD.fullmatch(n.value):
