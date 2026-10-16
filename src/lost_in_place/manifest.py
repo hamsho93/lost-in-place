@@ -26,6 +26,7 @@ from lost_in_place.planning import (
     arm_name,
     available_planners,
     check_observation_level,
+    check_planner_level,
 )
 from lost_in_place.scenario import load_scenario
 
@@ -75,7 +76,7 @@ class Entry:
     planner_options: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        check_observation_level(self.observation)
+        check_planner_level(self.planner, self.observation, self.planner_options, self.validator)
 
     @property
     def cell(self) -> str:

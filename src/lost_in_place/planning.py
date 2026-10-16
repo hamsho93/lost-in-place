@@ -25,8 +25,11 @@ DEXI_PLANNER = "dexi"
 REJECTED = " - rejected: "
 # Every observation level a planner can fly at, and whether it is shown estimator health. A level
 # missing here is an error wherever it is read (sweep spec, manifest entry, agent config, observe),
-# so a typo or a level this build doesn't implement can never fly as O0.
-OBSERVATION_LEVELS: dict[str, bool] = {"O0": False, "O1": True}
+# so a typo or a level this build doesn't implement can never fly as O0. The rung levels of the
+# freeze-v3 ladder (O1-L, O1-N, O1-R) show health as O1 does and change only DEXI's prompt around it
+# (`llm.dexi`), so only the `dexi` planner flies them.
+OBSERVATION_LEVELS: dict[str, bool] = {"O0": False, "O1": True, "O1L": True, "O1N": True, "O1R": True}
+RUNG_LEVELS = ("O1L", "O1N", "O1R")
 
 
 def check_observation_level(level: str) -> str:
@@ -37,6 +40,21 @@ def check_observation_level(level: str) -> str:
 
 def shows_health(level: str) -> bool:
     return OBSERVATION_LEVELS[check_observation_level(level)]
+
+
+def check_planner_level(
+    planner: str, level: str, options: dict[str, Any] | None = None, validator: str = "none"
+) -> str:
+    """Raise unless `planner` can fly `level`: any planner but `dexi` would fly a rung as plain O1,
+    and a `dexi` rung must fit its prompt version and validator arm (`llm.dexi.template`)."""
+    check_observation_level(level)
+    if level in RUNG_LEVELS and planner != DEXI_PLANNER:
+        raise ValueError(f"observation level {level!r} needs the '{DEXI_PLANNER}' planner, not '{planner}'")
+    if planner == DEXI_PLANNER:
+        from lost_in_place.llm.dexi import PROMPT_VERSION, template
+
+        template((options or {}).get("prompt", PROMPT_VERSION), validator, level)
+    return level
 
 
 def arm_name(planner: str, options: dict[str, str] | None = None) -> str:
