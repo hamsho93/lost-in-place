@@ -341,6 +341,7 @@ def _cmd_propose(args: argparse.Namespace) -> int:
     import asyncio
     from dataclasses import asdict
 
+    from lost_in_place.llm.dexi import DEXI_DRIVER, DexiEnvelope, DexiPlanner
     from lost_in_place.llm.planner import LLMPlanner
     from lost_in_place.llm.prompt import InvalidProposal
     from lost_in_place.llm.registry import get_model
@@ -362,7 +363,15 @@ def _cmd_propose(args: argparse.Namespace) -> int:
         history=("take_off altitude_m=1.5: done",),
         health=sample_health[args.health],
     )
-    planner = LLMPlanner(get_model(args.model))
+    spec = get_model(args.model)
+    # The settings this call sends, so a smoke call's log shows which registry entry was tried.
+    print(json.dumps({"model": spec.model_dump(exclude={"notes"}), "planner": args.planner}), file=sys.stderr)
+    planner: LLMPlanner | DexiPlanner
+    if args.planner == "dexi":
+        envelope = DexiEnvelope(max_alt_m=2.0, geofence_m=5.5)
+        planner = DexiPlanner(spec, envelope, 1.5, prompt_version=args.prompt, driver=DEXI_DRIVER)
+    else:
+        planner = LLMPlanner(spec)
     status = 0
     try:
         asyncio.run(planner.propose(observation))
@@ -375,13 +384,104 @@ def _cmd_propose(args: argparse.Namespace) -> int:
 def _cmd_families(args: argparse.Namespace) -> int:
     from lost_in_place.families import generate
 
+    if args.e5:
+        return _families_e5(args)
+    if args.count is None or args.check:
+        print("lip families: --count is required, and --check goes with --e5", file=sys.stderr)
+        return 2
     for i in range(args.start, args.start + args.count):
         family = generate(
-            f"{args.prefix}{i:02d}", args.seed, benign=args.benign, loud_anchored=args.loud_anchor
+            f"{args.prefix or 'g'}{i:02d}",
+            0 if args.seed is None else args.seed,
+            benign=args.benign,
+            loud_anchored=args.loud_anchor,
         )
-        for path in family.write(args.out):
+        for path in family.write(args.out or Path("scenarios/e1")):
             print(path)
     return 0
+
+
+def _families_e5(args: argparse.Namespace) -> int:
+    import collections
+    import tempfile
+
+    from lost_in_place import families
+
+    fixed = {"--count": args.count, "--start": args.start or None, "--prefix": args.prefix}
+    fixed |= {"--benign": args.benign or None, "--loud-anchor": args.loud_anchor or None}
+    if given := [flag for flag, value in fixed.items() if value is not None]:
+        print(f"lip families: --e5 draws a fixed set; drop {', '.join(given)}", file=sys.stderr)
+        return 2
+    out: Path = args.out or Path("scenarios/e5")
+    draw = families.draw_e5(args.prior, families.E5_SEED if args.seed is None else args.seed)
+    strata = collections.Counter(families.wording_stratum(f.scenarios()["healthy"]) for f in draw.families)
+    n = len(draw.families)
+    for template in families.TEMPLATES:
+        shares = ", ".join(f"{k} {strata[k]}/{n} ({strata[k] / n:.1%})" for k in sorted(strata, key=str))
+        print(f"{template}: {n} families, {len(draw.canaries)} canaries, {n} timed; strata {shares}")
+    skipped = {k: v for k, v in draw.duplicates.items() if v}
+    print(f"duplicates rejected: {sum(skipped.values())} {skipped}")
+    if not args.check:
+        families.write_e5(draw, out)
+        return 0
+    with tempfile.TemporaryDirectory() as tmp:
+        fresh = Path(tmp)
+        families.write_e5(draw, fresh)
+        want = {p.relative_to(fresh): p.read_bytes() for p in fresh.rglob("*.yaml")}
+        have = {p.relative_to(out): p.read_bytes() for p in out.rglob("*.yaml")}
+    bad = sorted(str(p) for p in want.keys() | have.keys() if want.get(p) != have.get(p))
+    for path in bad:
+        print(f"differs, missing or extra: {out / path}", file=sys.stderr)
+    return 1 if bad else 0
+
+
+def _cmd_dryrun(args: argparse.Namespace) -> int:
+    import asyncio
+    from dataclasses import asdict
+
+    from lost_in_place import dryrun, wording
+    from lost_in_place.llm.clients import make_client
+    from lost_in_place.llm.registry import get_model
+
+    spec = get_model(args.model)
+    episodes = [(t, s) for t in args.templates for s in dryrun.wording_families(args.scenarios, t)]
+    cost = wording.dryrun_cost(len(episodes)) if spec.provider == "bedrock_imported" else None
+    print(
+        f"dry run: {args.model} ({spec.provider}), {len(episodes)} episodes"
+        f" ({', '.join(args.templates)} x {len(episodes) // len(args.templates)} families),"
+        f" prompt {args.prompt}, {args.obs}, driver dexi, validator none, latency 0"
+    )
+    if cost is not None:
+        print(f"  about {cost['calls']} calls; {cost['copy_minutes']} copy-minutes -> ${cost['usd']}")
+    if not args.live:
+        print("  plan only: add --live to call the model (it costs money)")
+        return 0
+
+    def progress(run: dryrun.DryRun) -> None:
+        state = run.harness_error or ("success" if run.success else run.end)
+        print(f"  {run.template} {run.family}: {state}", flush=True)
+
+    runs = asyncio.run(
+        dryrun.run_all(
+            episodes, spec, lambda: make_client(spec), args.prompt, args.obs, args.jobs, progress=progress
+        )
+    )
+    summary = dryrun.summarise(runs)
+    doc = {
+        "model": args.model,
+        "prompt": args.prompt,
+        "observation": args.obs,
+        "driver": "dexi",
+        "validator": "none",
+        "latency_s": 0.0,
+        "summary": summary,
+        "episodes": [asdict(r) for r in runs],
+    }
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_text(json.dumps(doc, indent=1) + "\n")
+    print(json.dumps(summary))
+    print(args.out)
+    return 1 if any(row["harness_error"] for row in summary.values()) else 0
 
 
 def _instance_arg(value: str) -> int | None:
@@ -411,11 +511,15 @@ def build_parser() -> argparse.ArgumentParser:
     fam = sub.add_parser(
         "families", help="generate scenario families (four matched states each; five with --benign)"
     )
-    fam.add_argument("--count", type=int, required=True, help="how many families")
+    fam.add_argument("--count", type=int, help="how many families (required without --e5)")
     fam.add_argument("--start", type=int, default=0, help="number of the first family (default: 0)")
-    fam.add_argument("--prefix", default="g", help="family names are <prefix><number> (default: g)")
-    fam.add_argument("--seed", type=int, default=0, help="the same seed and names give the same families")
-    fam.add_argument("--out", type=Path, default=Path("scenarios/e1"))
+    fam.add_argument("--prefix", help="family names are <prefix><number> (default: g)")
+    fam.add_argument(
+        "--seed",
+        type=int,
+        help="the same seed and names give the same families (default: 0; 7 with --e5)",
+    )
+    fam.add_argument("--out", type=Path, help="default: scenarios/e1; scenarios/e5 with --e5")
     fam.add_argument(
         "--benign",
         action="store_true",
@@ -424,10 +528,44 @@ def build_parser() -> argparse.ArgumentParser:
     fam.add_argument(
         "--loud-anchor",
         action="store_true",
-        help="start the loud fault when the estimate is 2 m from the first move's target (scenarios/v3),"
-        " not 2.5 s into the move (E1, E2)",
+        help="start the loud fault when the estimate is 2 m from the first move's target"
+        " (scenarios/smoke-audit-fixes), not 2.5 s into the move (E1, E2)",
+    )
+    fam.add_argument(
+        "--e5",
+        action="store_true",
+        help="draw E5's fixed set (c000-c159, canaries k000-k005, deduplicated) and write it under"
+        " both templates to <out>/{t0,t1}/{families,canary,timed}; prints the wording strata",
+    )
+    fam.add_argument(
+        "--prior",
+        type=Path,
+        default=Path("scenarios"),
+        help="with --e5: the directory holding the sets E5 must not repeat (default: scenarios)",
+    )
+    fam.add_argument(
+        "--check",
+        action="store_true",
+        help="with --e5: compare with <out> instead of writing; exit 1 if any differ",
     )
     fam.set_defaults(func=_cmd_families)
+
+    dry = sub.add_parser(
+        "dryrun",
+        help="fly a model through DEXI's prompt against a kinematic double, for the E5 wording check"
+        " (b00-b59 re-worded plus k000-k005, per template); plans only, unless --live",
+    )
+    dry.add_argument("model", help="a model in llm/models.yaml (the wording check flies qwen3-4b-student)")
+    dry.add_argument("--templates", nargs="+", choices=("t0", "t1"), default=["t0", "t1"])
+    dry.add_argument("--prompt", choices=("dexi-v2", "dexi-9b2e7a7"), default="dexi-v2")
+    dry.add_argument("--obs", choices=list(OBSERVATION_LEVELS), default="O0")
+    dry.add_argument("--jobs", type=int, default=8, help="episodes in flight (default: 8)")
+    dry.add_argument("--scenarios", type=Path, default=Path("scenarios"), help="default: scenarios")
+    dry.add_argument("--out", type=Path, default=Path("runs/wording-check/dryrun.json"))
+    dry.add_argument(
+        "--live", action="store_true", help="call the model; without it, print the plan and cost"
+    )
+    dry.set_defaults(func=_cmd_dryrun)
 
     run = sub.add_parser("run", help="fly one scenario")
     run.add_argument("scenario", type=Path)
@@ -588,6 +726,15 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["none", "healthy", "degraded"],
         default="none",
         help="estimator-health block: none (as deployed) or a sample healthy/degraded one",
+    )
+    propose.add_argument(
+        "--planner",
+        choices=["llm", "dexi"],
+        default="llm",
+        help="the prompt and tools: the generic LLM planner's, or DEXI's (driver dexi, validator none)",
+    )
+    propose.add_argument(
+        "--prompt", default="dexi-v2", help="with --planner dexi: the DEXI prompt version (default dexi-v2)"
     )
     propose.set_defaults(func=_cmd_propose)
     return parser
