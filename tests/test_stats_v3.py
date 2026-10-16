@@ -431,6 +431,36 @@ def test_an_analysis_mixing_two_gpt_entries_is_refused() -> None:
     assert stats_v3.collect([mixed[0], canary]).entries == {"gpt-6.1-sol": "gpt-6.1-sol"}
 
 
+def test_sonnet_5_5_fallback_entries_are_one_arm_and_never_mixed() -> None:
+    for entry in stats_v3.SONNET_ENTRIES:
+        key = f"dexi-{entry}.driver-dexi.prompt-{stats_v3.CLAIM}"
+        assert stats_v3.level_of(key, "O0") == ("claude-sonnet-5-5", "O0-V")
+    assert stats_v3.SONNET_ENTRIES == ("claude-sonnet-5-5", "claude-sonnet-5-5-fb1", "claude-sonnet-5-5-fb2")
+    assert stats_v3.base_arm("claude-sonnet-4-6") == "claude-sonnet-4-6"
+    mixed = [
+        attempt(0, "loud", "claude-sonnet-5-5-fb1", "O1", score(0, "loud")),
+        attempt(1, "brief", "claude-sonnet-5-5-fb2", "O1-N", score(1, "brief")),
+        attempt(2, "loud", "gpt-6.1-sol-fb1", "O1", score(2, "loud")),
+    ]
+    with pytest.raises(
+        ValueError,
+        match=re.escape("claude-sonnet-5-5 is flown as claude-sonnet-5-5-fb1, claude-sonnet-5-5-fb2"),
+    ):
+        stats_v3.collect(mixed)
+    with pytest.raises(ValueError, match="names one base arm twice"):
+        stats_v3.read_design(record("a" * 64, arms="claude-sonnet-5-5, claude-sonnet-5-5-fb2", m=8))
+
+
+def test_fifth_arm_entries_agree_with_the_registry_when_it_has_them() -> None:
+    from lost_in_place.llm.registry import load_models
+
+    models = load_models()
+    if "claude-sonnet-5-5" not in models:
+        pytest.skip("this build's models.yaml has no claude-sonnet-5-5 yet")
+    assert {m for m in models if m.startswith("claude-sonnet-5-5")} == set(stats_v3.SONNET_ENTRIES)
+    assert set(stats_v3.SMOKE_ONLY) <= set(models)
+
+
 def test_gpt_entries_agree_with_the_registry_when_it_has_the_gpt_arm() -> None:
     from lost_in_place.llm.registry import load_models
 
@@ -503,17 +533,120 @@ def test_verdicts_levels_and_readings_for_one_arm() -> None:
     ]
 
 
-def test_the_wave_wide_column_uses_m_from_the_design() -> None:
+@pytest.mark.parametrize(
+    ("m", "level", "z"), [(20, 0.9975, 3.023), (16, 0.996875, 2.955), (12, 0.995833, 2.865)]
+)
+def test_the_wave_wide_column_uses_m_from_the_design(m: int, level: float, z: float) -> None:
+    others = ("gpt-6.1-sol", "qwen3-4b-student", "qwen3-4b-zero-shot", "claude-sonnet-5-5")[: m // 4 - 1]
     data = stats_v3.collect(wave() + scripted())
-    result = stats_v3.analyse(data, Design((ARM, "b", "c", "d"), 16, 120), resamples=50)
+    result = stats_v3.analyse(data, Design((ARM, *others), m, 120, dropped=others), resamples=50)
+    assert result["analysis"]["levels"]["wave"] == level and round(result["analysis"]["z"]["wave"], 3) == z
     h4d = result["arms"][ARM]["contrasts"]["H4d(i)"]
-    assert h4d["wave"]["level"] == round(1 - 0.05 / 16, 6) and result["analysis"]["m"] == 16
+    assert (
+        h4d["wave"]["level"] == round(1 - 0.05 / m, 6)
+        and h4d["wave"]["m"] == m
+        and result["analysis"]["m"] == m
+    )
     assert h4d["wave"]["ci_pts"][0] < h4d["ci_pts"][0] and h4d["wave"]["ci_pts"][1] > h4d["ci_pts"][1]
-    assert result["inputs"]["confirmatory_arms_without_data"] == ["b", "c", "d"]
+    assert result["inputs"]["confirmatory_arms_without_data"] == sorted(others)
+    assert result["analysis"]["dropped_arms"] == list(others)
+
+
+def test_five_confirmatory_arms_with_two_fallback_entries_flown() -> None:
+    attempts = wave() + wave("gpt-6.1-sol-fb2") + wave("claude-sonnet-5-5-fb1") + scripted()
+    arms = f"{ARM}, gpt-6.1-sol, claude-sonnet-5-5-fb1, qwen3-4b-student, b"
+    design = stats_v3.read_design(record("a" * 64, arms=arms, m=20, dropped="b"))
+    assert design.live == (ARM, "claude-sonnet-5-5", "gpt-6.1-sol", "qwen3-4b-student")
+    data = stats_v3.collect(attempts)
+    assert data.entries["claude-sonnet-5-5"] == "claude-sonnet-5-5-fb1"
+    with pytest.raises(stats_v3.Unsettled, match=r"qwen3-4b-student \(no scored results\)"):
+        stats_v3.analyse(data, design, resamples=20)
+    design = stats_v3.read_design(record("a" * 64, arms=arms, m=20, dropped="qwen3-4b-student, b"))
+    result = stats_v3.analyse(data, design, resamples=20)
+    assert result["analysis"]["z"]["wave"] == pytest.approx(3.023, abs=5e-4)
+    for arm in (ARM, "gpt-6.1-sol", "claude-sonnet-5-5"):
+        c = result["arms"][arm]["contrasts"]
+        assert result["arms"][arm]["role"] == "confirmatory" and c["H4d(i)"]["wave"]["m"] == 20
+        assert c["P-R"]["verdict"] == "confirmed"
+
+
+def test_a_deferred_arm_refuses_the_analysis_until_settled_or_dropped(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    sonnet = wave("claude-sonnet-5-5")
+    data = stats_v3.collect(wave() + scripted())
+    design = Design((ARM, "claude-sonnet-5-5"), 8, 120)
+    with pytest.raises(stats_v3.Unsettled, match=r"claude-sonnet-5-5 \(no scored results\)"):
+        stats_v3.analyse(data, design, resamples=20)
+    planned = [a for a in wave() + scripted() + sonnet if a.cell[4] in ("O0", "O1")]
+    partial = stats_v3.collect(wave() + scripted() + sonnet[:50], entries_for(planned))
+    with pytest.raises(stats_v3.Unsettled, match=r"claude-sonnet-5-5 \(\d+ manifest episodes not started\)"):
+        stats_v3.analyse(partial, design, resamples=20)
+    drop = Design(design.confirmatory, 8, 120, dropped=("claude-sonnet-5-5",))
+    dropped = stats_v3.analyse(stats_v3.collect(wave() + scripted() + sonnet[:50]), drop, resamples=20)
+    arm = dropped["arms"]["claude-sonnet-5-5"]
+    assert arm["role"] == "dropped" and arm["readings"] == []
+    assert all(c["verdict"] is None and c["no_verdict"] == "dropped arm" for c in arm["contrasts"].values())
+    assert dropped["arms"][ARM]["contrasts"]["H4d(i)"]["wave"]["m"] == 8
+    root = checkout(tmp_path / "repo", stats_v3.script_sha256(), signoff=True)
+    (root / stats_v3.SPEC_V3).write_text(
+        record(stats_v3.script_sha256(), arms=f"{ARM}, claude-sonnet-5-5", m=8)
+    )
+    write_runs(tmp_path / "runs", wave(n=40) + scripted(40))
+    assert cli.main(["stats", str(tmp_path / "runs"), "--design", "v3", "--root", str(root)]) == 3
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == (
+        "refusing to print E5 outcomes: confirmatory arms neither settled nor in the record's dropped arms:"
+        " claude-sonnet-5-5 (no scored results)\n"
+    )
+
+
+def test_incomplete_episodes_are_flagged_loudly() -> None:
+    attempts = [a for a in wave() if not (a.scenario_id == "c004_loud" and a.cell[4] == "O1L")]
+    attempts.append(attempt(4, "loud", ARM, "O1-L", None, outcome="timeout"))
+    result = stats_v3.analyse(stats_v3.collect(attempts + scripted()), DESIGN, resamples=20)
+    assert result["inputs"]["incomplete_episodes"] == {ARM: 1}
+    assert (
+        f"**Incomplete episodes (attempted, no result, fewer than 3 attempts): {ARM} (1).**"
+        in stats_v3.markdown(result)
+    )
+
+
+def test_the_smoke_only_haiku_is_never_an_e5_arm() -> None:
+    haiku = attempt(0, "loud", "claude-haiku-5-5", "O1", score(0, "loud"))
+    for attempts in ([haiku], [canary(haiku)]):
+        with pytest.raises(ValueError, match="smoke-only entry claude-haiku-5-5"):
+            stats_v3.collect([*attempts, attempt(1, "loud", ARM, "O1", score(1, "loud"))])
+    cell = (*haiku.cell[:2], "claude-haiku-5-5", "none", "O1")
+    llm = Attempt(haiku.key, "attempt1", 1.0, "completed", haiku.scenario_id, cell, None)
+    with pytest.raises(ValueError, match="smoke-only"):
+        stats_v3.collect([llm])
+    with pytest.raises(ValueError, match="smoke-only"):
+        stats_v3.read_design(record("a" * 64, arms=f"{ARM}, claude-haiku-5-5", m=8))
+    stats_v3.check_not_smoke_only("dexi-claude-haiku-5-50.driver-dexi.prompt-dexi-v2")
+
+
+def test_dropped_arms_are_read_from_the_record() -> None:
+    spec = record(
+        "a" * 64,
+        arms="gpt-6.1-sol-fb1, claude-sonnet-5-5, " + ARM,
+        m=12,
+        dropped="gpt-6.1-sol, claude-sonnet-5-5-fb2",
+    )
+    assert stats_v3.read_design(spec) == Design(
+        (ARM, "claude-sonnet-5-5", "gpt-6.1-sol"), 12, 120, dropped=("claude-sonnet-5-5", "gpt-6.1-sol")
+    )
+    with pytest.raises(ValueError, match="no value for Dropped arms"):
+        stats_v3.read_design(record("a" * 64, dropped=None))
+    with pytest.raises(ValueError, match="dropped arms b are not confirmatory arms"):
+        stats_v3.read_design(record("a" * 64, dropped="b"))
+    with pytest.raises(ValueError, match="no confirmatory arms"):
+        stats_v3.read_design(record("a" * 64, arms="none", m=0))
 
 
 def test_a_descriptive_arm_gets_estimates_and_no_verdicts() -> None:
-    data = stats_v3.collect(wave("qwen3-4b-zero-shot") + scripted())
+    data = stats_v3.collect(wave() + wave("qwen3-4b-zero-shot") + scripted())
     arm = stats_v3.analyse(data, DESIGN, resamples=50)["arms"]["qwen3-4b-zero-shot"]
     assert arm["role"] == "descriptive" and arm["readings"] == []
     assert all(
@@ -763,13 +896,16 @@ def test_markdown_has_every_section() -> None:
 # --- the blinding gate and the CLI --------------------------------------------------------------
 
 
-def record(sha: str | None, arms: str = ARM, m: int | None = 4, n: int = 120) -> str:
+def record(
+    sha: str | None, arms: str = ARM, m: int | None = 4, n: int = 120, dropped: str | None = "none"
+) -> str:
     rows = [
         ("This file", ""),
         (stats_v3.ANALYSIS_ROW, f"`{sha}`" if sha else ""),
         (stats_v3.ARMS_ROW, f"`{arms}`"),
         (stats_v3.M_ROW, "" if m is None else f"`{m}`"),
         (stats_v3.N_ROW, f"`{n}`"),
+        (stats_v3.DROPPED_ROW, "" if dropped is None else f"`{dropped}`"),
     ]
     table = "\n".join(f"| {k} | {v} |" for k, v in rows)
     return f"# SPEC 0.2\n\n## Freeze record\n\n| Artifact | Value |\n|---|---|\n{table}\n\n## Amendment log\n"
@@ -1068,8 +1204,8 @@ def test_gates_refuse_any_other_arm_before_reading_a_score(
     assert f"the input also holds dexi-{ARM}.driver-dexi.prompt-dexi-v2-none-O1" in err
 
 
-def write_manifest(path: Path, attempts: list[Attempt]) -> Path:
-    entries = [
+def entries_for(attempts: list[Attempt]) -> list[Entry]:
+    return [
         Entry(
             scenario=f"scenarios/e5/t0/families/{a.scenario_id}.yaml",
             scenario_id=a.scenario_id,
@@ -1081,6 +1217,10 @@ def write_manifest(path: Path, attempts: list[Attempt]) -> Path:
         )
         for a in attempts
     ]
+
+
+def write_manifest(path: Path, attempts: list[Attempt]) -> Path:
+    entries = entries_for(attempts)
     assert [e.key for e in entries] == [a.key for a in attempts]
     path.write_text(json.dumps({"entries": [asdict(e) for e in entries]}))
     return path

@@ -342,14 +342,23 @@ def _cmd_stats_v3(args: argparse.Namespace) -> int:
         return 1
     for cell, count in sorted(data.off_ladder.items()):
         print(f"excluded {count} episodes off the ladder: {cell}", file=sys.stderr)
-    result = stats_v3.analyse(
-        data,
-        design,
-        resamples=args.resamples,
-        seed=args.seed,
-        inputs=inputs,
-        pin={"sha256": status["sha256"], "pinned": True},
-    )
+    try:
+        result = stats_v3.analyse(
+            data,
+            design,
+            resamples=args.resamples,
+            seed=args.seed,
+            inputs=inputs,
+            pin={"sha256": status["sha256"], "pinned": True},
+        )
+    except stats_v3.Unsettled as exc:
+        print(f"refusing to print E5 outcomes: {exc}", file=sys.stderr)
+        return 3
+    for arm, count in result["inputs"]["incomplete_episodes"].items():
+        print(
+            f"{arm} has {count} incomplete episodes (attempted, no result, fewer than 3 attempts)",
+            file=sys.stderr,
+        )
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.with_suffix(".json").write_text(stats_v3.dumps(result))

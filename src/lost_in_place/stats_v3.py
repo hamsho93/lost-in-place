@@ -24,8 +24,9 @@ O1R is O0, O1, O1-L, O1-N and O1-R; `dexi-9b2e7a7` with O0 and O1 is O0-V and O1
 other pair (`dexi-9b2e7a7` at O1L, say) is off the ladder: it is excluded, counted and named in the
 report, never mapped. A non-DEXI arm key, or a validator other than `none`, is outside the design and
 only counted. The GPT arm is whichever of `gpt-6.1-sol` and its three pre-declared fallback entries
-the smoke call accepted (design 9.2); all four are the base arm `gpt-6.1-sol`, and an analysis holding
-two of them is refused. The condition is the scenario
+the smoke call accepted (design 9.2), and the Sonnet 5.5 arm likewise of `claude-sonnet-5-5` and its
+two; each entry is its base arm, and an analysis holding two entries of one arm is refused, as is any
+input holding the smoke-only `claude-haiku-5-5`. The condition is the scenario
 id's suffix (`c000_loud`, `c000_loud_timed`). The family is the scenario id up to its first `_`;
 canary families (`k000`-`k005`) are never analysed. There is one episode per family per cell.
 
@@ -45,7 +46,12 @@ is defined for 95% of the families in both cells, and gets no verdict otherwise.
 judged on `csa` and needs `manipulation_decision_ok` in 95% of each cell ("manipulation failed"
 otherwise). A brief guard needs `manipulation_ok` in 95% of each cell. Shares are over the families
 with a result in both cells. If the scripted control's gates fail or are missing, no arm gets a
-verdict. A descriptive arm never gets one.
+verdict. A descriptive arm never gets one, nor does an arm in the record's dropped arms (a deferred
+arm whose month was not approved; it stays in m, as tagged).
+
+**Deferred arms.** Nothing is analysed while a confirmatory arm that is not dropped has no scored
+result or a manifest episode not yet started (`settlement`): every deferred arm settles or is dropped
+first, and there is one analysis run.
 
 **Missing cells.** A family without a result in one cell of a contrast leaves only that contrast; it is
 counted there, as `missing`, against the families expected in either cell.
@@ -85,6 +91,8 @@ ANALYSIS_ROW = f"Analysis script (`{SCRIPT}`)"
 ARMS_ROW = "Confirmatory arms"
 M_ROW = "Wave-wide m"
 N_ROW = "Families (N)"
+DROPPED_ROW = "Dropped arms"
+NO_ARMS = "none"
 
 ALPHA = 0.05
 DELTA = 0.10
@@ -116,7 +124,10 @@ LEVELS = tuple(LADDER)
 ARM_KEY = re.compile(r"dexi-(?P<model>.+)\.driver-dexi\.prompt-(?P<prompt>[^.]+)")
 GPT_ARM = "gpt-6.1-sol"
 GPT_ENTRIES = (GPT_ARM, f"{GPT_ARM}-fb1", f"{GPT_ARM}-fb2", f"{GPT_ARM}-fb3")
-BASE_ARM = dict.fromkeys(GPT_ENTRIES, GPT_ARM)
+SONNET_ARM = "claude-sonnet-5-5"
+SONNET_ENTRIES = (SONNET_ARM, f"{SONNET_ARM}-fb1", f"{SONNET_ARM}-fb2")
+BASE_ARM = dict.fromkeys(GPT_ENTRIES, GPT_ARM) | dict.fromkeys(SONNET_ENTRIES, SONNET_ARM)
+SMOKE_ONLY = ("claude-haiku-5-5",)
 CONDITIONS = ("loud", "loud_timed", "brief", "healthy", "flowscale", "misaligned")
 SCRIPTED = ("rule-2m", "rule-leg")
 CAUTIOUS = "scripted-cautious"
@@ -146,8 +157,16 @@ def ladder_level(observation: str, prompt_version: str) -> str | None:
 
 
 def base_arm(model: str) -> str:
-    """The arm a model entry flies as: a GPT fallback entry is the GPT arm."""
+    """The arm a model entry flies as: a pre-declared fallback entry (GPT-6.1 Sol's, Sonnet 5.5's) is
+    its arm."""
     return BASE_ARM.get(model, model)
+
+
+def check_not_smoke_only(arm: str) -> None:
+    """Raise for an arm of a smoke-only registry entry, which is never part of E5."""
+    smoke = [s for s in SMOKE_ONLY if re.search(rf"(^|-){re.escape(s)}($|[.-])", arm)]
+    if smoke:
+        raise ValueError(f"{arm} is the smoke-only entry {smoke[0]}, never an E5 arm")
 
 
 def level_of(arm_key: str, observation: str) -> tuple[str, str] | None:
@@ -252,6 +271,7 @@ def collect(
     flown: dict[str, set[str]] = defaultdict(set)
     for key in sorted(planned):
         scenario_id, arm, validator, observation = planned[key]
+        check_not_smoke_only(arm)
         family = family_of(scenario_id)
         is_canary = family.startswith(CANARY_PREFIX)
         if is_canary != canary:
@@ -541,18 +561,31 @@ def rate(scores: Iterable[Score], metric: Metric) -> dict[str, Any] | None:
 
 @dataclass(frozen=True)
 class Design:
-    """What the freeze-v3 record fixes for the analysis (A-2, A-3 to A-5)."""
+    """What the freeze-v3 record fixes for the analysis (A-2, A-3 to A-5). A dropped arm (a deferred
+    arm whose month was not approved, section 10.4) stays in m, as tagged, and gets no verdicts."""
 
     confirmatory: tuple[str, ...]
     m: int
     n: int
+    dropped: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
+        if not self.confirmatory:
+            raise ValueError("no confirmatory arms")
         if self.m != PRIMARIES_PER_ARM * len(self.confirmatory):
             arms = len(self.confirmatory)
             raise ValueError(f"wave-wide m {self.m} is not {PRIMARIES_PER_ARM} x {arms} confirmatory arms")
         if self.n <= 0:
             raise ValueError(f"N must be positive, got {self.n}")
+        stray = sorted(set(self.dropped) - set(self.confirmatory))
+        if stray:
+            raise ValueError(f"dropped arms {', '.join(stray)} are not confirmatory arms")
+        for arm in self.confirmatory:
+            check_not_smoke_only(arm)
+
+    @property
+    def live(self) -> tuple[str, ...]:
+        return tuple(a for a in self.confirmatory if a not in self.dropped)
 
 
 _ROW = re.compile(r"^\| (?P<artifact>.+?) \| (?P<value>[^|]*?) ?\|$")
@@ -574,16 +607,27 @@ def record_rows(spec_text: str) -> dict[str, str]:
     return rows
 
 
-def read_design(spec_text: str) -> Design:
-    rows = record_rows(spec_text)
-    missing = [row for row in (ARMS_ROW, M_ROW, N_ROW) if not rows.get(row)]
-    if missing:
-        raise ValueError(f"{SPEC_V3}'s freeze record has no value for {', '.join(missing)}")
-    named = [a.strip().strip("`") for a in rows[ARMS_ROW].split(",") if a.strip()]
+def _arms(rows: dict[str, str], row: str) -> tuple[str, ...]:
+    named = [a.strip().strip("`") for a in rows[row].split(",") if a.strip()]
+    if named == [NO_ARMS]:
+        return ()
     arms = tuple(sorted({base_arm(a) for a in named}))
     if len(arms) != len(named):
-        raise ValueError(f"{SPEC_V3}'s {ARMS_ROW} names one base arm twice: {', '.join(named)}")
-    return Design(confirmatory=arms, m=int(rows[M_ROW]), n=int(rows[N_ROW]))
+        raise ValueError(f"{SPEC_V3}'s {row} names one base arm twice: {', '.join(named)}")
+    return arms
+
+
+def read_design(spec_text: str) -> Design:
+    rows = record_rows(spec_text)
+    missing = [row for row in (ARMS_ROW, M_ROW, N_ROW, DROPPED_ROW) if not rows.get(row)]
+    if missing:
+        raise ValueError(f"{SPEC_V3}'s freeze record has no value for {', '.join(missing)}")
+    return Design(
+        confirmatory=_arms(rows, ARMS_ROW),
+        m=int(rows[M_ROW]),
+        n=int(rows[N_ROW]),
+        dropped=_arms(rows, DROPPED_ROW),
+    )
 
 
 def script_sha256() -> str:
@@ -1083,11 +1127,35 @@ def pr_status(contrast: dict[str, Any], bar: dict[str, Any] | None) -> str:
     return str(v)
 
 
+class Unsettled(ValueError):
+    """A confirmatory arm that is neither settled nor dropped: nothing is unblinded until it is."""
+
+
+def settlement(data: Data, design: Design) -> dict[str, Any]:
+    """Each live confirmatory arm's unsettled episodes. An arm with no scored result, or with a
+    manifest episode not yet started, is unsettled (a deferred arm still to fly, or flying); one with
+    incomplete episodes (attempts, none a result, fewer than 3) is reported, since the submitter can
+    settle an index on 3 submissions."""
+    unsettled, incomplete = {}, {}
+    for arm in design.live:
+        cells = [c for c in set(data.expected) | set(data.results) if c.arm == arm]
+        results = sum(len(data.results.get(c, {})) for c in cells)
+        harness = sum((data.harness.get(c, Counter()) for c in cells), Counter())
+        if not results:
+            unsettled[arm] = "no scored results"
+        elif harness["not_started"]:
+            unsettled[arm] = f"{harness['not_started']} manifest episodes not started"
+        if harness["incomplete"]:
+            incomplete[arm] = harness["incomplete"]
+    return {"unsettled": unsettled, "incomplete": incomplete}
+
+
 def analyse_arm(
     data: Data, arm: str, design: Design, withheld: str | None, resamples: int, seed: int
 ) -> dict[str, Any]:
-    confirmatory = arm in design.confirmatory
-    reason = withheld if confirmatory else "descriptive arm"
+    dropped = arm in design.dropped
+    confirmatory = arm in design.confirmatory and not dropped
+    reason = withheld if confirmatory else ("dropped arm" if dropped else "descriptive arm")
     contrasts = {}
     for c in CONFIRMATORY:
         level = PRIMARY_LEVEL if c.role == "primary" else LEVEL_95
@@ -1126,7 +1194,7 @@ def analyse_arm(
     }
     out: dict[str, Any] = {
         "arm": arm,
-        "role": "confirmatory" if confirmatory else "descriptive",
+        "role": "confirmatory" if confirmatory else ("dropped" if dropped else "descriptive"),
         "contrasts": contrasts,
         "P-R": {"wilson_O1-R": bar, "status": pr_status(pr, bar)},
         "estimates": estimates,
@@ -1144,6 +1212,13 @@ def analyse(
     inputs: dict[str, Any] | None = None,
     pin: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """The whole analysis. Raises `Unsettled` while a live confirmatory arm is unsettled."""
+    settled = settlement(data, design)
+    if settled["unsettled"]:
+        raise Unsettled(
+            "confirmatory arms neither settled nor in the record's dropped arms: "
+            + "; ".join(f"{arm} ({why})" for arm, why in sorted(settled["unsettled"].items()))
+        )
     gates = scripted_gates(data, design.n)
     withheld = None
     if gates["G-S"] != "passes":
@@ -1167,6 +1242,7 @@ def analyse(
                 "wave": _r(z_for(wave_level(design.m))),
             },
             "confirmatory_arms": list(design.confirmatory),
+            "dropped_arms": list(design.dropped),
             "m": design.m,
             "n": design.n,
             "resamples": resamples,
@@ -1182,6 +1258,7 @@ def analyse(
             "arm_entries": data.entries,
             "canary_episodes": data.canary_episodes,
             "confirmatory_arms_without_data": sorted(set(design.confirmatory) - set(arms)),
+            "incomplete_episodes": settled["incomplete"],
             "strata": dict(sorted(Counter(data.strata.values()).items())),
         },
         "gates": gates,
@@ -1346,7 +1423,9 @@ def markdown(result: dict[str, Any]) -> str:
         f"Script `{a['script']}` SHA-256 `{a.get('sha256', '')}`. delta {a['delta_pts']:.0f} points. "
         f"Primaries at {100 * a['levels']['primary']:.2f}%, P-R and guards at 95%, the wave-wide column at "
         f"{100 * a['levels']['wave']:.2f}% (m = {a['m']}). "
-        f"Confirmatory arms: {', '.join(a['confirmatory_arms'])}. N = {a['n']}. "
+        f"Confirmatory arms: {', '.join(a['confirmatory_arms'])}"
+        + (f" (dropped: {', '.join(a['dropped_arms'])})" if a["dropped_arms"] else "")
+        + f". N = {a['n']}. "
         f"{a['resamples']} family resamples, seed {a['seed']}.",
         "",
         f"Inputs: {', '.join(i.get('runs', [])) or '-'}"
@@ -1360,6 +1439,9 @@ def markdown(result: dict[str, Any]) -> str:
     if i["off_ladder"]:
         cells = ", ".join(f"{cell} ({n})" for cell, n in i["off_ladder"].items())
         lines += [f"**Excluded, off the ladder (not a design cell): {cells}.**", ""]
+    if i["incomplete_episodes"]:
+        arms = ", ".join(f"{arm} ({n})" for arm, n in i["incomplete_episodes"].items())
+        lines += [f"**Incomplete episodes (attempted, no result, fewer than 3 attempts): {arms}.**", ""]
     if a["verdicts_withheld"]:
         lines += [f"**No verdicts: {a['verdicts_withheld']}.**", ""]
     lines += ["## Scripted control (counts out of N)", ""]
