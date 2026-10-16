@@ -1,29 +1,32 @@
-"""The freeze-v3 adaptation rules A-2 to A-5 (design sections 2.3 and 9.3), from whitelisted inputs only.
+"""The freeze-v3 adaptation rules A-2 to A-5 (design sections 2.3 and 9.3, and the fifth-arm
+amendment), from whitelisted inputs only.
 
 Inputs, none of them an outcome column (section 2.5):
 - `--phase0`: `e5_phase0.py summarise` (discordance, r_tr, invalid rates; retired families only);
-- `--smoke`: the GPT-6.1 Sol smoke-call record, `{"tried": [{"entry": ..., "result": "accepted" |
-  "rejected", "error": ...}, ...]}` in the section 9.2 order;
+- `--smoke`: the smoke-call record of both smoked arms, `{"gpt-6.1-sol": {"tried": [...]},
+  "claude-sonnet-5-5": {"tried": [...]}}`, each try `{"entry": ..., "result": "accepted" |
+  "rejected", "error": ...}` in that arm's fallback order (section 9.2); an arm left out was not tried;
 - `--canary`: `e5_admission.py canary-health` (per canary arm: planner calls, invalid calls,
   `manipulation_decision_ok` on loud, `manipulation_ok` on brief, metered dollars).
 
 The rules, in the order the design applies them:
-- A-3, GPT-6.1 Sol: (1) a smoke call accepted in the section 9.2 order; (2) invalid planner calls at
-  most 2% in its Phase 0 action calls and in its canary; (3) canary loud `manipulation_decision_ok`
-  in at least 40 of 42 episodes and brief `manipulation_ok` in at least 35 of 36; (4) canary cost at
-  most $0.060 per episode; (5) if its entry has no temperature, refute power at 98.75% under a null
-  with r = r_tr, at the wave's N, at least 60%. Confirmatory if all hold; not run if 1 or 4 fails;
-  otherwise descriptive. A-3 comes before A-2, so check 5 is taken at the N that A-2 gives from
-  Claude alone; admitting GPT can only raise N, and refute power rises with N.
-- A-2, N: 160 if, for Claude or a confirmatory GPT-6.1 Sol, any rung (O1-L, O1-N, O1-R, O1-V) against
-  O1, in loud or in brief, has more than 10% of prompts discordant in each direction; else 120.
+- A-3 (GPT-6.1 Sol) and A-3b (Claude Sonnet 5.5), the same checks and thresholds: (1) a smoke call
+  accepted in the arm's fallback order; (2) invalid planner calls at most 2% in its Phase 0 action
+  calls and in its canary; (3) canary loud `manipulation_decision_ok` in at least 40 of 42 episodes
+  and brief `manipulation_ok` in at least 35 of 36; (4) canary cost at most $0.060 per episode; (5) if
+  its entry has no temperature, refute power at 98.75% under a null with r = r_tr, at the wave's N, at
+  least 60%. Confirmatory if all hold; not run if 1 or 4 fails; otherwise descriptive. Both come
+  before A-2, so check 5 is taken at the N that A-2 gives from Claude Sonnet 4.6 alone; admitting an
+  arm can only raise N, and refute power rises with N.
+- A-2, N: 160 if, for Claude Sonnet 4.6 or a confirmatory smoked arm, any rung (O1-L, O1-N, O1-R, O1-V)
+  against O1, in loud or in brief, has more than 10% of prompts discordant in each direction; else 120.
 - A-4, each existing arm: descriptive if more than 2% of its canary planner calls are invalid.
-- A-5: m = 4 x the confirmatory arms.
+- A-5: m = 4 x the confirmatory arms, at most 20.
 
     uv run --extra aws python scripts/e5_admission.py canary-health s3://<bucket>/runs --template t1 \\
-        --usd gpt-6.1-sol=4.10 --out runs/canary/health.json
+        --usd gpt-6.1-sol=4.10 --usd claude-sonnet-5-5-fb1=3.50 --out runs/canary/health.json
     uv run python scripts/e5_admission.py decide --phase0 runs/phase0/phase0.json \\
-        --smoke runs/smoke/gpt.json --canary runs/canary/health.json --out runs/adaptation/a2-a5.json
+        --smoke runs/smoke/smoke.json --canary runs/canary/health.json --out runs/adaptation/a2-a5.json
 """
 
 from __future__ import annotations
@@ -42,8 +45,13 @@ from lost_in_place.llm.registry import get_model
 
 CLAUDE = "claude-sonnet-4-6"
 EXISTING_ARMS = ("qwen3-4b-student", "qwen3-4b-zero-shot", CLAUDE)
-GPT_ENTRIES = ("gpt-6.1-sol", "gpt-6.1-sol-fb1", "gpt-6.1-sol-fb2", "gpt-6.1-sol-fb3")
-CANARY_ARMS = (*EXISTING_ARMS, *GPT_ENTRIES)
+GPT_ARM, SONNET55_ARM = "gpt-6.1-sol", "claude-sonnet-5-5"
+GPT_ENTRIES = (GPT_ARM, f"{GPT_ARM}-fb1", f"{GPT_ARM}-fb2", f"{GPT_ARM}-fb3")
+SONNET55_ENTRIES = (SONNET55_ARM, f"{SONNET55_ARM}-fb1", f"{SONNET55_ARM}-fb2")
+# Each smoked arm, its fallback order, and the rule that admits it.
+SMOKED = {GPT_ARM: GPT_ENTRIES, SONNET55_ARM: SONNET55_ENTRIES}
+RULES = {GPT_ARM: "A-3", SONNET55_ARM: "A-3b"}
+CANARY_ARMS = (*EXISTING_ARMS, *GPT_ENTRIES, *SONNET55_ENTRIES)
 RUNGS = ("O1-L", "O1-N", "O1-R", "O1-V")
 STATES = ("loud", "brief")
 NS = (120, 160)
@@ -56,6 +64,7 @@ RETEST_POWER_AT_LEAST = 0.60
 PRIMARY_LEVEL = 1 - 0.05 / 4
 DELTA = 0.10
 HYPOTHESES_PER_ARM = 4
+MAX_M = 20
 CONFIRMATORY, DESCRIPTIVE, NOT_RUN = "confirmatory", "descriptive", "not run"
 # Section 2.5: the only score.json fields the canary-health report keeps.
 CANARY_SCORE_FIELDS = ("n_planner_calls", "n_invalid", "manipulation_ok", "manipulation_decision_ok")
@@ -122,14 +131,14 @@ def a2(phase0: dict[str, Any], models: list[str]) -> dict[str, Any]:
     return {"models": models, "checked": checked, "triggers": triggers, "N": NS[1] if triggers else NS[0]}
 
 
-def smoke_entry(smoke: dict[str, Any]) -> tuple[str | None, list[str]]:
-    """The accepted entry, after checking the record follows section 9.2's order: entries tried in
-    `GPT_ENTRIES` order, each after the one before it was rejected, ending at the first accepted."""
+def smoke_entry(smoke: dict[str, Any], entries: tuple[str, ...]) -> tuple[str | None, list[str]]:
+    """The accepted entry, after checking the arm's record follows its fallback order: `entries` tried
+    in order, each after the one before it was rejected, ending at the first accepted."""
     problems = []
     tried = smoke.get("tried", [])
     for i, t in enumerate(tried):
-        if i >= len(GPT_ENTRIES) or t.get("entry") != GPT_ENTRIES[i]:
-            problems.append(f"try {i + 1} is {t.get('entry')!r}, the order is {', '.join(GPT_ENTRIES)}")
+        if i >= len(entries) or t.get("entry") != entries[i]:
+            problems.append(f"try {i + 1} is {t.get('entry')!r}, the order is {', '.join(entries)}")
         if t.get("result") not in ("accepted", "rejected"):
             problems.append(f"try {i + 1}: result must be accepted or rejected")
         if t.get("result") == "accepted" and i != len(tried) - 1:
@@ -138,8 +147,13 @@ def smoke_entry(smoke: dict[str, Any]) -> tuple[str | None, list[str]]:
     return (None if problems else accepted), problems
 
 
-def a3(phase0: dict[str, Any], smoke: dict[str, Any], canary: dict[str, Any], n: int) -> dict[str, Any]:
-    entry, problems = smoke_entry(smoke)
+def a3(
+    phase0: dict[str, Any], smoke: dict[str, Any], canary: dict[str, Any], n: int, arm: str = GPT_ARM
+) -> dict[str, Any]:
+    """A-3 for GPT-6.1 Sol, or A-3b for Claude Sonnet 5.5: `smoke` is the whole record."""
+    if not isinstance(smoke.get(arm, {}), dict) or set(smoke) - set(SMOKED):
+        raise SystemExit(f"smoke record: give {{arm: {{'tried': [...]}}}} for arms among {', '.join(SMOKED)}")
+    entry, problems = smoke_entry(smoke.get(arm, {}), SMOKED[arm])
     checks: dict[str, Any] = {"1_smoke_call": _check(entry is not None, accepted=entry, problems=problems)}
     p0 = phase0["models"].get(entry or "")
     can = canary["arms"].get(entry or "")
@@ -188,7 +202,7 @@ def a3(phase0: dict[str, Any], smoke: dict[str, Any], canary: dict[str, Any], n:
         status = CONFIRMATORY
     else:
         status = DESCRIPTIVE
-    return {"entry": entry, "checks": checks, "status": status}
+    return {"rule": RULES[arm], "arm": arm, "entry": entry, "checks": checks, "status": status}
 
 
 def a4(canary: dict[str, Any]) -> dict[str, Any]:
@@ -215,25 +229,23 @@ def arm_key(model: str) -> str:
 
 def decide(phase0: dict[str, Any], smoke: dict[str, Any], canary: dict[str, Any]) -> dict[str, Any]:
     n_before = a2(phase0, [CLAUDE])["N"]
-    gpt = a3(phase0, smoke, canary, n_before)
-    models = [CLAUDE, *([gpt["entry"]] if gpt["status"] == CONFIRMATORY else [])]
-    n_rule = a2(phase0, models)
-    retest = gpt["checks"]["5_retest"]
-    if retest.get("required") and "r_tr" in retest and n_rule["N"] != n_before:
-        retest["refute_power_at_wave_n"] = round(refute_power(n_rule["N"], retest["r_tr"]), 4)
+    smoked = {arm: a3(phase0, smoke, canary, n_before, arm) for arm in SMOKED}
+    admitted = [r["entry"] for r in smoked.values() if r["status"] == CONFIRMATORY]
+    n_rule = a2(phase0, [CLAUDE, *admitted])
+    for r in smoked.values():
+        retest = r["checks"]["5_retest"]
+        if retest.get("required") and "r_tr" in retest and n_rule["N"] != n_before:
+            retest["refute_power_at_wave_n"] = round(refute_power(n_rule["N"], retest["r_tr"]), 4)
     existing = a4(canary)
-    confirmatory = [a for a in EXISTING_ARMS if existing[a]["status"] == CONFIRMATORY]
-    if gpt["status"] == CONFIRMATORY:
-        confirmatory.append(gpt["entry"])
+    confirmatory = [a for a in EXISTING_ARMS if existing[a]["status"] == CONFIRMATORY] + admitted
+    m = HYPOTHESES_PER_ARM * len(confirmatory)
+    assert m <= MAX_M
     return {
-        "A-3": gpt,
+        **{RULES[arm]: r for arm, r in smoked.items()},
         "A-2": n_rule,
         "A-4": existing,
-        "A-5": {
-            "confirmatory_arms": [arm_key(a) for a in confirmatory],
-            "m": HYPOTHESES_PER_ARM * len(confirmatory),
-        },
-        "order": "A-3 (check 5 at the N A-2 gives from Claude alone), then A-2, A-4, A-5",
+        "A-5": {"confirmatory_arms": [arm_key(a) for a in confirmatory], "m": m, "max_m": MAX_M},
+        "order": "A-3 and A-3b (check 5 at the N A-2 gives from Claude Sonnet 4.6 alone), then A-2, A-4, A-5",
     }
 
 

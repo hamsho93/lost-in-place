@@ -55,19 +55,46 @@ def _arm(
     }
 
 
+GPT, SONNET = "gpt-6.1-sol", "claude-sonnet-5-5"
+SONNET_FB1 = "claude-sonnet-5-5-fb1"
+EXISTING = ("qwen3-4b-student", "qwen3-4b-zero-shot", "claude-sonnet-4-6")
+ORDER = {
+    GPT: ("gpt-6.1-sol", "gpt-6.1-sol-fb1", "gpt-6.1-sol-fb2", "gpt-6.1-sol-fb3"),
+    SONNET: ("claude-sonnet-5-5", "claude-sonnet-5-5-fb1", "claude-sonnet-5-5-fb2"),
+}
+
+
+def _tried(arm: str, entry: str) -> dict[str, Any]:
+    order = ORDER[arm]
+    tried = [{"entry": e, "result": "rejected", "error": "400"} for e in order[: order.index(entry)]]
+    return {"tried": [*tried, {"entry": entry, "result": "accepted"}]}
+
+
 def _inputs(
-    entry: str = "gpt-6.1-sol",
+    entry: str = GPT,
+    sonnet: str = SONNET_FB1,
     claude: dict[str, Any] | None = None,
     gpt: dict[str, Any] | None = None,
+    s55: dict[str, Any] | None = None,
+    s55_canary: dict[str, Any] | None = None,
     **arm: Any,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-    phase0 = {"models": {"claude-sonnet-4-6": claude or _model(), entry: gpt or _model()}}
-    order = ("gpt-6.1-sol", "gpt-6.1-sol-fb1", "gpt-6.1-sol-fb2", "gpt-6.1-sol-fb3")
-    tried = [{"entry": e, "result": "rejected", "error": "400"} for e in order[: order.index(entry)]]
-    smoke = {"tried": [*tried, {"entry": entry, "result": "accepted"}]}
-    arms = {a: _arm() for a in ("qwen3-4b-student", "qwen3-4b-zero-shot", "claude-sonnet-4-6")}
-    canary = {"template": "t1", "arms": arms | {entry: _arm(**arm)}}
+    """Every arm passes unless changed: GPT-6.1 Sol flies `entry`, Sonnet 5.5 flies `sonnet` (its
+    expected fb1, stochastic); `arm` changes GPT's canary and `s55_canary` Sonnet 5.5's."""
+    phase0 = {
+        "models": {"claude-sonnet-4-6": claude or _model(), entry: gpt or _model(), sonnet: s55 or _model()}
+    }
+    smoke = {GPT: _tried(GPT, entry), SONNET: _tried(SONNET, sonnet)}
+    arms = {a: _arm() for a in EXISTING}
+    canary = {"template": "t1", "arms": arms | {entry: _arm(**arm), sonnet: _arm(**(s55_canary or {}))}}
     return phase0, smoke, canary
+
+
+def _for(arm: str, entry: str | None = None, model: dict[str, Any] | None = None, **canary: Any) -> Any:
+    """The inputs with one smoked arm changed: its entry, its Phase 0 summary or its canary."""
+    if arm == GPT:
+        return _inputs(entry=entry or GPT, gpt=model, **canary)
+    return _inputs(sonnet=entry or SONNET_FB1, s55=model, s55_canary=canary)
 
 
 @pytest.mark.parametrize(
@@ -99,57 +126,88 @@ def test_a2_needs_both_directions_above_ten_percent(adm: ModuleType) -> None:
         adm.a2({"models": {}}, ["m"])
 
 
-def test_gpt_discordance_raises_n_only_when_gpt_is_confirmatory(adm: ModuleType) -> None:
+@pytest.mark.parametrize(("arm", "entry"), [(GPT, GPT), (SONNET, SONNET_FB1)])
+def test_a_smoked_arms_discordance_raises_n_only_when_it_is_confirmatory(
+    adm: ModuleType, arm: str, entry: str
+) -> None:
     discordant = _model({("loud", "O1-V"): (0.15, 0.12)})
-    d = adm.decide(*_inputs(gpt=discordant))
-    assert d["A-3"]["status"] == "confirmatory" and d["A-2"]["N"] == 160
-    assert d["A-2"]["triggers"][0]["model"] == "gpt-6.1-sol"
-    d = adm.decide(*_inputs(gpt=discordant, loud=39))
-    assert (
-        d["A-3"]["status"] == "descriptive"
-        and d["A-2"]["N"] == 120
-        and d["A-2"]["models"] == ["claude-sonnet-4-6"]
-    )
+    rule = adm.RULES[arm]
+    d = adm.decide(*_for(arm, model=discordant))
+    assert d[rule]["status"] == "confirmatory" and d["A-2"]["N"] == 160
+    assert [t["model"] for t in d["A-2"]["triggers"]] == [entry]
+    d = adm.decide(*_for(arm, model=discordant, loud=39))
+    assert d[rule]["status"] == "descriptive" and d["A-2"]["N"] == 120
+    assert entry not in d["A-2"]["models"] and "claude-sonnet-4-6" in d["A-2"]["models"]
     d = adm.decide(*_inputs(claude=_model({("brief", "O1-L"): (0.2, 0.2)}), loud=39))
     assert d["A-2"]["N"] == 160
 
 
-def test_a3_confirmatory(adm: ModuleType) -> None:
-    gpt = adm.decide(*_inputs(invalid=20, loud=40, brief=35, usd=0.060 * 78))["A-3"]
-    assert gpt["status"] == "confirmatory" and gpt["entry"] == "gpt-6.1-sol"
-    assert gpt["checks"]["5_retest"] == {"ok": True, "required": False}
-    assert gpt["checks"]["4_cost"]["usd_per_episode"] == pytest.approx(0.060)
+def test_both_smoked_arms_are_decided_before_a2(adm: ModuleType) -> None:
+    d = adm.decide(*_inputs())
+    assert d["A-2"]["models"] == ["claude-sonnet-4-6", GPT, SONNET_FB1]
+    assert (d["A-3"]["rule"], d["A-3"]["arm"], d["A-3b"]["rule"], d["A-3b"]["arm"]) == (
+        "A-3",
+        GPT,
+        "A-3b",
+        SONNET,
+    )
+    assert d["order"].startswith("A-3 and A-3b")
 
 
+@pytest.mark.parametrize(("arm", "entry", "stochastic"), [(GPT, GPT, False), (SONNET, SONNET_FB1, True)])
+def test_a3_and_a3b_confirmatory(adm: ModuleType, arm: str, entry: str, stochastic: bool) -> None:
+    r = adm.decide(*_for(arm, invalid=20, loud=40, brief=35, usd=0.060 * 78))[adm.RULES[arm]]
+    assert r["status"] == "confirmatory" and r["entry"] == entry
+    assert r["checks"]["5_retest"]["required"] is stochastic and r["checks"]["5_retest"]["ok"]
+    assert r["checks"]["4_cost"]["usd_per_episode"] == pytest.approx(0.060)
+    base = adm.decide(*_for(SONNET, entry=SONNET))["A-3b"]
+    assert base["status"] == "confirmatory" and base["checks"]["5_retest"] == {"ok": True, "required": False}
+
+
+@pytest.mark.parametrize("arm", [GPT, SONNET])
 @pytest.mark.parametrize(
     ("change", "failed"),
     [
         ({"invalid": 21}, "2_invalid"),
-        ({"gpt": _model(invalid=0.03)}, "2_invalid"),
+        ({"model": _model(invalid=0.03)}, "2_invalid"),
         ({"loud": 39}, "3_manipulation"),
         ({"brief": 34}, "3_manipulation"),
-        ({"entry": "gpt-6.1-sol-fb2", "gpt": _model(r_tr=0.10)}, "5_retest"),
+        ({"model": _model(r_tr=0.10)}, "5_retest"),
     ],
 )
-def test_a3_descriptive(adm: ModuleType, change: dict[str, Any], failed: str) -> None:
-    gpt = adm.decide(*_inputs(**change))["A-3"]
-    assert gpt["status"] == "descriptive"
-    assert [k for k, v in gpt["checks"].items() if not v["ok"]] == [failed]
+def test_a3_and_a3b_descriptive(adm: ModuleType, arm: str, change: dict[str, Any], failed: str) -> None:
+    stochastic = {GPT: "gpt-6.1-sol-fb2", SONNET: SONNET_FB1}[arm]
+    r = adm.decide(*_for(arm, entry=stochastic, **change))[adm.RULES[arm]]
+    assert r["status"] == "descriptive"
+    assert [k for k, v in r["checks"].items() if not v["ok"]] == [failed]
 
 
-def test_a3_not_run(adm: ModuleType) -> None:
-    assert adm.decide(*_inputs(usd=0.07 * 78))["A-3"]["status"] == "not run"
-    assert adm.decide(*_inputs(usd=None))["A-3"]["status"] == "not run"
-    phase0, _, canary = _inputs()
-    rejected = {"tried": [{"entry": e, "result": "rejected"} for e in adm.GPT_ENTRIES]}
-    gpt = adm.decide(phase0, rejected, canary)["A-3"]
-    assert gpt["status"] == "not run" and gpt["entry"] is None
-    out_of_order = {"tried": [{"entry": "gpt-6.1-sol-fb2", "result": "accepted"}]}
-    gpt = adm.decide(*_inputs(entry="gpt-6.1-sol-fb2")[:1], out_of_order, canary)["A-3"]
-    assert gpt["status"] == "not run" and "the order is" in gpt["checks"]["1_smoke_call"]["problems"][0]
-    after_accept = {"tried": [{"entry": "gpt-6.1-sol", "result": "accepted"}, {"entry": "gpt-6.1-sol-fb1"}]}
-    _, problems = adm.smoke_entry(after_accept)
+@pytest.mark.parametrize("arm", [GPT, SONNET])
+def test_a3_and_a3b_not_run(adm: ModuleType, arm: str) -> None:
+    rule = adm.RULES[arm]
+    assert adm.decide(*_for(arm, usd=0.07 * 78))[rule]["status"] == "not run"
+    assert adm.decide(*_for(arm, usd=None))[rule]["status"] == "not run"
+    phase0, smoke, canary = _inputs()
+    rejected = smoke | {arm: {"tried": [{"entry": e, "result": "rejected"} for e in adm.SMOKED[arm]]}}
+    r = adm.decide(phase0, rejected, canary)[rule]
+    assert r["status"] == "not run" and r["entry"] is None
+    del smoke[arm]
+    assert adm.decide(phase0, smoke, canary)[rule]["status"] == "not run"
+    skipped = smoke | {arm: {"tried": [{"entry": adm.SMOKED[arm][1], "result": "accepted"}]}}
+    r = adm.decide(phase0, skipped, canary)[rule]
+    assert r["status"] == "not run" and "the order is" in r["checks"]["1_smoke_call"]["problems"][0]
+
+
+def test_the_smoke_record_is_checked(adm: ModuleType) -> None:
+    after_accept = {"tried": [{"entry": GPT, "result": "accepted"}, {"entry": "gpt-6.1-sol-fb1"}]}
+    _, problems = adm.smoke_entry(after_accept, adm.GPT_ENTRIES)
     assert any("nothing after it" in p for p in problems)
+    haiku = {"tried": [{"entry": "claude-sonnet-5-5", "result": "rejected"}, {"entry": "claude-haiku-5-5"}]}
+    _, problems = adm.smoke_entry(haiku, adm.SONNET55_ENTRIES)
+    assert any("'claude-haiku-5-5'" in p for p in problems)
+    phase0, _, canary = _inputs()
+    with pytest.raises(SystemExit, match="smoke record"):
+        adm.decide(phase0, {"tried": [{"entry": GPT, "result": "accepted"}]}, canary)
 
 
 def test_check_5_is_taken_at_the_n_claude_alone_gives(adm: ModuleType) -> None:
@@ -164,11 +222,22 @@ def test_check_5_is_taken_at_the_n_claude_alone_gives(adm: ModuleType) -> None:
     gpt_raises = {"entry": "gpt-6.1-sol-fb2", "gpt": _model({("brief", "O1-L"): (0.2, 0.2)}, r_tr=0.05)}
     d = adm.decide(*_inputs(**gpt_raises))
     retest = d["A-3"]["checks"]["5_retest"]
-    assert (
-        d["A-2"]["N"] == 160
-        and retest["n"] == 120
-        and retest["refute_power_at_wave_n"] == pytest.approx(0.8567, abs=1e-4)
+    assert d["A-2"]["N"] == 160 and retest["n"] == 120
+    assert retest["refute_power_at_wave_n"] == pytest.approx(0.8567, abs=1e-4)
+
+
+def test_sonnet_raising_n_does_not_rescue_gpts_check_5(adm: ModuleType) -> None:
+    d = adm.decide(
+        *_inputs(
+            entry="gpt-6.1-sol-fb2",
+            gpt=_model(r_tr=0.07),
+            s55=_model({("loud", "O1-R"): (0.2, 0.2)}, r_tr=0.05),
+        )
     )
+    assert d["A-3b"]["status"] == "confirmatory" and d["A-2"]["N"] == 160
+    assert d["A-3"]["status"] == "descriptive" and d["A-3"]["checks"]["5_retest"]["n"] == 120
+    assert d["A-3"]["checks"]["5_retest"]["refute_power_at_wave_n"] == pytest.approx(0.7328, abs=1e-4)
+    assert d["A-3b"]["checks"]["5_retest"]["refute_power_at_wave_n"] == pytest.approx(0.8567, abs=1e-4)
 
 
 def test_a4_two_percent_is_still_confirmatory(adm: ModuleType) -> None:
@@ -183,18 +252,20 @@ def test_a4_two_percent_is_still_confirmatory(adm: ModuleType) -> None:
         adm.a4(canary)
 
 
-def test_a5_m_is_four_per_confirmatory_arm(adm: ModuleType) -> None:
+def test_a5_m_is_four_per_confirmatory_arm_up_to_20(adm: ModuleType) -> None:
     d = adm.decide(*_inputs())
-    assert d["A-5"]["m"] == 16
+    assert (d["A-5"]["m"], d["A-5"]["max_m"]) == (20, 20)
     assert d["A-5"]["confirmatory_arms"] == [
         "dexi-qwen3-4b-student.driver-dexi.prompt-dexi-v2",
         "dexi-qwen3-4b-zero-shot.driver-dexi.prompt-dexi-v2",
         "dexi-claude-sonnet-4-6.driver-dexi.prompt-dexi-v2",
         "dexi-gpt-6.1-sol.driver-dexi.prompt-dexi-v2",
+        "dexi-claude-sonnet-5-5-fb1.driver-dexi.prompt-dexi-v2",
     ]
-    assert adm.decide(*_inputs(loud=30))["A-5"]["m"] == 12
-    assert adm.decide(*_inputs(usd=10.0))["A-5"]["m"] == 12
-    phase0, smoke, canary = _inputs(invalid=30)
+    assert adm.decide(*_inputs(loud=30))["A-5"]["m"] == 16
+    assert adm.decide(*_inputs(s55_canary={"usd": 10.0}))["A-5"]["m"] == 16
+    assert adm.decide(*_inputs(usd=10.0, s55_canary={"brief": 30}))["A-5"]["m"] == 12
+    phase0, smoke, canary = _inputs(invalid=30, s55_canary={"invalid": 30})
     canary["arms"]["qwen3-4b-zero-shot"] = _arm(invalid=50)
     assert adm.decide(phase0, smoke, canary)["A-5"]["m"] == 8
 
@@ -212,7 +283,7 @@ OUTCOMES = {
 
 
 def _canary_mirror(root: Path, template: str, arm: str, decision_ok: int, brief_ok: int) -> None:
-    model = "gpt-6.1-sol" if arm.startswith("gpt") else arm
+    model = arm
     run = f"e5-canary-{template}-{arm}"
     for i in range(6):
         family = f"k{i:03d}"
@@ -259,45 +330,82 @@ class Agreeable:
         return Completion((call,), "", "tool_use", 10, 2, 0, "stub")
 
 
-def test_dry_run_from_recorded_runs_to_the_adaptation_block(
-    adm: ModuleType, p0: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def _dry_run(
+    adm: ModuleType,
+    p0: ModuleType,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    sonnet_smoke: dict[str, Any],
+    sonnet_canary: dict[str, Any],
+) -> dict[str, Any]:
+    """Recorded runs, through Phase 0 (stub replies) and canary-health, to `decide`, all by CLI."""
     runs = e4_mirror(tmp_path / "runs", families=3)
     prompts_path = tmp_path / "phase0" / "prompts.json"
     assert p0.main(["prompts", str(runs), "--out", str(prompts_path)]) == 0
     prompts = json.loads(prompts_path.read_text())
     results = []
-    for model in ("claude-sonnet-4-6", "gpt-6.1-sol"):
+    for model in ("claude-sonnet-4-6", GPT, SONNET_FB1):
         calls = p0.plan(prompts, model, "auto", p0.repeats(model, "auto"))
         out = tmp_path / "phase0" / f"{model}.jsonl"
         assert replay.send(model, calls, out, Agreeable(), log=lambda s: None)["sent"] == len(calls)
         results.append(str(out))
     phase0_path = tmp_path / "phase0" / "phase0.json"
     assert p0.main(["summarise", *results, "--prompts", str(prompts_path), "--out", str(phase0_path)]) == 0
-    for arm in ("qwen3-4b-student", "qwen3-4b-zero-shot", "claude-sonnet-4-6", "gpt-6.1-sol"):
+    for arm in (*EXISTING, GPT):
         _canary_mirror(runs, "t1", arm, decision_ok=42, brief_ok=36)
+    sonnet_usd = sonnet_canary.pop("usd")
+    _canary_mirror(runs, "t1", SONNET_FB1, **sonnet_canary)
     health = tmp_path / "canary" / "health.json"
     usd = ["--usd", "gpt-6.1-sol=4.10", "--usd", "claude-sonnet-4-6=6.0"]
+    usd += ["--usd", f"{SONNET_FB1}={sonnet_usd}"]
     assert adm.main(["canary-health", str(runs), "--template", "t1", *usd, "--out", str(health)]) == 0
     smoke = tmp_path / "smoke.json"
-    smoke.write_text(json.dumps({"tried": [{"entry": "gpt-6.1-sol", "result": "accepted"}]}))
+    smoke.write_text(
+        json.dumps({GPT: {"tried": [{"entry": GPT, "result": "accepted"}]}, SONNET: sonnet_smoke})
+    )
     capsys.readouterr()
     decision = tmp_path / "a2-a5.json"
-    args = [
-        "--phase0",
-        str(phase0_path),
-        "--smoke",
-        str(smoke),
-        "--canary",
-        str(health),
-        "--out",
-        str(decision),
-    ]
-    assert adm.main(["decide", *args]) == 0
-    d = json.loads(decision.read_text())
+    args = ["--phase0", str(phase0_path), "--smoke", str(smoke), "--canary", str(health)]
+    assert adm.main(["decide", *args, "--out", str(decision)]) == 0
+    d: dict[str, Any] = json.loads(decision.read_text())
     assert json.loads(capsys.readouterr().out) == d
-    assert d["A-3"]["status"] == "confirmatory" and d["A-2"]["N"] == 120 and d["A-5"]["m"] == 16
-    assert d["A-2"]["triggers"] == [] and d["A-3"]["checks"]["4_cost"]["usd_per_episode"] == pytest.approx(
-        4.1 / 78
-    )
     assert set(d["inputs"]) == {"phase0", "smoke", "canary"} and len(d["script_sha256"]) == 64
+    assert d["A-3"]["status"] == "confirmatory" and d["A-2"]["triggers"] == []
+    assert d["A-3"]["checks"]["4_cost"]["usd_per_episode"] == pytest.approx(4.1 / 78)
+    return d
+
+
+ACCEPTED_FB1 = _tried(SONNET, SONNET_FB1)
+
+
+@pytest.mark.parametrize(
+    ("smoke", "canary", "status", "m"),
+    [
+        (ACCEPTED_FB1, {"decision_ok": 42, "brief_ok": 36, "usd": 3.5}, "confirmatory", 20),
+        (ACCEPTED_FB1, {"decision_ok": 39, "brief_ok": 36, "usd": 3.5}, "descriptive", 16),
+        (ACCEPTED_FB1, {"decision_ok": 42, "brief_ok": 36, "usd": 4.8}, "not run", 16),
+        (
+            {"tried": [{"entry": e, "result": "rejected"} for e in ORDER[SONNET]]},
+            {"decision_ok": 42, "brief_ok": 36, "usd": 3.5},
+            "not run",
+            16,
+        ),
+    ],
+)
+def test_dry_run_from_recorded_runs_to_the_adaptation_block(
+    adm: ModuleType,
+    p0: ModuleType,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    smoke: dict[str, Any],
+    canary: dict[str, Any],
+    status: str,
+    m: int,
+) -> None:
+    d = _dry_run(adm, p0, tmp_path, capsys, smoke, dict(canary))
+    s55 = d["A-3b"]
+    assert (s55["status"], d["A-5"]["m"], d["A-2"]["N"]) == (status, m, 120)
+    if smoke is ACCEPTED_FB1:
+        assert s55["entry"] == SONNET_FB1 and s55["checks"]["5_retest"]["required"] is True
+        assert s55["checks"]["5_retest"]["r_tr"] == 0.0 and s55["checks"]["5_retest"]["ok"]
+    assert (f"dexi-{SONNET_FB1}.driver-dexi.prompt-dexi-v2" in d["A-5"]["confirmatory_arms"]) is (m == 20)
