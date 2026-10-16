@@ -9,10 +9,11 @@ Nothing here calls a model unless `probe ... --live` is given. The student's dry
         --out runs/wording-check/probe-claude.json --live
     uv run python scripts/e5_wording_check.py decide --dryrun runs/wording-check/dryrun.json \\
         --probe runs/wording-check/probe-claude.json [--probe runs/wording-check/probe-gpt.json] \\
-        --models claude-sonnet-4-6 [gpt-6.1-sol] --out runs/wording-check/a1.json
+        --models claude-sonnet-4-6 [gpt-6.1-sol] [claude-sonnet-5-5] --out runs/wording-check/a1.json
 
-`--models` names every model whose probe counts for A-1: Claude, and GPT-6.1 Sol only if its smoke
-call passed. Each needs exactly one `--probe` file, and no other probe file is accepted.
+`--models` names every model whose probe counts for A-1: Claude Sonnet 4.6, and GPT-6.1 Sol and
+Claude Sonnet 5.5 each only if its smoke call passed (name the accepted entry, e.g. `-fb1`). Each
+needs exactly one `--probe` file, and no other probe file is accepted.
 """
 
 from __future__ import annotations
@@ -156,7 +157,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--scenarios", type=Path, default=Path("scenarios"))
     sub = p.add_subparsers(dest="command", required=True)
     est = sub.add_parser("estimate", help="call counts and rough cost of the whole wording check")
-    est.add_argument("--models", nargs="+", default=["claude-sonnet-4-6", "gpt-6.1-sol"])
+    est.add_argument("--models", nargs="+", default=["claude-sonnet-4-6", "gpt-6.1-sol", "claude-sonnet-5-5"])
     est.set_defaults(func=cmd_estimate)
     pr = sub.add_parser("prompts", help="write every probe prompt with its hash; no calls")
     pr.add_argument("--out", type=Path, required=True)

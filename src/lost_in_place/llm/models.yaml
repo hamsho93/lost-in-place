@@ -17,6 +17,20 @@ claude-sonnet-4-6:
     Frontier arm, added 2026-10-12. The newest Claude model this account can use on Bedrock;
     the 5.x models need an agreement through AWS Sales.
 
+rule-2m:
+  provider: scripted
+  model_id: scripted-rule-dexi-2m
+  notes: >-
+    Not a model: freeze-v3's scripted DEXI-cadence control (design 6), added 2026-10-16. Run as
+    dexi/rule-2m. It reads the rendered prompt, flies each leg in 2.0 m moves, holds 2 s on bad
+    health and lands if it is still bad (lost_in_place/llm/scripted_dexi.py). No model call.
+
+rule-leg:
+  provider: scripted
+  model_id: scripted-rule-dexi-leg
+  notes: >-
+    As rule-2m, at whole-leg cadence: one move per leg, as DEXI's student flies them.
+
 qwen3-4b-zero-shot:
   provider: bedrock_imported
   model_id: lip-qwen3-4b-thinking-2507-768f209
@@ -85,3 +99,52 @@ gpt-6.1-sol-fb3:
   notes: >-
     Fallback 3 of gpt-6.1-sol (design 9.2): fallback 2 without the reasoning-effort field, so the
     provider's default effort applies.
+
+claude-sonnet-5-5:
+  provider: bedrock
+  model_id: us.anthropic.claude-sonnet-5-5
+  region: us-east-2
+  max_tokens: 4096
+  temperature: 0
+  tool_choice: auto
+  additional_request_fields: {output_config: {effort: low}}
+  notes: >-
+    E5 fifth arm, approved 2026-10-16 (fifth-arm spec), served from us-east-2. tool_choice auto
+    because Sonnet 5.5 rejects forced tool use; a reply without a tool call is invalid. Effort low
+    (the model's default is high) matches GPT-6.1 Sol and the cost model. Anthropic's docs say
+    Sonnet 5.5 rejects any non-default temperature, so the smoke call is expected to fall back to
+    fb1; the entries below are tried in order, each one change further.
+
+claude-sonnet-5-5-fb1:
+  provider: bedrock
+  model_id: us.anthropic.claude-sonnet-5-5
+  region: us-east-2
+  max_tokens: 4096
+  tool_choice: auto
+  additional_request_fields: {output_config: {effort: low}}
+  notes: >-
+    Fallback 1 of claude-sonnet-5-5: no temperature, so the arm is stochastic and its test-retest
+    is checked.
+
+claude-sonnet-5-5-fb2:
+  provider: bedrock
+  model_id: us.anthropic.claude-sonnet-5-5
+  region: us-east-2
+  max_tokens: 4096
+  tool_choice: auto
+  notes: >-
+    Fallback 2 of claude-sonnet-5-5: fallback 1 without the effort field, so the model's default
+    effort (high) applies.
+
+# Smoke-only: checks the us-east-2 request shape cheaply. Not an E5 arm; no freeze-v3 sweep uses it.
+claude-haiku-5-5:
+  provider: bedrock
+  model_id: us.anthropic.claude-haiku-5-5
+  region: us-east-2
+  max_tokens: 4096
+  tool_choice: auto
+  additional_request_fields: {output_config: {effort: low}}
+  notes: >-
+    Smoke-only, never in a freeze-v3 sweep. The settings of claude-sonnet-5-5-fb1: Anthropic's
+    docs say Haiku 5.5 rejects any non-default temperature, and the smoke flies the configuration
+    expected to work.

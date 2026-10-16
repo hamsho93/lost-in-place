@@ -55,6 +55,15 @@ class BedrockConverseClient:
         self.spec = spec
         profiles = json.loads(env.get(BEDROCK_PROFILES_ENV) or "{}")
         self.model_id: str = profiles.get(spec.model_id, spec.model_id)
+        # The runtime endpoint is chosen by spec.region, and Bedrock only serves a profile from
+        # the region it lives in, so a profile made in the stack's region can't serve this entry.
+        if self.model_id.startswith("arn:"):
+            region = self.model_id.split(":")[3]
+            if region != spec.region:
+                raise LookupError(
+                    f"model '{spec.name}': its {BEDROCK_PROFILES_ENV} profile is in {region}, "
+                    f"but the entry calls {spec.region}"
+                )
         self._client = client
 
     @classmethod
@@ -126,9 +135,11 @@ class BedrockConverseClient:
 
 
 def _reasoning(block: dict[str, Any]) -> str:
-    """A Converse `reasoningContent` block's text; a provider may return it encrypted instead."""
+    """A Converse `reasoningContent` block's text. A provider may return it encrypted instead, or,
+    like Claude 5.x by default (thinking display "omitted"), as an empty text with a signature."""
     if "reasoningText" in block:
-        return str(block["reasoningText"].get("text", ""))
+        text = str(block["reasoningText"].get("text", ""))
+        return text or ("[omitted reasoning]" if block["reasoningText"].get("signature") else "")
     return "[redacted reasoning]" if "redactedContent" in block else ""
 
 
@@ -407,10 +418,17 @@ class BedrockImportedClient:
         )
 
 
+def _scripted(spec: ModelSpec) -> ChatClient:
+    from lost_in_place.llm.scripted_dexi import ScriptedRuleClient  # it imports this module
+
+    return ScriptedRuleClient.from_spec(spec)
+
+
 CLIENTS: dict[str, Callable[[ModelSpec], ChatClient]] = {
     "bedrock": BedrockConverseClient.from_spec,
     "openai_compatible": OpenAICompatibleClient.from_spec,
     "bedrock_imported": BedrockImportedClient.from_spec,
+    "scripted": _scripted,
 }
 
 

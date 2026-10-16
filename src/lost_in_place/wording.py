@@ -229,9 +229,16 @@ def a1(
 
 
 # Rough cost, for the --dry-run plans. Bedrock on-demand $ per million input and output tokens.
-TOKEN_PRICES = {"claude-sonnet-4-6": (3.0, 15.0), "gpt-6.1-sol": (2.20, 11.0)}
+# A fallback entry (`<model>-fbN`) is priced as its model.
+TOKEN_PRICES = {
+    "claude-sonnet-4-6": (3.0, 15.0),
+    "gpt-6.1-sol": (2.20, 11.0),
+    "claude-sonnet-5-5": (2.20, 11.0),
+}
 # Reasoning tokens a call adds, unmeasured (§10.1 assumes a median of 200 at effort low).
-REASONING_TOKENS = {"gpt-6.1-sol": 200}
+REASONING_TOKENS = {"gpt-6.1-sol": 200, "claude-sonnet-5-5": 200}
+# Claude 4.7 and later tokenize the same text into about 30% more tokens.
+TOKENIZER_FACTOR = {"claude-sonnet-5-5": 1.3}
 CMU_USD_PER_MIN = 0.05718
 STUDENT_CMUS = 2
 
@@ -239,10 +246,12 @@ STUDENT_CMUS = 2
 def probe_cost(
     model: str, prompts: Sequence[ProbePrompt], reps: int = PROBE_REPS, output_tokens: int = 25
 ) -> dict[str, Any]:
+    base = re.sub(r"-fb\d+$", "", model)
+    factor = TOKENIZER_FACTOR.get(base, 1.0)
     calls = len(prompts) * reps
-    tokens_in = sum(len(p.message) for p in prompts) * reps / 3.5
-    tokens_out = calls * (output_tokens + REASONING_TOKENS.get(model, 0))
-    price = TOKEN_PRICES.get(model)
+    tokens_in = sum(len(p.message) for p in prompts) * reps / 3.5 * factor
+    tokens_out = int(calls * (output_tokens * factor + REASONING_TOKENS.get(base, 0)))
+    price = TOKEN_PRICES.get(base)
     usd = None if price is None else round((tokens_in * price[0] + tokens_out * price[1]) / 1e6, 2)
     return {
         "model": model,
