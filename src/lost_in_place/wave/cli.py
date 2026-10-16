@@ -27,7 +27,7 @@ from lost_in_place.wave.pinger import Pinger, invoke_ping
 from lost_in_place.wave.store import LocalStore, Overlay, S3Store, Store
 from lost_in_place.wave.submit import PreflightFailed, Submitter
 
-Factory = Callable[[str], Any]
+Factory = Callable[..., Any]
 DEFAULT_LOCAL_DIR = Path(".e5-dryrun")
 
 
@@ -332,8 +332,11 @@ def validate(
     start = datetime.fromtimestamp(min(s for s, _ in spans), now.tzinfo) - margin
     end = datetime.fromtimestamp(max(e for _, e in spans), now.tzinfo) + margin
     tokens = meter.traced_tokens(runs.read(folder, "episode.json") for folder in runs.folders())
-    sources = meter.Sources(tokens=(meter.Tokens(profile, arm.price),), queue=ctx.stack.queue)
-    cloudwatch = meter.cloudwatch_usage(ctx.clients("cloudwatch"), ctx.wave, sources, start, end, now)
+    tokens_source = meter.Tokens(profile, arm.price, ctx.stack.profile_region(model))
+    sources = meter.Sources(tokens=(tokens_source,), queue=ctx.stack.queue)
+    cloudwatch = meter.cloudwatch_usage(
+        lambda region: ctx.clients("cloudwatch", region), ctx.wave, sources, start, end, now
+    )
     seconds = sum(e - s for s, e in spans)
     found = meter.agreements(ctx.wave, arm.price, tokens, seconds, cloudwatch)
     window = {
@@ -426,7 +429,7 @@ def health_cmd(
         now = submitter.clock()
         for run in selected:
             spent = submitter.arm_spent(run.arm, now) if submitter.state.windows.get(run.arm.name) else 0.0
-            costs[run.arm.name] = health.ArmCost(spent, _throttles(submitter, run.arm.name, now))
+            costs[run.arm.name] = health.ArmCost(spent, submitter.arm_throttles(run.arm, now))
     health.report(
         [(r.arm.name, r.episodes.values(), r.live) for r in selected],
         costs,
@@ -437,23 +440,5 @@ def health_cmd(
     return 0
 
 
-def _throttles(submitter: Submitter, arm_name: str, now: datetime) -> float | None:
-    arm = submitter.wave.arm(arm_name)
-    model_id = (
-        submitter.stack.profile_id(arm.bedrock_model)
-        if arm.bedrock_model
-        else submitter.import_arn(arm.import_name)
-        if arm.import_name
-        else None
-    )
-    if model_id is None:
-        return None
-    total = 0.0
-    for start, end in submitter.windows(arm_name, now):
-        query = meter.metric_query("t", "AWS/Bedrock", "InvocationThrottles", "ModelId", model_id, 300)
-        total += meter.metric_sums(submitter.clients("cloudwatch"), [query], start, end or now)["t"]
-    return total
-
-
-def _offline(service: str) -> Any:
+def _offline(service: str, region: str | None = None) -> Any:
     raise RuntimeError(f"offline health (--runs) uses no AWS, but asked for {service}")

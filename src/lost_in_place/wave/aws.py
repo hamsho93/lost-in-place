@@ -59,19 +59,21 @@ class ReadOnly:
 
 
 class Clients:
-    """One client per service, created on first use. `factory(service)` builds a client; tests pass
-    fakes. With `read_only`, every write call raises `WriteRefused`."""
+    """One client per service and region, created on first use. `factory(service, region)` builds a
+    client (region None: the factory's own); tests pass fakes. With `read_only`, every write call
+    raises `WriteRefused`."""
 
-    def __init__(self, factory: Callable[[str], Any], *, read_only: bool = False) -> None:
+    def __init__(self, factory: Callable[..., Any], *, read_only: bool = False) -> None:
         self._factory = factory
-        self._clients: dict[str, Any] = {}
+        self._clients: dict[tuple[str, str | None], Any] = {}
         self.read_only = read_only
 
-    def __call__(self, service: str) -> Any:
-        if service not in self._clients:
-            client = self._factory(service)
-            self._clients[service] = ReadOnly(client, service) if self.read_only else client
-        return self._clients[service]
+    def __call__(self, service: str, region: str | None = None) -> Any:
+        key = (service, region)
+        if key not in self._clients:
+            client = self._factory(service) if region is None else self._factory(service, region)
+            self._clients[key] = ReadOnly(client, service) if self.read_only else client
+        return self._clients[key]
 
 
 @dataclass(frozen=True)
@@ -94,6 +96,11 @@ class Stack:
         """The CloudWatch `ModelId` of the stack's tagged copy of a system inference profile."""
         arn = self.bedrock_profiles.get(system_profile)
         return arn.rsplit("/", 1)[-1] if arn else None
+
+    def profile_region(self, system_profile: str) -> str | None:
+        """The region the tagged copy was created in, from its ARN."""
+        arn = self.bedrock_profiles.get(system_profile)
+        return (arn.split(":")[3] or None) if arn else None
 
 
 def discover(
@@ -135,7 +142,7 @@ def discover(
 
 def boto3_factory(
     region: str, role_arn: str | None = None, session_name: str = "lip-e5-wave"
-) -> Callable[[str], Any]:
+) -> Callable[..., Any]:
     """Client factory for the given region. With `role_arn`, clients use that role through
     credentials that refresh 15 minutes before they expire (OperatorRole sessions last up to 12 h)."""
     import boto3
@@ -168,10 +175,10 @@ def boto3_factory(
         session = base
     config = Config(retries={"mode": "standard", "max_attempts": 5})
 
-    def factory(service: str) -> Any:
+    def factory(service: str, client_region: str | None = None) -> Any:
         if service == "budgets":
             return session.client(service, region_name="us-east-1", config=config)
-        return session.client(service, config=config)
+        return session.client(service, region_name=client_region or region, config=config)
 
     return factory
 

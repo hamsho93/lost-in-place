@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BUCKET = "results-bucket"
 QUEUE = "the-queue"
 PROFILE_ARN = "arn:aws:bedrock:us-east-1:000000000000:application-inference-profile/prof1"
+EAST2_PROFILE_ARN = "arn:aws:bedrock:us-east-2:000000000000:application-inference-profile/prof2"
 IMPORT_ARN = "arn:aws:bedrock:us-east-1:000000000000:imported-model/imp1"
 OPERATOR_ARN = "arn:aws:iam::000000000000:role/LostInPlaceSim-OperatorRole1"
 BUDGET_STOP_ARN = "arn:aws:iam::000000000000:policy/BudgetStop1"
@@ -292,6 +293,7 @@ class Fakes:
     s3: FakeS3 = field(init=False)
     batch: FakeBatch = field(init=False)
     cloudwatch: FakeCloudWatch = field(default_factory=FakeCloudWatch)
+    cloudwatch_east2: FakeCloudWatch = field(default_factory=FakeCloudWatch)
     bedrock: FakeBedrock = field(init=False)
     runtime: FakeRuntime = field(init=False)
     budgets: FakeBudgets = field(default_factory=FakeBudgets)
@@ -303,7 +305,11 @@ class Fakes:
         self.bedrock = FakeBedrock(self.writes)
         self.runtime = FakeRuntime(self.writes)
 
-    def __call__(self, service: str) -> Any:
+    def __call__(self, service: str, region: str | None = None) -> Any:
+        if region not in (None, "us-east-1", "us-east-2"):
+            raise ValueError(f"no fake {service} in {region}")
+        if service == "cloudwatch" and region == "us-east-2":
+            return self.cloudwatch_east2
         return {
             "s3": self.s3,
             "batch": self.batch,
@@ -394,6 +400,8 @@ def write_sweeps(root: Path) -> None:
         ("scripted", "scripted-naive"),
         ("claude", "scripted-naive"),
         ("student", "scripted-naive"),
+        ("gpt", "scripted-naive"),
+        ("sonnet", "scripted-naive"),
     ):
         spec = {"name": f"e5-{name}", "planners": [planner], **SWEEP}
         (root / f"sweeps/e5/{name}.yaml").write_text(yaml.safe_dump(spec))
@@ -420,6 +428,7 @@ class World:
     commands: list[list[str]] = field(default_factory=list)
     gate_exit: int = 0
     output: list[str] = field(default_factory=list)
+    stack: Stack = field(default_factory=lambda: STACK)
 
     def run_command(self, command: Any) -> tuple[int, str]:
         self.commands.append(list(command))
@@ -432,7 +441,7 @@ class World:
         return Submitter(
             self.wave,
             clients,
-            STACK,
+            self.stack,
             store,
             root=self.root,
             dry_run=self.dry_run,

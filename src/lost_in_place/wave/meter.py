@@ -11,11 +11,16 @@ Three CloudWatch sources, each lagging about 1-5 minutes:
 Per arm, the same metrics are read over the arm's windows (warm-up or first submission to settlement)
 and compute comes from the arm's own jobs. The episode traces give a second, independent token
 count, used for S-8's rolling cost per episode and to check the meter (`validate`).
+
+CloudWatch metrics stay in the region that served the call, so token metrics are read in each
+profile's own region (Claude Sonnet 5.5 is called in us-east-2 from Batch in us-east-1); imports and
+Batch are read in the wave's home region. `cw(region)` returns the CloudWatch client for a region
+(None: the home region).
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from typing import Any
@@ -23,6 +28,7 @@ from typing import Any
 from lost_in_place.wave.config import Arm, Price, Wave
 
 MAX_QUERIES = 500
+Regional = Callable[[str | None], Any]
 
 
 @dataclass
@@ -51,6 +57,7 @@ class Usage:
 class Tokens:
     model_id: str  # CloudWatch ModelId: a tagged profile's id
     price: Price
+    region: str | None = None  # where the profile serves calls (None: the home region)
 
 
 @dataclass(frozen=True)
@@ -132,28 +139,34 @@ def metric_points(
 
 
 def cloudwatch_usage(
-    cw: Any, wave: Wave, sources: Sources, start: datetime, end: datetime, now: datetime
+    cw: Regional, wave: Wave, sources: Sources, start: datetime, end: datetime, now: datetime
 ) -> Usage:
     if end <= start:
         return Usage()
     period = period_for(start, end, now)
-    queries = []
+    by_region: dict[str | None, list[dict[str, Any]]] = {}
     for i, t in enumerate(sources.tokens):
-        queries.append(metric_query(f"i{i}", "AWS/Bedrock", "InputTokenCount", "ModelId", t.model_id, period))
-        queries.append(
-            metric_query(f"o{i}", "AWS/Bedrock", "OutputTokenCount", "ModelId", t.model_id, period)
+        by_region.setdefault(t.region, []).extend(
+            [
+                metric_query(f"i{i}", "AWS/Bedrock", "InputTokenCount", "ModelId", t.model_id, period),
+                metric_query(f"o{i}", "AWS/Bedrock", "OutputTokenCount", "ModelId", t.model_id, period),
+            ]
         )
+    home = by_region.setdefault(None, [])
     for i, arn in enumerate(sources.imports):
-        queries.append(metric_query(f"c{i}", "AWS/Bedrock", "ModelCopy", "ModelId", arn, period))
+        home.append(metric_query(f"c{i}", "AWS/Bedrock", "ModelCopy", "ModelId", arn, period))
     if sources.queue:
-        queries.append(
+        home.append(
             metric_query(
                 "b", "AWS/Batch", "JobAttemptExecutionDuration", "JobQueueName", sources.queue, period
             )
         )
-    if not queries:
+    sums: dict[str, float] = {}
+    for region, queries in by_region.items():
+        if queries:
+            sums.update(metric_sums(cw(region), queries, start, end))
+    if not sums:
         return Usage()
-    sums = metric_sums(cw, queries, start, end)
     usage = Usage()
     for i, t in enumerate(sources.tokens):
         usage.input_tokens += sums[f"i{i}"]
@@ -175,17 +188,26 @@ def token_usd(price: Price | None, input_tokens: float, output_tokens: float) ->
     return price.cost(input_tokens, output_tokens) if price else 0.0
 
 
-def project_sources(wave: Wave, profiles: dict[str, str], import_arns: Iterable[str], queue: str) -> Sources:
+def project_sources(
+    wave: Wave,
+    profiles: dict[str, str],
+    import_arns: Iterable[str],
+    queue: str,
+    regions: Mapping[str, str | None] | None = None,
+) -> Sources:
     """Everything the project can spend through: every tagged profile of the stack (priced by the arm
-    that calls it, or at the dearest configured price if none does), every imported model, the queue."""
+    that calls it, or at the dearest configured price if none does, and read in `regions[profile]`),
+    every imported model, the queue."""
     prices = {a.bedrock_model: a.price for a in wave.arms if a.bedrock_model and a.price}
     dearest = max(
         prices.values(),
         key=lambda p: p.input_per_mtok + p.output_per_mtok,
         default=Price(input_per_mtok=0, output_per_mtok=0),
     )
+    regions = regions or {}
     tokens = tuple(
-        Tokens(arn.rsplit("/", 1)[-1], prices.get(model, dearest)) for model, arn in sorted(profiles.items())
+        Tokens(arn.rsplit("/", 1)[-1], prices.get(model, dearest), regions.get(model))
+        for model, arn in sorted(profiles.items())
     )
     return Sources(tokens=tokens, imports=tuple(sorted(set(import_arns))), queue=queue)
 
@@ -202,18 +224,24 @@ def all_import_arns(cw: Any) -> list[str]:
     return sorted(arns)
 
 
-def arm_sources(arm: Arm, profiles: dict[str, str], import_arns: dict[str, str]) -> Sources:
+def arm_sources(
+    arm: Arm, profiles: dict[str, str], import_arns: dict[str, str], region: str | None = None
+) -> Sources:
     tokens: tuple[Tokens, ...] = ()
     if arm.bedrock_model and arm.price:
         arn = profiles.get(arm.bedrock_model)
         if arn:
-            tokens = (Tokens(arn.rsplit("/", 1)[-1], arm.price),)
+            tokens = (Tokens(arn.rsplit("/", 1)[-1], arm.price, region),)
     imports = (import_arns[arm.import_name],) if arm.import_name and arm.import_name in import_arns else ()
     return Sources(tokens=tokens, imports=imports)
 
 
 def window_usage(
-    cw: Any, wave: Wave, sources: Sources, windows: list[tuple[datetime, datetime | None]], now: datetime
+    cw: Regional,
+    wave: Wave,
+    sources: Sources,
+    windows: list[tuple[datetime, datetime | None]],
+    now: datetime,
 ) -> Usage:
     total = Usage()
     for start, end in windows:

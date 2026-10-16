@@ -24,6 +24,7 @@ from typing import Any
 import yaml
 
 from lost_in_place import manifest
+from lost_in_place.llm.registry import ModelSpec
 from lost_in_place.manifest import Entry
 from lost_in_place.wave import meter, rules
 from lost_in_place.wave.aws import Clients, Stack, account_id, mask, utcnow
@@ -34,6 +35,7 @@ from lost_in_place.wave.store import Store
 
 TERMINAL = ("SUCCEEDED", "FAILED")
 JOB_NAME = re.compile(r"[^A-Za-z0-9_-]")
+DEFAULT_MODEL_REGION = str(ModelSpec.model_fields["region"].default)
 
 
 class PreflightFailed(RuntimeError):
@@ -138,6 +140,7 @@ class Submitter:
         self._imports_cache: tuple[datetime, list[str]] | None = None
         self._dry_jobs = 0
         self._estimate: tuple[datetime, float] | None = None
+        self._registry: dict[str, Any] | None = None
 
     # ---------------------------------------------------------------- loading
 
@@ -282,6 +285,52 @@ class Submitter:
                     self.s4_seen.add((view.key, view.label))
         self.ledger.s4(lines)
 
+    # ---------------------------------------------------------------- regions
+
+    def registry(self) -> dict[str, Any]:
+        """The raw models.yaml (S-0 compares entries field by field, so no defaults are filled in)."""
+        if self._registry is None:
+            path = self.models_path
+            self._registry = (yaml.safe_load(path.read_text()) or {}) if path.exists() else {}
+        return self._registry
+
+    def region_of(self, arm: Arm) -> str | None:
+        """Where the arm's Bedrock calls are served, so where CloudWatch has its metrics: the region of
+        its models.yaml entry, else of its tagged profile's ARN (None: the home region)."""
+        entry = self.registry().get(arm.model) if arm.model else None
+        if isinstance(entry, dict):
+            return str(entry.get("region") or DEFAULT_MODEL_REGION)
+        return self.stack.profile_region(arm.bedrock_model) if arm.bedrock_model else None
+
+    def profile_regions(self) -> dict[str, str | None]:
+        regions = {model: self.stack.profile_region(model) for model in self.stack.bedrock_profiles}
+        for arm in self.wave.arms:
+            if arm.bedrock_model and arm.model:
+                regions[arm.bedrock_model] = self.region_of(arm)
+        return regions
+
+    def cw(self, region: str | None = None) -> Any:
+        return self.clients("cloudwatch", region)
+
+    def model_source(self, arm: Arm) -> tuple[str | None, str | None]:
+        """The arm's CloudWatch `ModelId` and the region its metrics are in."""
+        if arm.bedrock_model:
+            return self.stack.profile_id(arm.bedrock_model), self.region_of(arm)
+        if arm.import_name:
+            return self.import_arn(arm.import_name), None
+        return None, None
+
+    def arm_throttles(self, arm: Arm, now: datetime) -> float | None:
+        """InvocationThrottles over the arm's metering windows."""
+        model_id, region = self.model_source(arm)
+        if model_id is None:
+            return None
+        total = 0.0
+        for start, end in self.windows(arm.name, now):
+            query = meter.metric_query("t", "AWS/Bedrock", "InvocationThrottles", "ModelId", model_id, 300)
+            total += meter.metric_sums(self.cw(region), [query], start, end or now)["t"]
+        return total
+
     # ---------------------------------------------------------------- money
 
     def account(self) -> str:
@@ -308,7 +357,7 @@ class Submitter:
             known = set(self.state.import_arns.values())
             self._imports_cache = (
                 now,
-                sorted(known | set(meter.all_import_arns(self.clients("cloudwatch")))),
+                sorted(known | set(meter.all_import_arns(self.cw()))),
             )
         return self._imports_cache[1]
 
@@ -328,13 +377,20 @@ class Submitter:
             if w.get("end") and str(w["end"]).startswith(month)
         )
 
+    def project_sources(self, now: datetime) -> meter.Sources:
+        return meter.project_sources(
+            self.wave,
+            self.stack.bedrock_profiles,
+            self.project_imports(now),
+            self.stack.queue,
+            self.profile_regions(),
+        )
+
     def month_meter(self, now: datetime) -> meter.Usage:
         """Metered AWS spend this month: CloudWatch, plus attempts still running, plus other tagged spend."""
-        sources = meter.project_sources(
-            self.wave, self.stack.bedrock_profiles, self.project_imports(now), self.stack.queue
-        )
+        sources = self.project_sources(now)
         start = meter.month_start(now)
-        usage = meter.cloudwatch_usage(self.clients("cloudwatch"), self.wave, sources, start, now, now)
+        usage = meter.cloudwatch_usage(self.cw, self.wave, sources, start, now, now)
         usage.compute_usd += self.in_flight_compute(now)
         usage.other_usd = self.wave.other_usd_per_day * (now - start).total_seconds() / 86400
         return usage
@@ -353,10 +409,7 @@ class Submitter:
                 self.clients("budgets"), self.account(), self.stack.budget_name
             )
             since = max(meter.month_start(now), updated - timedelta(hours=self.wave.budget_lag_h))
-            sources = meter.project_sources(
-                self.wave, self.stack.bedrock_profiles, self.project_imports(now), self.stack.queue
-            )
-            recent = meter.cloudwatch_usage(self.clients("cloudwatch"), self.wave, sources, since, now, now)
+            recent = meter.cloudwatch_usage(self.cw, self.wave, self.project_sources(now), since, now, now)
             return actual + recent.total_usd + self.in_flight_compute(now) + self.external_usd(month)
         return self.month_meter(now).total_usd + self.external_usd(month)
 
@@ -371,10 +424,9 @@ class Submitter:
             arm,
             self.stack.bedrock_profiles,
             {arm.import_name: arn} if arm.import_name and (arn := self.import_arn(arm.import_name)) else {},
+            self.region_of(arm),
         )
-        usage = meter.window_usage(
-            self.clients("cloudwatch"), self.wave, sources, self.windows(arm.name, now), now
-        )
+        usage = meter.window_usage(self.cw, self.wave, sources, self.windows(arm.name, now), now)
         spent = usage.total_usd + sum(float(w.get("usd") or 0) for w in self.state.windows.get(arm.name, []))
         if arm.kind == "batch":
             run = self.arm_run(arm)
@@ -508,13 +560,7 @@ class Submitter:
 
     def check_throttles(self, run: ArmRun, now: datetime) -> None:
         arm = run.arm
-        model_id = (
-            self.stack.profile_id(arm.bedrock_model)
-            if arm.bedrock_model
-            else self.import_arn(arm.import_name)
-            if arm.import_name
-            else None
-        )
+        model_id, region = self.model_source(arm)
         if not model_id or run.done:
             return
         last = self.state.last_cap_cut.get(arm.name)
@@ -525,7 +571,7 @@ class Submitter:
             meter.metric_query("t", "AWS/Bedrock", "InvocationThrottles", "ModelId", model_id, 60),
             meter.metric_query("n", "AWS/Bedrock", "Invocations", "ModelId", model_id, 60),
         ]
-        sums = meter.metric_sums(self.clients("cloudwatch"), queries, now - window, now)
+        sums = meter.metric_sums(self.cw(region), queries, now - window, now)
         if rules.s4_throttled(sums["t"], sums["n"], self.wave.rules):
             self.state.cap_cut[arm.name] = (
                 self.state.cap_cut.get(arm.name, 0) + self.wave.rules.throttle_cap_cut
@@ -617,14 +663,23 @@ class Submitter:
         if uploaded is not None and uploaded != run.sweep.body:
             failures.append(f"S-0: {run.sweep.manifest_key} differs from the manifest of {run.arm.sweep}")
         arm = run.arm
+        entry = self.registry().get(arm.model) if arm.model else None
+        if arm.model and not isinstance(entry, dict):
+            failures.append(f"S-0: models.yaml has no entry {arm.model}")
         if arm.pinned_model is not None:
-            entries = yaml.safe_load(self.models_path.read_text()) or {}
-            entry = entries.get(arm.model) or {}
             for key, value in arm.pinned_model.items():
-                if entry.get(key) != value:
-                    failures.append(
-                        f"S-0: models.yaml {arm.model}.{key} is {entry.get(key)!r}, pinned {value!r}"
-                    )
+                found = (entry or {}).get(key)
+                if found != value:
+                    failures.append(f"S-0: models.yaml {arm.model}.{key} is {found!r}, pinned {value!r}")
+        if arm.bedrock_model:
+            profile_region = self.stack.profile_region(arm.bedrock_model)
+            if profile_region is None:
+                failures.append(f"S-0: the stack has no tagged profile for {arm.bedrock_model}")
+            elif isinstance(entry, dict) and self.region_of(arm) != profile_region:
+                failures.append(
+                    f"S-0: models.yaml {arm.model} calls {self.region_of(arm)}, but the tagged profile "
+                    f"for {arm.bedrock_model} is in {profile_region}; the meter would miss its tokens"
+                )
         for command in self.wave.preflight_commands:
             code, output = self.run_command(command)
             if code != 0:
@@ -793,7 +848,7 @@ class Submitter:
             if arn and name not in self.state.kill_pings and name not in self.state.deleted_imports:
                 window = timedelta(seconds=self.wave.rules.idle_copy_s + 60)
                 points = meter.metric_points(
-                    self.clients("cloudwatch"), "AWS/Bedrock", "ModelCopy", "ModelId", arn, now - window, now
+                    self.cw(), "AWS/Bedrock", "ModelCopy", "ModelId", arn, now - window, now
                 )
                 if rules.s6_idle(points, self.idle_since.get(name), now, self.wave.rules):
                     self.state.kill_pings[name] = iso(now)

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from wave_fakes import IMPORT_ARN, PROFILE_ARN, QUEUE, FakeBatch, Fakes, make_world
+from wave_fakes import EAST2_PROFILE_ARN, IMPORT_ARN, PROFILE_ARN, QUEUE, FakeBatch, Fakes, make_world
 
 from lost_in_place.wave import config, meter
 from lost_in_place.wave.config import Price
@@ -28,11 +28,32 @@ def test_cloudwatch_usage_prices_tokens_copies_and_compute() -> None:
     fakes.cloudwatch.points[IMPORT_ARN] = [(NOW - timedelta(minutes=m), 1.0) for m in range(1, 101)]
     wave = config.load()
     sources = meter.Sources((meter.Tokens(profile, PRICE),), (IMPORT_ARN,), QUEUE)
-    usage = meter.cloudwatch_usage(fakes.cloudwatch, wave, sources, NOW - timedelta(hours=3), NOW, NOW)
+    usage = meter.cloudwatch_usage(
+        lambda region: fakes("cloudwatch", region), wave, sources, NOW - timedelta(hours=3), NOW, NOW
+    )
     assert round(usage.token_usd, 4) == round(3.3 + 1.65, 4)
     assert usage.copy_minutes == 100 and round(usage.copy_usd, 2) == 11.40
     assert usage.batch_hours == 10 and round(usage.compute_usd, 3) == 0.5
     assert round(usage.total_usd, 2) == round(3.3 + 1.65 + 11.4 + 0.5, 2)
+
+
+def test_token_metrics_are_read_in_each_profiles_region() -> None:
+    fakes = Fakes()
+    east1, east2 = PROFILE_ARN.rsplit("/", 1)[-1], EAST2_PROFILE_ARN.rsplit("/", 1)[-1]
+    fakes.cloudwatch.sums[("InputTokenCount", east1)] = 1e6
+    fakes.cloudwatch.sums[("InputTokenCount", east2)] = 7e6
+    fakes.cloudwatch_east2.sums[("InputTokenCount", east2)] = 2e6
+    fakes.cloudwatch_east2.sums[("JobAttemptExecutionDuration", QUEUE)] = 3.6e9
+    sonnet = Price(input_per_mtok=2.2, output_per_mtok=11)
+    sources = meter.Sources(
+        (meter.Tokens(east1, PRICE), meter.Tokens(east2, sonnet, "us-east-2")), queue=QUEUE
+    )
+    usage = meter.cloudwatch_usage(
+        lambda region: fakes("cloudwatch", region), config.load(), sources, NOW - timedelta(hours=1), NOW, NOW
+    )
+    assert usage.input_tokens == 3e6 and round(usage.token_usd, 4) == round(3.3 + 2 * 2.2, 4)
+    assert usage.batch_hours == 0
+    assert fakes.cloudwatch.calls == 1 and fakes.cloudwatch_east2.calls == 1
 
 
 def test_period_follows_cloudwatch_retention() -> None:
