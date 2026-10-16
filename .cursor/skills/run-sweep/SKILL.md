@@ -22,7 +22,7 @@ Read `infra/AGENTS.md` first. The account is shared, so its rules come before an
 
 ```bash
 cd infra
-npx -y aws-cdk@2 diff LostInPlaceSim -c alertEmail=<owner's alert email> -c budgetUsd=100 -c maxVcpus=<n> -c imageTag=sha256:<digest>
+npx -y aws-cdk@2 diff LostInPlaceSim --no-change-set -c alertEmail=<owner's alert email> -c budgetUsd=450 -c maxVcpus=<n> -c imageTag=sha256:<digest>
 npx -y aws-cdk@2 deploy LostInPlaceSim <same -c flags> --require-approval never
 ```
 
