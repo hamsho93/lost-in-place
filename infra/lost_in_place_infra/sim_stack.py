@@ -14,7 +14,8 @@ allocation tag in the Billing console; until then the budget sees $0.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,7 @@ from aws_cdk import (
     Size,
     Stack,
     Tags,
+    Token,
 )
 from aws_cdk import aws_batch as batch
 from aws_cdk import aws_bedrock as bedrock
@@ -65,6 +67,10 @@ PROJECT_TAG_VALUE = "lost-in-place"
 GITHUB_OIDC_HOST = "token.actions.githubusercontent.com"
 BEDROCK_PROFILES_ENV = "LIP_BEDROCK_PROFILES"  # read by lost_in_place.llm.clients
 FROZEN_IMAGE_TAG_PREFIX = "freeze-"
+# Tagged (application) profiles only: a system profile's ARN has `inference-profile/` instead.
+EXTERNAL_PROFILE_ARN = re.compile(
+    r"arn:aws[a-z-]*:bedrock:(?P<region>[a-z0-9-]+):(?P<account>\d{12}):application-inference-profile/[a-z0-9]+"
+)
 
 
 @dataclass(frozen=True)
@@ -86,13 +92,37 @@ class SimSettings:
     # Bedrock system inference profiles the planner may call (e.g. "us.anthropic.claude-sonnet-4-6").
     # Each gets a tagged application inference profile, so its spend counts against the budget.
     bedrock_models: tuple[str, ...] = ()
+    # The region each Bedrock model is called in (registry `region`); unlisted means the stack's.
+    bedrock_regions: Mapping[str, str] = field(default_factory=dict)
+    # Tagged application inference profile ARNs, by model id, for the models called in another
+    # region. CloudFormation creates resources only in its stack's region, so these are created
+    # once outside the stack (infra/README.md, "Models in another region").
+    external_profiles: Mapping[str, str] = field(default_factory=dict)
     # Names of models imported with Bedrock Custom Model Import that the planner may call.
     imported_models: tuple[str, ...] = ()
 
 
-def _registry_ids(path: Path, provider: str) -> tuple[str, ...]:
+DEFAULT_MODEL_REGION = "us-east-1"  # lost_in_place.llm.registry.ModelSpec.region
+
+
+def _registry_entries(path: Path, provider: str) -> list[dict[str, Any]]:
     entries = yaml.safe_load(path.read_text()) or {}
-    return tuple(sorted({e["model_id"] for e in entries.values() if e.get("provider") == provider}))
+    return [e for e in entries.values() if e.get("provider") == provider]
+
+
+def _registry_ids(path: Path, provider: str) -> tuple[str, ...]:
+    return tuple(sorted({e["model_id"] for e in _registry_entries(path, provider)}))
+
+
+def bedrock_regions_from_registry(path: Path) -> dict[str, str]:
+    """The region each Bedrock model id in the planner registry is called in."""
+    regions: dict[str, str] = {}
+    for entry in _registry_entries(path, "bedrock"):
+        model, region = entry["model_id"], entry.get("region", DEFAULT_MODEL_REGION)
+        if regions.setdefault(model, region) != region:
+            # The jobs map profiles by model id, so one id can have only one profile.
+            raise ValueError(f"{model} is registered in both {regions[model]} and {region}")
+    return regions
 
 
 def bedrock_models_from_registry(path: Path) -> tuple[str, ...]:
@@ -201,8 +231,40 @@ class SimStack(Stack):
         # copy are not granted, so untagged (unbudgeted) model spend isn't possible from these roles.
         bedrock_profiles: dict[str, str] = {}
         foundation_models: list[str] = []
+        other_regions = {
+            model: region
+            for model in settings.bedrock_models
+            if (region := settings.bedrock_regions.get(model, self.region)) != self.region
+        }
+        if other_regions and Token.is_unresolved(self.region):
+            raise ValueError("Bedrock models of other regions need a stack with an explicit region")
+        if stray := sorted(set(settings.external_profiles) - set(other_regions)):
+            raise ValueError(f"External profiles for models not registered in another region: {stray}")
         for model in settings.bedrock_models:
             foundation_model = model.split(".", 1)[1]  # "us.anthropic.x" -> "anthropic.x"
+            if model in other_regions:
+                region = other_regions[model]
+                arn = settings.external_profiles.get(model)
+                if arn is None:
+                    Annotations.of(self).add_warning(
+                        f"No profile ARN for {model} ({region}): neither role may call it."
+                    )
+                    continue
+                match = EXTERNAL_PROFILE_ARN.fullmatch(arn)
+                if (
+                    match is None
+                    or match["region"] != region
+                    or (not Token.is_unresolved(self.account) and match["account"] != self.account)
+                ):
+                    raise ValueError(
+                        f"{model}: expected an application inference profile of this account in {region}"
+                    )
+                bedrock_profiles[model] = arn
+                # The profile condition below, not this prefix, is what limits the grant.
+                foundation_models.append(
+                    f"arn:{self.partition}:bedrock:*::foundation-model/{foundation_model}*"
+                )
+                continue
             profile = bedrock.CfnApplicationInferenceProfile(
                 self,
                 f"Bedrock-{foundation_model}",

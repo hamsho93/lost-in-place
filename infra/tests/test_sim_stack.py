@@ -1,10 +1,11 @@
 import json
+import re
 from pathlib import Path
 from typing import Any
 
 import aws_cdk as cdk
 import pytest
-from aws_cdk.assertions import Match, Template
+from aws_cdk.assertions import Annotations, Match, Template
 
 from lost_in_place_infra.sim_stack import (
     FROZEN_IMAGE_TAG_PREFIX,
@@ -12,6 +13,7 @@ from lost_in_place_infra.sim_stack import (
     SimSettings,
     SimStack,
     bedrock_models_from_registry,
+    bedrock_regions_from_registry,
     imported_models_from_registry,
 )
 
@@ -411,6 +413,166 @@ def test_registry_bedrock_models_are_read_from_models_yaml() -> None:
     assert "lip-qwen3-4b-thinking-2507-768f209" in imported_models_from_registry(registry)
     assert "lip-qwen3-4b-c1-c6bc0a6" in imported_models_from_registry(registry)
     assert SONNET not in imported_models_from_registry(registry)
+
+
+SONNET_5_5 = "us.anthropic.claude-sonnet-5-5"
+HAIKU_5_5 = "us.anthropic.claude-haiku-5-5"
+EAST_2_PROFILES = {
+    SONNET_5_5: "arn:aws:bedrock:us-east-2:123456789012:application-inference-profile/s55profile01",
+    HAIKU_5_5: "arn:aws:bedrock:us-east-2:123456789012:application-inference-profile/h55profile01",
+}
+
+
+def east_2_stack(name: str, **overrides: Any) -> SimStack:
+    settings: dict[str, Any] = {
+        "bedrock_models": (HAIKU_5_5, SONNET, SONNET_5_5),
+        "bedrock_regions": {SONNET: "us-east-1", SONNET_5_5: "us-east-2", HAIKU_5_5: "us-east-2"},
+        "external_profiles": EAST_2_PROFILES,
+    }
+    return SimStack(
+        cdk.App(),
+        name,
+        settings=SimSettings(**{**settings, **overrides}),
+        env=cdk.Environment(account="123456789012", region="us-east-1"),
+    )
+
+
+@pytest.fixture(scope="module")
+def east_2_template() -> Template:
+    return Template.from_stack(east_2_stack("WithEast2"))
+
+
+def test_no_us_east_1_profile_is_created_for_a_us_east_2_entry(east_2_template: Template) -> None:
+    profiles = east_2_template.find_resources("AWS::Bedrock::ApplicationInferenceProfile")
+    assert sorted(profiles) == ["Bedrockanthropicclaudesonnet46"]
+    template = json.dumps(east_2_template.to_json())
+    for model in (SONNET_5_5, HAIKU_5_5):
+        assert f"inference-profile/{model}" not in template
+
+
+def test_both_roles_invoke_the_us_east_2_profiles(east_2_template: Template) -> None:
+    for role in ("JobRole", "OperatorRole"):
+        [statement] = [
+            s
+            for s in granting(role_statements(east_2_template, role), "bedrock:InvokeModel")
+            if "Condition" not in s and "imported-model" not in json.dumps(s["Resource"])
+        ]
+        assert statement["Action"] == ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
+        assert all(arn in statement["Resource"] for arn in EAST_2_PROFILES.values())
+        assert {"Fn::GetAtt": ["Bedrockanthropicclaudesonnet46", "InferenceProfileArn"]} in statement[
+            "Resource"
+        ]
+
+
+def test_us_east_2_foundation_models_only_under_the_profile_condition(east_2_template: Template) -> None:
+    for role in ("JobRole", "OperatorRole"):
+        statements = granting(role_statements(east_2_template, role), "bedrock:InvokeModel")
+        [statement] = [s for s in statements if "foundation-model/" in json.dumps(s["Resource"])]
+        resources = json.dumps(statement["Resource"])
+        assert "bedrock:*::foundation-model/anthropic.claude-sonnet-5-5*" in resources
+        assert "bedrock:*::foundation-model/anthropic.claude-haiku-5-5*" in resources
+        condition = statement["Condition"]["StringEquals"]["bedrock:InferenceProfileArn"]
+        assert all(arn in condition for arn in EAST_2_PROFILES.values())
+
+
+def test_no_role_may_call_a_system_profile(east_2_template: Template) -> None:
+    policies = json.dumps(east_2_template.find_resources("AWS::IAM::Policy"))
+    assert re.search(r"(?<!application-)inference-profile/", policies) is None
+
+
+def test_jobs_and_output_map_the_us_east_2_profiles(east_2_template: Template) -> None:
+    jobs = east_2_template.find_resources("AWS::Batch::JobDefinition").values()
+    [output] = east_2_template.find_outputs("BedrockProfiles").values()
+    for mapping in [
+        *(json.dumps(job["Properties"]["ContainerProperties"]["Environment"]) for job in jobs),
+        json.dumps(output["Value"]),
+    ]:
+        for model, arn in EAST_2_PROFILES.items():
+            assert f'\\"{model}\\":\\"{arn}\\"' in mapping
+
+
+def test_budget_stop_covers_us_east_2_calls(east_2_template: Template) -> None:
+    [stop] = east_2_template.find_resources("AWS::IAM::ManagedPolicy").values()
+    [deny] = stop["Properties"]["PolicyDocument"]["Statement"]
+    # Unconditioned on `*`, so it denies every region's endpoint; the budget's tag filter is
+    # account-wide, so the us-east-2 profiles' project tag counts their spend.
+    assert deny["Effect"] == "Deny"
+    assert deny["Resource"] == "*"
+    assert "Condition" not in deny
+    assert {"bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"} <= set(deny["Action"])
+
+
+def test_us_east_2_entry_without_a_profile_arn_is_not_callable() -> None:
+    stack = east_2_stack("WithoutEast2Arns", external_profiles={})
+    Annotations.from_stack(stack).has_warning(
+        "*", Match.string_like_regexp(f"No profile ARN for {SONNET_5_5} \\(us-east-2\\)")
+    )
+    template = Template.from_stack(stack)
+    assert "claude-sonnet-5-5" not in json.dumps(template.to_json())
+    assert sorted(template.find_resources("AWS::Bedrock::ApplicationInferenceProfile")) == [
+        "Bedrockanthropicclaudesonnet46"
+    ]
+
+
+@pytest.mark.parametrize(
+    "arn",
+    [
+        "arn:aws:bedrock:us-east-2:123456789012:inference-profile/us.anthropic.claude-sonnet-5-5",
+        "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/s55profile01",
+        "arn:aws:bedrock:us-east-2:210987654321:application-inference-profile/s55profile01",
+        "arn:aws:bedrock:us-east-2:123456789012:application-inference-profile/*",
+    ],
+)
+def test_external_profile_must_be_this_accounts_tagged_profile_in_the_entry_region(arn: str) -> None:
+    with pytest.raises(ValueError, match="expected an application inference profile"):
+        east_2_stack("BadArn", external_profiles={**EAST_2_PROFILES, SONNET_5_5: arn})
+
+
+def test_external_profile_for_an_in_region_model_is_rejected() -> None:
+    arn = "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/s46profile01"
+    with pytest.raises(ValueError, match="not registered in another region"):
+        east_2_stack("StrayArn", external_profiles={**EAST_2_PROFILES, SONNET: arn})
+
+
+def test_registry_regions_default_to_us_east_1_and_are_one_per_model(tmp_path: Path) -> None:
+    registry = tmp_path / "models.yaml"
+    registry.write_text(
+        f"a: {{provider: bedrock, model_id: {SONNET}}}\n"
+        f"b: {{provider: bedrock, model_id: {SONNET_5_5}, region: us-east-2}}\n"
+        f"b-fb1: {{provider: bedrock, model_id: {SONNET_5_5}, region: us-east-2, temperature: 0}}\n"
+    )
+    assert bedrock_regions_from_registry(registry) == {SONNET: "us-east-1", SONNET_5_5: "us-east-2"}
+    registry.write_text(
+        registry.read_text() + f"c: {{provider: bedrock, model_id: {SONNET_5_5}, region: us-west-2}}\n"
+    )
+    with pytest.raises(ValueError, match="registered in both us-east-2 and us-west-2"):
+        bedrock_regions_from_registry(registry)
+
+
+def test_registry_entries_of_other_regions_get_no_profile_in_the_stack_region() -> None:
+    registry = Path(__file__).resolve().parents[2] / "src" / "lost_in_place" / "llm" / "models.yaml"
+    models, regions = bedrock_models_from_registry(registry), bedrock_regions_from_registry(registry)
+    others = {m: r for m, r in regions.items() if r != "us-east-1"}
+    template = Template.from_stack(
+        SimStack(
+            cdk.App(),
+            "FromRegistry",
+            settings=SimSettings(
+                bedrock_models=models,
+                bedrock_regions=regions,
+                external_profiles={
+                    m: f"arn:aws:bedrock:{r}:123456789012:application-inference-profile/p{i:011d}"
+                    for i, (m, r) in enumerate(others.items())
+                },
+            ),
+            env=cdk.Environment(account="123456789012", region="us-east-1"),
+        )
+    )
+    profiles = template.find_resources("AWS::Bedrock::ApplicationInferenceProfile").values()
+    copied = [json.dumps(p["Properties"]["ModelSource"]["CopyFrom"]) for p in profiles]
+    assert len(copied) == len(models) - len(others)
+    for model in others:
+        assert not any(c.endswith(f':inference-profile/{model}"]]}}') for c in copied)
 
 
 def imported_statements(template: Template) -> list[dict[str, object]]:
