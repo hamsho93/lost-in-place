@@ -142,8 +142,9 @@ claude-haiku-5-5:
   model_id: us.anthropic.claude-haiku-5-5
   region: us-east-2
   max_tokens: 4096
-  temperature: 0
   tool_choice: auto
   additional_request_fields: {output_config: {effort: low}}
   notes: >-
-    Smoke-only, never in a freeze-v3 sweep. Same settings as claude-sonnet-5-5.
+    Smoke-only, never in a freeze-v3 sweep. The settings of claude-sonnet-5-5-fb1: Anthropic's
+    docs say Haiku 5.5 rejects any non-default temperature, and the smoke flies the configuration
+    expected to work.
