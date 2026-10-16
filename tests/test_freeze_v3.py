@@ -326,27 +326,26 @@ def test_freeze_record_defaults_to_v2_and_refuses_v3_only_flags(capsys: pytest.C
     assert "only with --freeze v3" in capsys.readouterr().err
 
 
-FIFTH_ARM_REGISTRY = """
-gpt-6.1-sol-fb2:
-  provider: bedrock
-  model_id: openai.gpt-6.1-sol
-claude-sonnet-5-5-fb1:
-  provider: bedrock
-  model_id: us.anthropic.claude-sonnet-5-5
-  region: us-east-2
-"""
+FIFTH_ARM_ENTRIES = {
+    "gpt-6.1-sol-fb2": "  provider: bedrock\n  model_id: openai.gpt-6.1-sol\n",
+    "claude-sonnet-5-5-fb1": (
+        "  provider: bedrock\n  model_id: us.anthropic.claude-sonnet-5-5\n  region: us-east-2\n"
+    ),
+}
 
 
 def test_cli_records_five_arms_then_drops_one(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     args = ["freeze-record", "--freeze", "v3", "--root", str(repo)]
     write = [*args, "--template", "t0", "--n", "160", "--arms", ",".join(FIVE), "--image-digest", DIGEST]
-    assert cli.main([*write, "--write"]) == 1
-    assert "not in src/lost_in_place/llm/models.yaml: claude-sonnet-5-5-fb1, gpt-6.1-sol-fb2" in (
-        capsys.readouterr().err
-    )
+    unknown = [*args, "--template", "t0", "--n", "160", "--arms", ",".join((*ARMS, "claude-sonnet-9"))]
+    assert cli.main([*unknown, "--image-digest", DIGEST, "--write"]) == 1
+    assert "not in src/lost_in_place/llm/models.yaml: claude-sonnet-9" in capsys.readouterr().err
     registry = repo / freeze.MODEL_REGISTRY
-    registry.write_text(registry.read_text() + FIFTH_ARM_REGISTRY)
-    _git(repo, "commit", "-qam", "fifth arm")
+    text = registry.read_text()
+    registry.write_text(
+        text + "".join(f"{k}:\n{v}" for k, v in FIFTH_ARM_ENTRIES.items() if f"\n{k}:" not in text)
+    )
+    _git(repo, "commit", "-qam", "fifth arm", "--allow-empty")
     assert cli.main([*write, "--write"]) == 0
     capsys.readouterr()
     written = freeze.recorded_v3((repo / freeze.SPEC_V3).read_text())

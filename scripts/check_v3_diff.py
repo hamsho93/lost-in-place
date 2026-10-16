@@ -421,7 +421,8 @@ def check_bundles(repo: Path, pre: str, head: str, result: Result) -> None:
             detail = f"; differs in: {', '.join(where)}" if where else ""
             result.failures.append(f"{name} changed: `{b}` at pre, `{a}` at head{detail}")
         else:
-            extra = f" ({after['prompts']} prompts rendered from each ref)" if after.get("prompts") else ""
+            rendered = name == "prompt bundle v3" and after.get("prompts")
+            extra = f" ({after['prompts']} prompts rendered from each ref)" if rendered else ""
             result.notes.append(f"{name}: `{a}` at both refs{extra}")
 
 
