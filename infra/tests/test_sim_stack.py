@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from typing import Any
 
 import aws_cdk as cdk
 import pytest
@@ -418,6 +419,7 @@ def imported_statements(template: Template) -> list[dict[str, object]]:
         for policy in template.find_resources("AWS::IAM::Policy").values()
         for statement in policy["Properties"]["PolicyDocument"]["Statement"]
         if "imported-model" in json.dumps(statement.get("Resource"))
+        and "bedrock:InvokeModel" in json.dumps(statement["Action"])
     ]
 
 
@@ -457,6 +459,85 @@ def test_job_definition_can_pin_an_image_digest() -> None:
     assert len(jobs) == 2
     for job in jobs:
         assert f"@{digest}" in json.dumps(job["Properties"]["ContainerProperties"]["Image"])
+
+
+def role_statements(template: Template, role_prefix: str) -> list[dict[str, Any]]:
+    return [
+        statement
+        for policy in template.find_resources("AWS::IAM::Policy").values()
+        if any(r["Ref"].startswith(role_prefix) for r in policy["Properties"]["Roles"])
+        for statement in policy["Properties"]["PolicyDocument"]["Statement"]
+    ]
+
+
+def granting(statements: list[dict[str, Any]], action: str) -> list[dict[str, Any]]:
+    def actions(s: dict[str, Any]) -> list[str]:
+        return s["Action"] if isinstance(s["Action"], list) else [s["Action"]]
+
+    return [s for s in statements if s["Effect"] == "Allow" and action in actions(s)]
+
+
+def test_operator_reads_metrics_which_have_no_resource_scope(template: Template) -> None:
+    operator = role_statements(template, "OperatorRole")
+    for action in ("cloudwatch:GetMetricData", "cloudwatch:ListMetrics", "bedrock:ListImportedModels"):
+        [statement] = granting(operator, action)
+        assert statement["Resource"] == "*"
+        assert "Condition" not in statement
+
+
+def test_operator_reads_only_this_projects_budget(template: Template) -> None:
+    operator = role_statements(template, "OperatorRole")
+    for action in ("budgets:ViewBudget", "budgets:DescribeBudgetActionsForBudget"):
+        [statement] = granting(operator, action)
+        assert json.dumps(statement["Resource"]).endswith(':budgets::123456789012:budget/Test-monthly"]]}')
+
+
+def test_operator_lists_policies_of_the_two_stopped_roles_only(template: Template) -> None:
+    [statement] = granting(role_statements(template, "OperatorRole"), "iam:ListAttachedRolePolicies")
+    roles = sorted(r["Fn::GetAtt"][0] for r in statement["Resource"])
+    assert len(roles) == 2
+    assert roles[0].startswith("JobRole")
+    assert roles[1].startswith("OperatorRole")
+
+
+def test_operator_deletes_only_project_tagged_imports(template: Template) -> None:
+    assert granting(role_statements(template, "OperatorRole"), "bedrock:DeleteImportedModel") == []
+    app = cdk.App()
+    stack = SimStack(
+        app,
+        "WithImportedDelete",
+        settings=SimSettings(imported_models=("lip-qwen-test",)),
+        env=cdk.Environment(account="123456789012", region="us-east-1"),
+    )
+    imported = Template.from_stack(stack)
+    [statement] = granting(role_statements(imported, "OperatorRole"), "bedrock:DeleteImportedModel")
+    assert json.dumps(statement["Resource"]).endswith(':imported-model/*"]]}')
+    assert statement["Condition"] == {"StringEquals": {"aws:ResourceTag/project": "lost-in-place"}}
+    assert granting(role_statements(imported, "JobRole"), "bedrock:DeleteImportedModel") == []
+
+
+def test_operator_describes_this_stack_only(template: Template) -> None:
+    operator = role_statements(template, "OperatorRole")
+    for action in ("cloudformation:DescribeStacks", "cloudformation:DescribeStackResources"):
+        [statement] = granting(operator, action)
+        assert json.dumps(statement["Resource"]).endswith(':stack/Test/*"]]}')
+
+
+def test_submitter_grants_stay_off_the_job_role(template: Template) -> None:
+    policies = json.dumps(role_statements(template, "JobRole"))
+    for prefix in ("cloudwatch:", "budgets:", "iam:", "cloudformation:", "bedrock:DeleteImportedModel"):
+        assert prefix not in policies
+
+
+def test_only_the_operator_may_submit_jobs(template: Template) -> None:
+    submitters = [
+        role
+        for policy in template.find_resources("AWS::IAM::Policy").values()
+        if granting(policy["Properties"]["PolicyDocument"]["Statement"], "batch:SubmitJob")
+        for role in policy["Properties"]["Roles"]
+    ]
+    assert len(submitters) == 1
+    assert submitters[0]["Ref"].startswith("OperatorRole")
 
 
 def test_frozen_images_outlive_the_keep_ten_rule(template: Template) -> None:

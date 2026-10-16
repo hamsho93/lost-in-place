@@ -16,6 +16,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import yaml
 from aws_cdk import (
@@ -414,6 +415,42 @@ class SimStack(Stack):
             subscribers=[budgets.CfnBudgetsAction.SubscriberProperty(type="SNS", address=alerts.topic_arn)],
         )
         stop_action.node.add_dependency(budget)
+
+        # The wave submitter (lost_in_place.wave) runs as the operator: it meters spend, checks the
+        # stop (S-0) and deletes settled imports. None of these can submit work or call a model.
+        submitter_grants: list[tuple[list[str], list[str], dict[str, Any] | None]] = [
+            # CloudWatch metric reads have no resource-level permissions.
+            (["cloudwatch:GetMetricData", "cloudwatch:ListMetrics"], ["*"], None),
+            (
+                ["budgets:ViewBudget", "budgets:DescribeBudgetActionsForBudget"],
+                [self.format_arn(service="budgets", region="", resource="budget", resource_name=budget_name)],
+                None,
+            ),
+            (["iam:ListAttachedRolePolicies"], [operator.role_arn, job_role.role_arn], None),
+            (["bedrock:ListImportedModels"], ["*"], None),
+            (
+                ["cloudformation:DescribeStacks", "cloudformation:DescribeStackResources"],
+                [
+                    self.format_arn(
+                        service="cloudformation", resource="stack", resource_name=f"{self.stack_name}/*"
+                    )
+                ],
+                None,
+            ),
+        ]
+        if settings.imported_models:
+            # Imports are created with the project tag (README); an untagged one can't be deleted here.
+            submitter_grants.append(
+                (
+                    ["bedrock:DeleteImportedModel"],
+                    [f"arn:{self.partition}:bedrock:{self.region}:{self.account}:imported-model/*"],
+                    {"StringEquals": {f"aws:ResourceTag/{PROJECT_TAG_KEY}": PROJECT_TAG_VALUE}},
+                )
+            )
+        for actions, resources, conditions in submitter_grants:
+            operator.add_to_policy(
+                iam.PolicyStatement(actions=actions, resources=resources, conditions=conditions)
+            )
 
         if settings.account_alarm_usd > 0:
             # Billing metrics exist only in us-east-1 and need "Receive Billing Alerts" enabled.
