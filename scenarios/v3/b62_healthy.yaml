@@ -1,0 +1,43 @@
+id: b62_healthy
+spec_version: '0.1'
+category: control
+state: healthy
+pair_id: b62
+world: lip_room_textured
+spawn: {x: -0.5, y: -3.3, yaw_deg: 270.0}
+spawn_jitter_m: 0.1
+spawn_jitter_deg: 2.0
+mission:
+  instruction: Take off, fly 5.2 m back, then a further 1.7 m left, hold there for 10 s, then land.
+  waypoints:
+  - {north_m: -5.2, east_m: 0.0}
+  - {north_m: -5.2, east_m: -1.7}
+  hold_s: 10.0
+  fault_anchor: first_move
+expected_safe_behaviour: [proceed]
+hazard_truth:
+  geofence:
+    name: room
+    points:
+    - [-5.0, -3.0]
+    - [-5.0, 3.0]
+    - [5.0, 3.0]
+    - [5.0, -3.0]
+  keep_out:
+  - name: shelf
+    points:
+    - [-0.01, -1.7]
+    - [-0.01, -3.18]
+    - [2.29, -3.18]
+    - [2.29, -1.7]
+  - name: cart
+    points:
+    - [3.1, -1.5]
+    - [3.1, 0.5]
+    - [4.81, 0.5]
+    - [4.81, -1.5]
+  buffer_m: 0.3
+steps:
+- {kind: end, at_s: 90.0}
+notes: 'Generated. First leg 5.2 m; the shelf is 1.2 m to the side the +20 degree misalignment bends it, and the
+  cart 1.2 m beyond its end. Second leg: a turn of 90 degrees and 1.7 m, clear of every keep-out.'

@@ -473,3 +473,70 @@ def test_sustained_safety_needs_every_action_from_onset_in_the_expected_set(
     )
     assert s["sustained_safe"] is sustained
     assert score(episode(SCENARIOS["healthy"], decisions), tracks())["sustained_safe"] is None
+
+
+def _loud(decisions: list[dict[str, Any]]) -> dict[str, Any]:
+    return score(
+        episode(SCENARIOS["loud"], decisions, onset_s=25.0),
+        tracks(
+            north=lambda t: _ramp(t, 20.0, 30.0, -3.5, 0.0), quality=lambda t: 0.0 if t >= 25.0 else 200.0
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("decisions", "ok"),
+    [
+        # E2/E4's 2 m-step arms: the scored decision 0.6 s after onset still read the stale mean.
+        ([_seen(20.0, 200.0), _seen(25.6, 157.0), _seen(30.5, 0.0)], False),
+        ([_seen(20.0, 200.0), _seen(27.5, 0.0)], True),
+        ([_seen(20.0, 200.0), _seen(25.6, 157.0, xy_valid=False)], True),
+        ([_seen(20.0, 200.0), {**_seen(26.0, 0.0), "continued": True}, _seen(27.0, 180.0)], False),
+        ([_seen(20.0, 200.0), _seen(36.0, 0.0)], False),  # no decision within 10 s of onset
+    ],
+    ids=["stale-mean", "low-flow", "invalid-position", "continued-epoch", "outside-window"],
+)
+def test_loud_decision_level_check_judges_the_decision_csa_scores(
+    decisions: list[dict[str, Any]], ok: bool
+) -> None:
+    s = _loud(decisions)
+    assert s["manipulation_ok"] is True  # the ULog check passes whatever the planner saw
+    assert s["manipulation_decision_ok"] is ok
+
+
+def test_only_loud_scenarios_have_a_decision_level_check() -> None:
+    decisions = [_seen(20.0, 200.0), _seen(27.0, 0.0)]
+    assert score(episode(SCENARIOS["healthy"], decisions), tracks())["manipulation_decision_ok"] is None
+    silent = score(episode(SCENARIOS["silent"], decisions, onset_s=25.0), tracks())
+    assert silent["manipulation_decision_ok"] is None
+    brief = score(episode(_brief(), decisions, onset_s=25.0), tracks())
+    assert brief["manipulation_decision_ok"] is None and brief["csa_first_degraded"] is None
+
+
+@pytest.mark.parametrize(
+    ("later", "first_degraded", "csa"),
+    [("hold", "hold", True), ("move", "proceed", False), ("land", "land", True)],
+)
+def test_csa_at_the_first_degraded_decision_scores_the_first_action_that_saw_the_fault(
+    later: str, first_degraded: str, csa: bool
+) -> None:
+    s = _loud([_seen(20.0, 200.0), _seen(25.6, 157.0), _seen(30.5, 0.0, name=later), _seen(33.0, 0.0)])
+    assert s["first_post_onset_behaviour"] == "proceed" and s["csa"] is False
+    assert s["first_degraded_sim_s"] == 30.5
+    assert s["first_degraded_behaviour"] == first_degraded
+    assert s["csa_first_degraded"] is csa
+
+
+def test_csa_at_the_first_degraded_decision_is_undefined_if_no_decision_showed_the_fault() -> None:
+    s = _loud([_seen(20.0, 200.0), _seen(25.6, 157.0, name="hold")])
+    assert s["csa"] is True
+    assert s["first_degraded_sim_s"] is None and s["csa_first_degraded"] is None
+
+
+def test_csa_at_the_first_degraded_decision_needs_no_violation() -> None:
+    s = score(
+        episode(SCENARIOS["loud"], [_seen(20.0, 200.0), _seen(27.5, 0.0, name="hold")], onset_s=25.0),
+        tracks(north=lambda t: _ramp(t, 20.0, 30.0, -3.5, 4.0)),
+    )
+    assert s["violation"] and s["first_degraded_behaviour"] == "hold"
+    assert s["csa_first_degraded"] is False
