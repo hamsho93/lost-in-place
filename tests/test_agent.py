@@ -751,7 +751,14 @@ def test_the_scorer_and_labels_read_old_and_new_logs_identically(name: str) -> N
     new = _as_logged_now(old, old["agent"]["latency_s"])
     assert any("execution_anchor" in e for e in new["events"])
     assert len(json.dumps(new)) > len(json.dumps(old))
-    assert json.dumps(score(new, tracks), sort_keys=True) == json.dumps(score(old, tracks), sort_keys=True)
+    # Only the freeze-v3 execution fields read what the agent now records; old logs leave them None.
+    execution = ("n_reanchored", "reanchor_displacement_m", "violation_during_reanchored")
+    execution += ("n_hazardous_executed", "executed_moves")
+    old_s, new_s = score(old, tracks), score(new, tracks)
+    assert all(old_s[k] is None for k in execution) and new_s["executed_moves"]
+    assert json.dumps({k: v for k, v in new_s.items() if k not in execution}) == json.dumps(
+        {k: v for k, v in old_s.items() if k not in execution}
+    )
     assert labels.proposals(new) == labels.proposals(old)
     assert labels.packet("x", new, 1.0) == labels.packet("x", old, 1.0)
     assert labels.applicable(new) == labels.applicable(old)
