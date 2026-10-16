@@ -81,6 +81,30 @@ def test_unknown_sweep_keys_and_empty_globs_are_rejected() -> None:
         manifest.build(_spec(scenarios=["nope/*.yaml"]), ROOT)
 
 
+def test_cells_union_cross_products_under_one_sweep() -> None:
+    plain = manifest.build(_spec(), ROOT)
+    assert manifest.build(_spec(cells=[{}]), ROOT) == plain
+    split = _spec(
+        scenarios=["scenarios/pilot/cross_healthy.yaml"],
+        cells=[{}, {"scenarios": ["scenarios/pilot/cross_loud.yaml"], "observations": ["O0", "O1"]}],
+    )
+    entries = manifest.build(split, ROOT)
+    cells = {(e.scenario_id, e.validator, e.observation) for e in entries}
+    assert len(entries) == len(cells) * 2 == (2 + 4) * 2
+    assert ("cross_loud", "none", "O1") in cells and ("cross_healthy", "none", "O1") not in cells
+    assert {e.seed for e in entries if e.rep == 0} == {manifest.episode_seed("cross", 0)}
+
+
+def test_bad_cells_and_overlapping_cells_are_rejected() -> None:
+    for bad in ([], {}, [{"reps": 2}], ["x"]):
+        with pytest.raises(ValueError, match="cell"):
+            _spec(cells=bad)
+    with pytest.raises(ValueError, match="duplicate episode keys"):
+        manifest.build(_spec(cells=[{}, {"validators": ["none"]}]), ROOT)
+    with pytest.raises(ValueError, match="observation level"):
+        _spec(cells=[{"observations": ["O1-L"]}])
+
+
 def test_sweep_names_must_be_safe_path_segments() -> None:
     for bad in ("", "E1", "a/b", "../x", "-x"):
         with pytest.raises(ValueError, match="sweep name"):
