@@ -6,7 +6,8 @@
 - **The prompts** are a canonical JSON bundle of what an LLM arm is shown: both prompt versions,
   the system prompt, DEXI's prompt template, both tool lists, the chat templates, and both
   prompts rendered for one fixed observation at O0 and at O1. A change to the wording, the
-  rendering or the tools changes it; a change to a comment doesn't.
+  rendering or the tools changes it; a change to a comment doesn't. Freeze-v3's prompts are a
+  separate bundle, `prompt_bundle_v3()` (the ladder), which no freeze-v2 row hashes.
 - **Labelling** is the same kind of bundle: the labelling instructions, the model labeller's
   brief and its pinned model.
 - **The image digest and the git SHA** are recorded as they are.
@@ -18,19 +19,34 @@
   file" row too and touches nothing else.
 - **The E4 supplement** (`scripts/e4_supplement.py`, design A11's additions to E4's report) is
   pinned the same way, by `lip freeze-record --e4-supplement --write`, after the analysis row.
+
+Freeze-v3 (E5) has its own record, in `SPEC-v3.md` (`Freeze.V3`, `lip freeze-record --freeze v3`),
+with the rows in `V3_ROWS`. It is written once, by the adaptation pull request, and every row is in
+the table from the start: the analysis script is one of them, not a later pin. Besides hashes it
+holds four adaptation outcomes, which are values: the wording template (A-1), N (A-2), the
+confirmatory arms (A-3, A-4) and the wave-wide m (A-5, 4 times the arms). The scenario rows hash the
+chosen template's directories. The probe-prompt row hashes the frozen texts that probes send
+outside an arm's prompt (`PROBE_TEXTS`), apart from the v3 prompt bundle, so the bundle doesn't
+depend on the probe modules. `tag_hashes()` is the hash list of the `freeze-v3-pre` tag message.
 """
 
 from __future__ import annotations
 
 import dataclasses
+import functools
 import hashlib
+import importlib
+import importlib.util
 import json
 import re
 import subprocess
+from collections.abc import Callable
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
 SPEC = "SPEC.md"
+REPO_ROOT = Path(__file__).resolve().parents[2]
 RECORD_HEADING = "## Freeze record"
 ROWS = (
     "This file",
@@ -63,14 +79,18 @@ def _record_span(lines: list[str]) -> tuple[int, int]:
     return start, end
 
 
-def blank_record(spec_text: str) -> str:
+def _blank(spec_text: str, rows: tuple[str, ...]) -> str:
     lines = spec_text.split("\n")
     start, end = _record_span(lines)
     for i in range(start, end):
         m = _ROW.match(lines[i])
-        if m and m["artifact"] in ALL_ROWS:
+        if m and m["artifact"] in rows:
             lines[i] = f"| {m['artifact']} | |"
     return "\n".join(lines)
+
+
+def blank_record(spec_text: str) -> str:
+    return _blank(spec_text, ALL_ROWS)
 
 
 def spec_hash(spec_text: str) -> str:
@@ -127,12 +147,113 @@ def prompt_bundle() -> dict[str, Any]:
     }
 
 
+# Fixed instructions in the two freeze-v3 wording templates (design section 5.1), so the v3 bundle
+# doesn't depend on the family generator; the rest of a rendered prompt follows from them.
+V3_INSTRUCTIONS = {
+    "T0": "Take off, fly 4.0 m left, then a further 1.8 m forward, hold there for 10 s, then land.",
+    "T1": (
+        "Take off, fly 4.0 m left, then 1.8 m forward, ending 1.8 m north and 4.0 m west of the"
+        " take-off point, hold there for 10 s, then land."
+    ),
+}
+
+
+def v3_observations() -> dict[str, Any]:
+    """One decision after the first 2 m of leg 1, by state: the health a planner sees there in a
+    healthy episode, and at the first decision after the onset of a brief and of a loud fault."""
+    from lost_in_place.planning import EstimatorHealth
+
+    return {
+        "healthy": EstimatorHealth(True, 0.31, 176, innovation_check_failing=False, heading_reference=False),
+        "brief": EstimatorHealth(True, 0.43, 0, innovation_check_failing=False, heading_reference=False),
+        "loud": EstimatorHealth(True, 0.64, 0, innovation_check_failing=False, heading_reference=False),
+    }
+
+
+def render_v3(instruction: str, observation: str, prompt_version: str, state: str) -> str:
+    """The prompt a `dexi` arm under validator `none` is shown at the v3 bundle's decision."""
+    from lost_in_place.llm import dexi
+    from lost_in_place.planning import Observation, shows_health
+
+    health = v3_observations()[state] if shows_health(observation) else None
+    obs = Observation(instruction, 0.02, -1.98, 1.5, 0.0, 88.0, health=health)
+    history = [
+        dexi.history_line(1, "take_off", {"alt_m": 1.5}, "reached: took off, now at 1.5 m"),
+        dexi.history_line(
+            2, "move", {"direction": "left", "distance_m": 2.0}, "reached: reached (0.0 N, -2.0 E, 1.5 m alt)"
+        ),
+    ]
+    return dexi.render_prompt(
+        obs.goal,
+        dexi.DexiEnvelope(max_alt_m=2.0, geofence_m=4.5),
+        dexi.state_from_observation(obs),
+        history,
+        dexi.health_block(health, observation) if health is not None else "",
+        dexi.template(prompt_version, dexi.NO_VALIDATOR, observation),
+    )
+
+
+def prompt_bundle_v3(root: Path | None = None) -> dict[str, Any]:
+    """Freeze-v3's prompts: every observation level under both DEXI prompt versions and validator
+    `none`, rendered in both wording templates at a healthy, a brief and a loud decision, with the
+    rung texts, the ladder and the tools. A pair the adapter refuses is listed as rejected. The
+    render grid (`prompt_grid.render_grid`) adds the digests of every prompt DEXI's planner renders
+    across health values, histories and the committed E5 families' instructions under `root`
+    (default: this checkout)."""
+    from lost_in_place import prompt_grid
+    from lost_in_place.llm import dexi, prompt
+    from lost_in_place.planning import OBSERVATION_LEVELS
+
+    try:
+        grid = prompt_grid.render_grid(root or REPO_ROOT)
+    except (FileNotFoundError, ImportError) as e:
+        raise MissingArtifact(f"render grid: {e}") from e
+
+    pairs, rejected = {}, []
+    for version in dexi.PROMPT_VERSIONS:
+        for level in OBSERVATION_LEVELS:
+            try:
+                pairs[level, version] = dexi.template(version, dexi.NO_VALIDATOR, level)
+            except ValueError:
+                rejected.append(f"{level}/{version}")
+    templates = Path(prompt.__file__).parent / "templates"
+    return {
+        "validator": dexi.NO_VALIDATOR,
+        "prompt_versions": list(dexi.PROMPT_VERSIONS),
+        "observation_levels": list(OBSERVATION_LEVELS),
+        "ladder": {name: list(pair) for name, pair in dexi.LADDER.items()},
+        "templates": {f"{level}/{version}": text for (level, version), text in pairs.items()},
+        "rejected": rejected,
+        "o1l": {"flow": dexi.O1L_FLOW, "eph_m": dexi.O1L_EPH_M, "annotations": list(dexi.O1L_ANNOTATIONS)},
+        "o1n_sentence": dexi.O1N_SENTENCE,
+        "o1r_rule": dexi.O1R_RULE,
+        "history_window": dexi.HISTORY_WINDOW,
+        "tools": dexi.TOOLS,
+        "instructions": V3_INSTRUCTIONS,
+        "renders": {
+            wording: {
+                f"{level}/{version}": {
+                    state: render_v3(instruction, level, version, state) for state in v3_observations()
+                }
+                for level, version in pairs
+            }
+            for wording, instruction in V3_INSTRUCTIONS.items()
+        },
+        "chat_templates": {p.name: p.read_text() for p in sorted(templates.glob("*.jinja"))},
+        "render_grid": grid,
+    }
+
+
 def _canonical(bundle: dict[str, Any]) -> bytes:
     return json.dumps(bundle, sort_keys=True, separators=(",", ":")).encode()
 
 
 def prompt_hash() -> str:
     return sha256(_canonical(prompt_bundle()))
+
+
+def prompt_hash_v3(root: Path | None = None) -> str:
+    return sha256(_canonical(prompt_bundle_v3(root)))
 
 
 def labelling_hash() -> str:
@@ -183,16 +304,20 @@ def record(root: Path, design: Path | None, image_digest: str | None) -> dict[st
     )
 
 
-def recorded(spec_text: str) -> dict[str, str]:
-    """The values written in SPEC's freeze record, by the rows it has."""
+def _recorded(spec_text: str, rows: tuple[str, ...]) -> dict[str, str]:
     lines = spec_text.split("\n")
     start, end = _record_span(lines)
     found = {}
     for line in lines[start:end]:
         m = _ROW.match(line)
-        if m and m["artifact"] in ALL_ROWS:
+        if m and m["artifact"] in rows:
             found[m["artifact"]] = m["value"].strip().strip("`")
     return found
+
+
+def recorded(spec_text: str) -> dict[str, str]:
+    """The values written in SPEC's freeze record, by the rows it has."""
+    return _recorded(spec_text, ALL_ROWS)
 
 
 def _row(artifact: str, value: str) -> str:
@@ -243,3 +368,334 @@ def mismatches(
         for row in rows
         if row != "Git SHA" and values.get(row) and written.get(row) != values[row]
     ]
+
+
+SPEC_V3 = "SPEC-v3.md"
+DESIGN_V3 = "docs/prereg/freeze-v3-design.md"
+E5_SCENARIOS = "scenarios/e5"
+E5_TEMPLATES = ("t0", "t1")
+E5_SETS = ("families", "canary", "timed")
+E5_SWEEPS = "sweeps/e5"
+FAMILY_COUNTS = (120, 160)
+MODEL_REGISTRY = "src/lost_in_place/llm/models.yaml"
+ANALYSIS_SCRIPT_V3 = "src/lost_in_place/stats_v3.py"
+ADMISSION_SCRIPT = "scripts/e5_admission.py"
+# Frozen text a probe sends besides an arm's prompt, by name: "<module>:<attribute>", or
+# "<script path from the repo root>:<attribute>". Every such text must be listed before freeze-v3-pre.
+PROBE_TEXTS = {"wording-check": "lost_in_place.wording:PROBE_QUESTION"}
+
+DESIGN_ROW_V3 = f"Experiment design (`{DESIGN_V3}`)"
+TEMPLATE_ROW = "Wording template (A-1)"
+SCENARIO_ROWS_V3 = {s: f"`{E5_SCENARIOS}/<t>/{s}/*.yaml` (sorted, concatenated)" for s in E5_SETS}
+PROMPT_ROW_V3 = "Prompt bundle v3 (`freeze.prompt_bundle_v3()`)"
+PROBE_ROW_V3 = "Probe prompts v3 (`freeze.probe_bundle_v3()`)"
+LABELLING_ROW = ROWS[5]
+MODELS_ROW = f"Model registry (`{MODEL_REGISTRY}`)"
+SWEEPS_ROW = f"`{E5_SWEEPS}/*.yaml` (sorted, concatenated)"
+IMAGE_ROW = ROWS[6]
+GIT_ROW = ROWS[7]
+ANALYSIS_ROW_V3 = f"Analysis script (`{ANALYSIS_SCRIPT_V3}`)"
+N_ROW = "Families (N)"
+ARMS_ROW = "Confirmatory arms"
+M_ROW = "Wave-wide m"
+DROPPED_ROW = "Dropped arms"
+NO_ARMS = "none"
+PRIMARIES_PER_ARM = 4
+MAX_ARMS = 5
+# Registry entries that are never a confirmatory arm: the scripted controls and the smoke-only model.
+SCRIPTED_ARMS = ("rule-2m", "rule-leg", "scripted-cautious", "scripted-naive")
+SMOKE_ONLY = ("claude-haiku-5-5",)
+_FALLBACK = re.compile(r"-fb[0-9]+$")
+_ARM_NAME = re.compile(r"[a-z0-9][a-z0-9.-]*")
+V3_ROWS = (
+    ROWS[0],
+    DESIGN_ROW_V3,
+    TEMPLATE_ROW,
+    *SCENARIO_ROWS_V3.values(),
+    PROMPT_ROW_V3,
+    PROBE_ROW_V3,
+    LABELLING_ROW,
+    MODELS_ROW,
+    SWEEPS_ROW,
+    IMAGE_ROW,
+    GIT_ROW,
+    ANALYSIS_ROW_V3,
+    N_ROW,
+    ARMS_ROW,
+    M_ROW,
+    DROPPED_ROW,
+)
+
+
+class Freeze(StrEnum):
+    """A freeze and its record: freeze-v2 (E1-E4, `SPEC.md`) or freeze-v3 (E5, `SPEC-v3.md`)."""
+
+    V2 = "v2"
+    V3 = "v3"
+
+    @property
+    def spec(self) -> str:
+        return SPEC if self is Freeze.V2 else SPEC_V3
+
+    @property
+    def rows(self) -> tuple[str, ...]:
+        return ALL_ROWS if self is Freeze.V2 else V3_ROWS
+
+
+class MissingArtifact(LookupError):
+    """A frozen artifact that isn't on this checkout (yet)."""
+
+
+def parse_arms(text: str) -> tuple[str, ...]:
+    """Comma-separated arms, sorted; `none` is no arm."""
+    arms = tuple(sorted(arm.strip().strip("`") for arm in text.split(",") if arm.strip()))
+    return () if arms == (NO_ARMS,) else arms
+
+
+def base_arm(entry: str) -> str:
+    """The arm a registry entry flies as: a pre-declared fallback entry `<arm>-fb<k>` is `<arm>`, as
+    in `stats_v3.base_arm`."""
+    return _FALLBACK.sub("", entry)
+
+
+@dataclasses.dataclass(frozen=True)
+class Adaptation:
+    """The adaptation outcomes the v3 record holds as values (design section 2.3): the wording
+    template (A-1), N (A-2) and the confirmatory arms (A-3, A-4), whose count fixes m (A-5). An arm is
+    a registry model, named by its base entry or the one fallback entry it flies (`stats_v3` reads
+    either); it flies every ladder level. A dropped arm (a deferred arm whose month was not approved,
+    section 10.4) stays an arm and in m, as tagged."""
+
+    template: str
+    n: int
+    arms: tuple[str, ...]
+    dropped: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.template not in E5_TEMPLATES:
+            raise ValueError(f"template must be one of {', '.join(E5_TEMPLATES)}, got {self.template!r}")
+        if self.n not in FAMILY_COUNTS:
+            raise ValueError(f"N must be one of {', '.join(map(str, FAMILY_COUNTS))}, got {self.n}")
+        if not 1 <= len(self.arms) <= MAX_ARMS:
+            raise ValueError(f"there are 1 to {MAX_ARMS} confirmatory arms, got {len(self.arms)}")
+        keys = [arm for arm in self.arms if arm.startswith("dexi-") and ".driver-" in arm]
+        if keys:
+            raise ValueError(
+                f"name the model, not an arm key: {', '.join(keys)} (an arm flies every ladder level)"
+            )
+        bad = [arm for arm in (*self.arms, *self.dropped) if not _ARM_NAME.fullmatch(arm)]
+        if bad:
+            raise ValueError(f"not a registry model name: {', '.join(map(repr, bad))}")
+        bases = [base_arm(arm) for arm in self.arms]
+        twice = sorted({b for b in bases if bases.count(b) > 1})
+        if twice:
+            raise ValueError(f"one base arm named twice: {', '.join(twice)} (in {', '.join(self.arms)})")
+        never = [arm for arm in self.arms if base_arm(arm) in (*SCRIPTED_ARMS, *SMOKE_ONLY)]
+        if never:
+            raise ValueError(
+                f"never a confirmatory arm (a scripted control or smoke-only): {', '.join(never)}"
+            )
+        stray = [arm for arm in self.dropped if base_arm(arm) not in bases]
+        if stray or len(set(map(base_arm, self.dropped))) != len(self.dropped):
+            raise ValueError(f"dropped arms must be confirmatory arms, once each: {', '.join(self.dropped)}")
+
+    @property
+    def m(self) -> int:
+        return PRIMARIES_PER_ARM * len(self.arms)
+
+    def values(self) -> dict[str, str]:
+        return {
+            TEMPLATE_ROW: self.template,
+            N_ROW: str(self.n),
+            ARMS_ROW: ", ".join(sorted(self.arms)),
+            M_ROW: str(self.m),
+            DROPPED_ROW: ", ".join(sorted(self.dropped)) or NO_ARMS,
+        }
+
+    def drop(self, arms: tuple[str, ...]) -> Adaptation:
+        return dataclasses.replace(self, dropped=tuple(sorted({*self.dropped, *arms})))
+
+
+def spec_hash_v3(spec_text: str) -> str:
+    return sha256(_blank(spec_text, V3_ROWS).encode())
+
+
+def recorded_v3(spec_text: str) -> dict[str, str]:
+    return _recorded(spec_text, V3_ROWS)
+
+
+def adaptation_from_record(spec_text: str) -> Adaptation:
+    """The adaptation outcomes written in the v3 record; raises if any is blank or inconsistent."""
+    written = recorded_v3(spec_text)
+    blank = [row for row in (TEMPLATE_ROW, N_ROW, ARMS_ROW, M_ROW, DROPPED_ROW) if not written.get(row)]
+    if blank:
+        raise ValueError(f"{SPEC_V3}'s freeze record has no value for {', '.join(blank)}")
+    try:
+        n, m = int(written[N_ROW]), int(written[M_ROW])
+    except ValueError:
+        raise ValueError(f"{N_ROW} and {M_ROW} must be integers in {SPEC_V3}'s freeze record") from None
+    adaptation = Adaptation(
+        written[TEMPLATE_ROW], n, parse_arms(written[ARMS_ROW]), parse_arms(written[DROPPED_ROW])
+    )
+    if m != adaptation.m:
+        raise ValueError(
+            f"{M_ROW} is {m}, but {PRIMARIES_PER_ARM} x {len(adaptation.arms)} confirmatory arms"
+            f" is {adaptation.m}"
+        )
+    return adaptation
+
+
+def unknown_arms(root: Path, adaptation: Adaptation) -> list[str]:
+    """The adaptation's confirmatory arms that aren't entries of `root`'s model registry."""
+    from lost_in_place.llm.registry import load_models
+
+    path = root / MODEL_REGISTRY
+    models = load_models(path) if path.is_file() else {}
+    return [arm for arm in adaptation.arms if arm not in models]
+
+
+def _load_attribute(root: Path, source: str) -> Any:
+    where, _, attribute = source.rpartition(":")
+    if where.endswith(".py"):
+        path = root / where
+        spec = importlib.util.spec_from_file_location(f"_frozen_{path.stem}", path)
+        if spec is None or spec.loader is None or not path.is_file():
+            raise MissingArtifact(f"no file {where}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    else:
+        try:
+            module = importlib.import_module(where)
+        except ImportError as e:
+            raise MissingArtifact(f"no module {where} ({e})") from e
+    if not hasattr(module, attribute):
+        raise MissingArtifact(f"{where} has no {attribute}")
+    return getattr(module, attribute)
+
+
+def probe_bundle_v3(root: Path) -> dict[str, Any]:
+    """The frozen probe texts (`PROBE_TEXTS`), by name. `root` resolves the script sources."""
+    return {name: _load_attribute(root, source) for name, source in PROBE_TEXTS.items()}
+
+
+def probe_hash_v3(root: Path) -> str:
+    return sha256(_canonical(probe_bundle_v3(root)))
+
+
+def _file_hash(path: Path) -> str:
+    if not path.is_file():
+        raise MissingArtifact(f"no file {path}")
+    return sha256(path.read_bytes())
+
+
+def _set_hash(directory: Path) -> str:
+    try:
+        return scenario_set_hash(directory)
+    except FileNotFoundError:
+        raise MissingArtifact(f"no *.yaml files in {directory}") from None
+
+
+def _spec_v3_hash(root: Path) -> str:
+    path = root / SPEC_V3
+    if not path.is_file():
+        raise MissingArtifact(f"no file {path}")
+    return spec_hash_v3(path.read_text())
+
+
+def _git_sha_v3(root: Path) -> str:
+    try:
+        return git_sha(root)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        raise MissingArtifact(f"{root} is not a git checkout") from None
+
+
+def _evaluate(items: dict[str, Callable[[], str]]) -> tuple[dict[str, str], dict[str, str]]:
+    values, missing = {}, {}
+    for label, compute in items.items():
+        try:
+            values[label] = compute()
+        except MissingArtifact as e:
+            values[label], missing[label] = "", str(e)
+    return values, missing
+
+
+def record_v3(
+    root: Path, image_digest: str | None, adaptation: Adaptation | None, design: Path | None = None
+) -> tuple[dict[str, str], dict[str, str]]:
+    """The v3 record's values by row, and the rows whose artifact isn't there, with the reason. The
+    image digest is empty when none is given; the scenario rows and the adaptation values are empty
+    without an adaptation, which names the template."""
+    items: dict[str, Callable[[], str]] = {row: str for row in V3_ROWS}
+    items |= {
+        ROWS[0]: functools.partial(_spec_v3_hash, root),
+        DESIGN_ROW_V3: functools.partial(_file_hash, design or root / DESIGN_V3),
+        PROMPT_ROW_V3: functools.partial(prompt_hash_v3, root),
+        PROBE_ROW_V3: functools.partial(probe_hash_v3, root),
+        LABELLING_ROW: labelling_hash,
+        MODELS_ROW: functools.partial(_file_hash, root / MODEL_REGISTRY),
+        SWEEPS_ROW: functools.partial(_set_hash, root / E5_SWEEPS),
+        IMAGE_ROW: functools.partial(str, image_digest or ""),
+        GIT_ROW: functools.partial(_git_sha_v3, root),
+        ANALYSIS_ROW_V3: functools.partial(_file_hash, root / ANALYSIS_SCRIPT_V3),
+    }
+    if adaptation is not None:
+        for name, row in SCENARIO_ROWS_V3.items():
+            items[row] = functools.partial(_set_hash, root / E5_SCENARIOS / adaptation.template / name)
+        items |= {row: functools.partial(str, value) for row, value in adaptation.values().items()}
+    return _evaluate(items)
+
+
+def write_record_v3(spec_text: str, values: dict[str, str]) -> str:
+    """Write `values` into the v3 record. The table must already have every row of `V3_ROWS`."""
+    lines = spec_text.split("\n")
+    start, end = _record_span(lines)
+    seen = set()
+    for i in range(start, end):
+        m = _ROW.match(lines[i])
+        if m and m["artifact"] in V3_ROWS:
+            seen.add(m["artifact"])
+            lines[i] = _row(m["artifact"], values.get(m["artifact"], ""))
+    absent = [row for row in V3_ROWS if row not in seen]
+    if absent:
+        raise ValueError(f"{SPEC_V3}'s record table has no row for {', '.join(absent)}")
+    return "\n".join(lines)
+
+
+def mismatches_v3(spec_text: str, values: dict[str, str]) -> list[str]:
+    """Rows of the v3 record whose written value differs from `values`; as for freeze-v2, rows with
+    nothing to compare and the git SHA are skipped."""
+    written = recorded_v3(spec_text)
+    return [
+        f"{row}: recorded {written.get(row) or '(blank)'}, now {values[row]}"
+        for row in V3_ROWS
+        if row != GIT_ROW and values.get(row) and written.get(row) != values[row]
+    ]
+
+
+def tag_hashes(root: Path, image_digest: str | None) -> tuple[dict[str, str], dict[str, str]]:
+    """The `freeze-v3-pre` tag message's values (design section 2.1), by label, and the missing ones
+    with the reason: the design, this spec, the v3 prompt bundle and probe prompts, each scenario
+    directory of both templates, the model registry, the admission script and the image digest."""
+
+    def digest() -> str:
+        if not image_digest:
+            raise MissingArtifact("no image digest (pass --image-digest)")
+        return image_digest
+
+    items: dict[str, Callable[[], str]] = {
+        DESIGN_ROW_V3: functools.partial(_file_hash, root / DESIGN_V3),
+        f"`{SPEC_V3}` (freeze record values blank)": functools.partial(_spec_v3_hash, root),
+        PROMPT_ROW_V3: functools.partial(prompt_hash_v3, root),
+        PROBE_ROW_V3: functools.partial(probe_hash_v3, root),
+        **{
+            f"`{E5_SCENARIOS}/{t}/{name}/*.yaml` (sorted, concatenated)": functools.partial(
+                _set_hash, root / E5_SCENARIOS / t / name
+            )
+            for t in E5_TEMPLATES
+            for name in E5_SETS
+        },
+        MODELS_ROW: functools.partial(_file_hash, root / MODEL_REGISTRY),
+        f"Admission script (`{ADMISSION_SCRIPT}`)": functools.partial(_file_hash, root / ADMISSION_SCRIPT),
+        IMAGE_ROW: digest,
+    }
+    return _evaluate(items)
