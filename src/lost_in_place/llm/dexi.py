@@ -363,6 +363,7 @@ class DexiPlanner:
             input_tokens=completion.input_tokens,
             output_tokens=completion.output_tokens,
             latency_ms=completion.latency_ms,
+            reasoning=completion.reasoning,
         )
         self.decisions.append(decision)
         # DEXI's clients act on the first tool call and ignore the rest.
