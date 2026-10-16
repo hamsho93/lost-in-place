@@ -2,7 +2,7 @@
 
 The first confirmatory results of Lost in Place, under the pre-registration frozen as `freeze-v2` on 2026-10-14. E1 and E2 ran on 2026-10-15 and were scored once, by the analysis script pinned before unblinding. Every number below is copied from that script's output; nothing was recomputed for this report.
 
-**In one paragraph.** The two validator demonstrations came out as the design said they would: under silent frame misalignment, neither the `geometric` validator nor the `estimator_health` validator caught a single hazardous move (0 of 296 each, against 126 of 126 when healthy). The planner result is a null. Neither Qwen3-4B arm produced a correct safe action under any fault, at either observation level: 0 of 120 in every cell. Showing the planner estimator health changed nothing measurable, so H1a is **inconclusive under the pre-registered §11 rule**; the exact bound excludes an O1 effect of 15 points or more, but with 60 families a 0-versus-0 contrast cannot reach the refute threshold. That null is the finding.
+**In one paragraph.** The two validator demonstrations came out as the design said they would: under silent frame misalignment, neither the `geometric` validator nor the `estimator_health` validator caught a single hazardous move (0 of 296 each, against 126 of 126 when healthy). The planner result is a null. Neither Qwen3-4B arm produced a correct safe action under any fault, at either observation level: 0 of 120 in every cell. Showing the planner estimator health changed nothing measurable, so H1a is **inconclusive under the pre-registered §11 rule**; the exact bound excludes an O1 effect of 15 points or more, but with 60 families a 0-versus-0 contrast cannot reach the refute threshold. That null is the finding. The descriptive frontier arm E4, run afterwards under amendment A11 ([e4-claude.md](e4-claude.md)), did the same: across all three arms (Qwen student, Qwen zero-shot, Claude Sonnet 4.6), no planner produced a correct safe action under any fault at either observability level.
 
 ## 1. What was pre-registered
 
@@ -20,7 +20,8 @@ The design (pre-registration draft v0, amendments A1–A10) and `SPEC.md` were h
 | H1c | secondary | false refusal on healthy and brief-dropout controls, O1 minus O0 | ≤ 10 points |
 | H2b, loud side | descriptive (departure 12) | `estimator_health` catch rate, healthy minus loud | within 15 points? |
 | H2c | descriptive bound (A9) | the student's `geometric` catch rate in E2's misaligned state | one-cell bound |
-| H3, E4 | not run at freeze-v2 | sized by a later dated amendment | |
+| H3 (E3) | not run at freeze-v2 | sized by a later dated amendment | |
+| E4 | descriptive; sized by amendment A11 after this report's sweeps | see [e4-claude.md](e4-claude.md) | no rule, no test |
 
 ### Verdict rules (design §11)
 
@@ -193,7 +194,8 @@ The scorer-agreement check (design §9, A5: a 10% per-cell sample labelled blind
 
 What comes next, each by dated amendment before it runs:
 
-- **E3 (H3, Sonnet teacher vs the 4B student)** and **E4 (Claude Sonnet 4.6 frontier reference arm)** are to be sized as families × 2 seeds. After E2's null, the E4 arm is the natural follow-up: it would show whether a large hosted model behaves differently where both small arms never acted on a fault. E4 uses the benchmark's own prompt and primitives, so it is not compared with the E2 arms; its estimate is about $435 and needs its own budget approval.
+- **E4 (Claude Sonnet 4.6 frontier reference arm)** has since run, sized by amendment A11 as E2's families × 2 seeds through the DEXI adapter, 1,200 episodes, about $46. It is descriptive only and not tested against the E2 arms; its results are in [e4-claude.md](e4-claude.md).
+- **E3 (H3, Sonnet teacher vs the 4B student)** is still to be sized as families × 2 seeds by a dated amendment.
 - **The scorer-agreement check** on 10% samples of E1 and E2.
 - **An independent ULog-versus-Gazebo track check**, owed from the freeze review.
 

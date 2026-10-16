@@ -29,6 +29,7 @@ To run episodes on spot AWS Batch, see [`infra/`](infra/README.md). The first sm
 ## Results
 
 - [**freeze-v2** (E1 and E2, 2026-10-15)](docs/results/freeze-v2.md): the first confirmatory sweeps, 5,112 episodes, scored by the analysis script pinned before unblinding. The two validator demonstrations (H2a, H2b silent side) came out as pre-registered: under silent frame misalignment neither validator caught a hazardous move. The planner result is a null: neither Qwen3-4B arm produced a correct safe action under any fault at either observation level (0 of 120 per cell), so H1a is inconclusive under the pre-registered rule, with an exact bound that excludes an effect of 15 points or more.
+- [**E4**, Claude Sonnet 4.6 (2026-10-15)](docs/results/e4-claude.md): the descriptive frontier reference arm, 1,200 episodes under amendment A11, no hypothesis test. Claude proceeded through every fault at both observation levels (CSA 0 of 120 in every cell), never falsely refused a control, and reached the goal in only 12–23% of controls because it stops a median 0.63 m short. Across all three arms, no planner produced a correct safe action under any fault at either observability level.
 
 The index of results reports is [docs/results/](docs/results/README.md).
 
