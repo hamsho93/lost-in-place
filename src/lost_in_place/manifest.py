@@ -1,6 +1,7 @@
 """Sweeps as manifests, episode keys, and which attempt of an episode counts.
 
-A sweep spec crosses scenarios x reps x planner x validator x observation. The manifest lists
+A sweep spec crosses scenarios x reps x planner x validator x observation, or is a union of such
+cross products (`cells`), all under one sweep name. The manifest lists
 every episode once, in a shuffled order, and a Batch array job runs entry `offset + index`.
 Each episode has a key, `<scenario>/<planner>-<validator>-<obs>/r<rep>-s<seed>`, and every attempt
 uploads to its own folder under `<runs>/<sweep name>/<key>/`, so a resubmitted array skips episodes
@@ -28,7 +29,7 @@ from lost_in_place.planning import (
     check_observation_level,
     check_planner_level,
 )
-from lost_in_place.scenario import load_scenario
+from lost_in_place.scenario import Scenario, load_scenario
 
 BATCH_ARRAY_MAX = 10_000
 OPTION = re.compile(r"[a-z0-9][a-z0-9._-]*")
@@ -87,17 +88,56 @@ class Entry:
         return f"{self.scenario_id}/{self.cell}/r{self.rep:03d}-s{self.seed}"
 
 
+CELL_KEYS = ("scenarios", "planners", "validators", "observations")
+
+
+@dataclass(frozen=True)
+class Cell:
+    """One cross product of a sweep: scenarios x planners x validators x observations."""
+
+    scenarios: list[str]
+    planners: list[tuple[str, dict[str, str]]]
+    validators: list[str]
+    observations: list[str]
+
+
+def _cell(data: dict[str, Any]) -> Cell:
+    return Cell(
+        scenarios=list(data["scenarios"]),
+        planners=[_planner_entry(p) for p in data.get("planners", ["scripted-naive"])],
+        validators=list(data.get("validators", ["none"])),
+        observations=[check_observation_level(str(o)) for o in data.get("observations", ["O0"])],
+    )
+
+
+def _cells(data: dict[str, Any]) -> list[Cell]:
+    """A sweep is one cross product, or with `cells` the union of several: each cell is a mapping of
+    `CELL_KEYS` that replaces the sweep's own values for that cell, so a design that isn't a full
+    cross product (freeze-v3's ladder) is still one sweep, one manifest and one runs prefix."""
+    if "cells" not in data:
+        return [_cell(data)]
+    cells = data["cells"]
+    if not isinstance(cells, list) or not cells:
+        raise ValueError("sweep key 'cells': give a non-empty list of cells")
+    shared = {k: data[k] for k in CELL_KEYS if k in data}
+    out = []
+    for cell in cells:
+        unknown = set(cell) - set(CELL_KEYS) if isinstance(cell, dict) else {"<not a mapping>"}
+        if unknown:
+            raise ValueError(f"unknown cell keys: {sorted(unknown)}; a cell sets {', '.join(CELL_KEYS)}")
+        out.append(_cell({**shared, **cell}))
+    return out
+
+
 class SweepSpec:
     """The YAML a manifest is built from; see `sweeps/`."""
 
     def __init__(self, data: dict[str, Any]) -> None:
         unknown = set(data) - {
             "name",
-            "scenarios",
+            *CELL_KEYS,
+            "cells",
             "reps",
-            "planners",
-            "validators",
-            "observations",
             "latency_s",
             "planner_options",
             "shuffle_seed",
@@ -107,15 +147,8 @@ class SweepSpec:
         self.name: str = data["name"]
         if not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", self.name):
             raise ValueError(f"sweep name {self.name!r}: use lower case, digits, '.', '_' and '-'")
-        self.scenarios: list[str] = list(data["scenarios"])
+        self.cells: list[Cell] = _cells(data)
         self.reps: int = int(data["reps"])
-        self.planners: list[tuple[str, dict[str, str]]] = [
-            _planner_entry(p) for p in data.get("planners", ["scripted-naive"])
-        ]
-        self.validators: list[str] = list(data.get("validators", ["none"]))
-        self.observations: list[str] = [
-            check_observation_level(str(o)) for o in data.get("observations", ["O0"])
-        ]
         self.latency_s = float(data.get("latency_s", 2.0))
         self.planner_options = {str(k): str(v) for k, v in (data.get("planner_options") or {}).items()}
         self.shuffle_seed = int(data.get("shuffle_seed", 0))
@@ -170,19 +203,30 @@ def build(spec: SweepSpec, root: Path = Path()) -> list[Entry]:
     Seeds come from the scenario's matched pair (its id when it has none) and the rep, so a fault
     scenario and its healthy control fly the same spawn, and every arm sees the same seeds.
     """
-    paths = sorted({p for pattern in spec.scenarios for p in glob.glob(str(root / pattern))})
+    loaded: dict[str, Scenario] = {}
+    entries = [e for cell in spec.cells for e in _cross(spec, cell, root, loaded)]
+    keys = [e.key for e in entries]
+    if len(set(keys)) != len(keys):
+        raise ValueError("duplicate episode keys: two scenario files share an id")
+    random.Random(spec.shuffle_seed).shuffle(entries)
+    return entries
+
+
+def _cross(spec: SweepSpec, cell: Cell, root: Path, loaded: dict[str, Scenario]) -> list[Entry]:
+    paths = sorted({p for pattern in cell.scenarios for p in glob.glob(str(root / pattern))})
     if not paths:
-        raise ValueError(f"no scenarios match {spec.scenarios}")
+        raise ValueError(f"no scenarios match {cell.scenarios}")
+    arms = [resolve_arm(arm, {**spec.planner_options, **own}) for arm, own in cell.planners]
     entries = []
     for path in paths:
-        scenario = load_scenario(path)
+        if path not in loaded:
+            loaded[path] = load_scenario(path)
+        scenario = loaded[path]
         group = scenario.pair_id or scenario.id
         for rep in range(spec.reps):
-            for planner, options in (
-                resolve_arm(arm, {**spec.planner_options, **own}) for arm, own in spec.planners
-            ):
-                for validator in spec.validators:
-                    for observation in spec.observations:
+            for planner, options in arms:
+                for validator in cell.validators:
+                    for observation in cell.observations:
                         entries.append(
                             Entry(
                                 scenario=Path(path).relative_to(root).as_posix(),
@@ -196,10 +240,6 @@ def build(spec: SweepSpec, root: Path = Path()) -> list[Entry]:
                                 planner_options=options,
                             )
                         )
-    keys = [e.key for e in entries]
-    if len(set(keys)) != len(keys):
-        raise ValueError("duplicate episode keys: two scenario files share an id")
-    random.Random(spec.shuffle_seed).shuffle(entries)
     return entries
 
 
