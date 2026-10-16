@@ -6,7 +6,8 @@
 - **The prompts** are a canonical JSON bundle of what an LLM arm is shown: both prompt versions,
   the system prompt, DEXI's prompt template, both tool lists, the chat templates, and both
   prompts rendered for one fixed observation at O0 and at O1. A change to the wording, the
-  rendering or the tools changes it; a change to a comment doesn't.
+  rendering or the tools changes it; a change to a comment doesn't. Freeze-v3's prompts are a
+  separate bundle, `prompt_bundle_v3()` (the ladder), which no freeze-v2 row hashes.
 - **Labelling** is the same kind of bundle: the labelling instructions, the model labeller's
   brief and its pinned model.
 - **The image digest and the git SHA** are recorded as they are.
@@ -127,12 +128,103 @@ def prompt_bundle() -> dict[str, Any]:
     }
 
 
+# Fixed instructions in the two freeze-v3 wording templates (design section 5.1), so the v3 bundle
+# doesn't depend on the family generator; the rest of a rendered prompt follows from them.
+V3_INSTRUCTIONS = {
+    "T0": "Take off, fly 4.0 m left, then a further 1.8 m forward, hold there for 10 s, then land.",
+    "T1": (
+        "Take off, fly 4.0 m left, then 1.8 m forward, ending 1.8 m north and 4.0 m west of the"
+        " take-off point, hold there for 10 s, then land."
+    ),
+}
+
+
+def v3_observations() -> dict[str, Any]:
+    """One decision after the first 2 m of leg 1, by state: the health a planner sees there in a
+    healthy episode, and at the first decision after the onset of a brief and of a loud fault."""
+    from lost_in_place.planning import EstimatorHealth
+
+    return {
+        "healthy": EstimatorHealth(True, 0.31, 176, innovation_check_failing=False, heading_reference=False),
+        "brief": EstimatorHealth(True, 0.43, 0, innovation_check_failing=False, heading_reference=False),
+        "loud": EstimatorHealth(True, 0.64, 0, innovation_check_failing=False, heading_reference=False),
+    }
+
+
+def render_v3(instruction: str, observation: str, prompt_version: str, state: str) -> str:
+    """The prompt a `dexi` arm under validator `none` is shown at the v3 bundle's decision."""
+    from lost_in_place.llm import dexi
+    from lost_in_place.planning import Observation, shows_health
+
+    health = v3_observations()[state] if shows_health(observation) else None
+    obs = Observation(instruction, 0.02, -1.98, 1.5, 0.0, 88.0, health=health)
+    history = [
+        dexi.history_line(1, "take_off", {"alt_m": 1.5}, "reached: took off, now at 1.5 m"),
+        dexi.history_line(
+            2, "move", {"direction": "left", "distance_m": 2.0}, "reached: reached (0.0 N, -2.0 E, 1.5 m alt)"
+        ),
+    ]
+    return dexi.render_prompt(
+        obs.goal,
+        dexi.DexiEnvelope(max_alt_m=2.0, geofence_m=4.5),
+        dexi.state_from_observation(obs),
+        history,
+        dexi.health_block(health, observation) if health is not None else "",
+        dexi.template(prompt_version, dexi.NO_VALIDATOR, observation),
+    )
+
+
+def prompt_bundle_v3() -> dict[str, Any]:
+    """Freeze-v3's prompts: every observation level under both DEXI prompt versions and validator
+    `none`, rendered in both wording templates at a healthy, a brief and a loud decision, with the
+    rung texts, the ladder and the tools. A pair the adapter refuses is listed as rejected."""
+    from lost_in_place.llm import dexi, prompt
+    from lost_in_place.planning import OBSERVATION_LEVELS
+
+    pairs, rejected = {}, []
+    for version in dexi.PROMPT_VERSIONS:
+        for level in OBSERVATION_LEVELS:
+            try:
+                pairs[level, version] = dexi.template(version, dexi.NO_VALIDATOR, level)
+            except ValueError:
+                rejected.append(f"{level}/{version}")
+    templates = Path(prompt.__file__).parent / "templates"
+    return {
+        "validator": dexi.NO_VALIDATOR,
+        "prompt_versions": list(dexi.PROMPT_VERSIONS),
+        "observation_levels": list(OBSERVATION_LEVELS),
+        "ladder": {name: list(pair) for name, pair in dexi.LADDER.items()},
+        "templates": {f"{level}/{version}": text for (level, version), text in pairs.items()},
+        "rejected": rejected,
+        "o1l": {"flow": dexi.O1L_FLOW, "eph_m": dexi.O1L_EPH_M, "annotations": list(dexi.O1L_ANNOTATIONS)},
+        "o1n_sentence": dexi.O1N_SENTENCE,
+        "o1r_rule": dexi.O1R_RULE,
+        "history_window": dexi.HISTORY_WINDOW,
+        "tools": dexi.TOOLS,
+        "instructions": V3_INSTRUCTIONS,
+        "renders": {
+            wording: {
+                f"{level}/{version}": {
+                    state: render_v3(instruction, level, version, state) for state in v3_observations()
+                }
+                for level, version in pairs
+            }
+            for wording, instruction in V3_INSTRUCTIONS.items()
+        },
+        "chat_templates": {p.name: p.read_text() for p in sorted(templates.glob("*.jinja"))},
+    }
+
+
 def _canonical(bundle: dict[str, Any]) -> bytes:
     return json.dumps(bundle, sort_keys=True, separators=(",", ":")).encode()
 
 
 def prompt_hash() -> str:
     return sha256(_canonical(prompt_bundle()))
+
+
+def prompt_hash_v3() -> str:
+    return sha256(_canonical(prompt_bundle_v3()))
 
 
 def labelling_hash() -> str:

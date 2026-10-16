@@ -18,6 +18,7 @@ The account also runs unrelated production stacks. Anything account-wide affects
 - `maxVcpus` caps concurrent compute, and the compute environment scales to 0 when idle. Keep `minv_cpus=0`.
 
 - Planner model calls (Bedrock) count against the budget only through the tagged application inference profiles this stack creates. Never grant `bedrock:InvokeModel` on a system inference profile (`us.*`, `global.*`) or on foundation models without the `bedrock:InferenceProfileArn` condition; that spend would be untagged and unbudgeted.
+- The one exception to "this stack creates" is a model whose registry `region` isn't the stack's (Sonnet 5.5 and Haiku 5.5, us-east-2). Its tagged profile is created once by CLI in that region, and its ARN is passed as `-c useast2Profiles` (README, "Models in another region"). Don't add a stack in us-east-2 for it.
 - Models from other providers (e.g. OpenAI) aren't covered by the AWS budget at all. Give them a spending cap on the provider's side before running them at scale.
 
 ## Details that have bitten before

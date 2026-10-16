@@ -26,6 +26,7 @@ from lost_in_place.planning import (
     arm_name,
     available_planners,
     check_observation_level,
+    check_planner_level,
 )
 from lost_in_place.scenario import load_scenario
 
@@ -75,7 +76,7 @@ class Entry:
     planner_options: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        check_observation_level(self.observation)
+        check_planner_level(self.planner, self.observation, self.planner_options, self.validator)
 
     @property
     def cell(self) -> str:
@@ -151,7 +152,10 @@ def resolve_arm(name: str, options: dict[str, str]) -> tuple[str, dict[str, str]
         prefix, _, model = name.rpartition("/")
         if prefix and prefix not in available_planners():
             raise LookupError(f"no planner '{prefix}'; installed: {', '.join(available_planners())}")
-        get_model(model)  # raises for an unknown name
+        from lost_in_place.llm.scripted_dexi import SCRIPTED_PROVIDER
+
+        if get_model(model).provider == SCRIPTED_PROVIDER and prefix != DEXI_PLANNER:
+            raise ValueError(f"'{model}' is scripted on DEXI's prompt: use '{DEXI_PLANNER}/{model}'")
         planner, resolved = prefix or LLM_PLANNER, {**options, "model": model}
     if planner == DEXI_PLANNER:
         from lost_in_place.llm.dexi import check_options
