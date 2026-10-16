@@ -375,7 +375,9 @@ def _cmd_families(args: argparse.Namespace) -> int:
     from lost_in_place.families import generate
 
     for i in range(args.start, args.start + args.count):
-        family = generate(f"{args.prefix}{i:02d}", args.seed, benign=args.benign)
+        family = generate(
+            f"{args.prefix}{i:02d}", args.seed, benign=args.benign, loud_anchored=args.loud_anchor
+        )
         for path in family.write(args.out):
             print(path)
     return 0
@@ -415,6 +417,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--benign",
         action="store_true",
         help="E2 variants: a safe second leg, a healthy control and a brief-flow-dropout control",
+    )
+    fam.add_argument(
+        "--loud-anchor",
+        action="store_true",
+        help="start the loud fault when the estimate is 2 m from the first move's target (scenarios/v3),"
+        " not 2.5 s into the move (E1, E2)",
     )
     fam.set_defaults(func=_cmd_families)
 

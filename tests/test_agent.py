@@ -148,14 +148,23 @@ class FakeFailure:
         self.injected.append(args)
 
 
+class FakeParam:
+    def __init__(self) -> None:
+        self.set: list[tuple[str, float]] = []
+
+    async def set_param_int(self, name: str, value: int) -> None:
+        self.set.append((name, value))
+
+
 class FakeDrone:
     def __init__(self, failure_error: str = "") -> None:
         self.offboard = FakeOffboard()
         self.failure = FakeFailure(failure_error)
+        self.param = FakeParam()
 
 
-def _agent_episode(scenario_file: str, config: AgentConfig | None = None) -> AgentEpisode:
-    scenario = load_scenario(PILOT / scenario_file)
+def _agent_episode(scenario_file: str, config: AgentConfig | None = None, root: Path = PILOT) -> AgentEpisode:
+    scenario = load_scenario(root / scenario_file)
     spawn = scenario.spawn_for(0)
     sim = SimInstance(
         paths=Paths(Path("/px4"), Path("/b"), Path("/w")), world=scenario.world, spawn=spawn, params={}
@@ -322,6 +331,41 @@ def test_a_target_anchor_starts_the_fault_clock_near_the_first_moves_target() ->
 
     asyncio.run(scenario())
     assert ep.first_move_target == (6.0, 0.0)
+
+
+@pytest.mark.parametrize("step_m", [2.0, 5.0])
+def test_a_v3_loud_fault_starts_2_m_from_the_first_moves_target(step_m: float) -> None:
+    """The 2 m steps' fault starts with the step; a whole leg's when 2 m of it remain."""
+    ep = _agent_episode("b00_loud.yaml", root=Path(__file__).parents[1] / "scenarios" / "v3")
+    drone = FakeDrone()
+
+    async def scenario() -> float:
+        clock = _advance_clock(ep, rate_s=0.05)
+        faults = asyncio.create_task(ep._fault_schedule(drone))  # type: ignore[arg-type]
+        ep.sim_us = 20_000_000
+        await ep._execute(drone, Action("move", {"north_m": 0.0, "east_m": step_m}))  # type: ignore[arg-type]
+        await asyncio.sleep(0.05)
+        if step_m > 2.0:
+            assert not drone.failure.injected and not drone.param.set
+            ep.tel.east_m = step_m - 2.1
+            await asyncio.sleep(0.05)
+            assert not drone.failure.injected
+            ep.tel.east_m = step_m - 1.9
+        moved_s = ep.sim_s
+        await asyncio.wait_for(faults, 5)
+        clock.cancel()
+        return moved_s
+
+    moved_s = asyncio.run(scenario())
+    anchor = next(e["fault_anchor_sim_s"] for e in ep.result.events if "fault_anchor_sim_s" in e)
+    param = next(e for e in ep.result.events if e.get("action") == "param")
+    (off,) = [e for e in ep.result.events if e.get("action") == "inject"]
+    assert drone.param.set == [("EKF2_NOAID_TOUT", 10_000_000)] and off["type"] == "off"
+    assert param["sim_s"] == pytest.approx(anchor, abs=0.1) and off["sim_s"] == pytest.approx(anchor, abs=0.1)
+    if step_m > 2.0:
+        assert anchor >= moved_s
+    else:
+        assert anchor == pytest.approx(20.0, abs=0.1)
 
 
 def test_a_rejected_fault_in_the_schedule_ends_the_episode() -> None:
