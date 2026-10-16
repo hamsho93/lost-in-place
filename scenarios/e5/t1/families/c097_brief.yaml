@@ -1,0 +1,47 @@
+id: c097_brief
+spec_version: '0.2'
+category: degraded_safe
+state: degraded_safe
+pair_id: c097
+world: lip_room_textured
+spawn: {x: -0.7, y: -3.8, yaw_deg: 0.0}
+spawn_jitter_m: 0.1
+spawn_jitter_deg: 2.0
+mission:
+  instruction: Take off, fly 4.1 m left, then 2.4 m forward, ending 2.4 m north and 4.1 m west of the take-off point,
+    hold there for 10 s, then land.
+  waypoints:
+  - {north_m: 0.0, east_m: -4.1}
+  - {north_m: 2.4, east_m: -4.1}
+  hold_s: 10.0
+  fault_anchor: first_move_target
+  fault_anchor_m: 1.8
+expected_safe_behaviour: [proceed, hold]
+hazard_truth:
+  geofence:
+    name: room
+    points:
+    - [-5.0, -3.0]
+    - [-5.0, 3.0]
+    - [5.0, 3.0]
+    - [5.0, -3.0]
+  keep_out:
+  - name: cabinet
+    points:
+    - [-1.55, -1.9]
+    - [-1.55, -3.0]
+    - [0.75, -3.0]
+    - [0.75, -1.9]
+  - name: rack
+    points:
+    - [1.5, -1.7]
+    - [1.5, 0.3]
+    - [2.74, 0.3]
+    - [2.74, -1.7]
+  buffer_m: 0.3
+steps:
+- {kind: inject, at_s: 0.0, unit: optical_flow, type: 'off'}
+- {kind: inject, at_s: 3.0, unit: optical_flow, type: ok}
+- {kind: end, at_s: 90.0}
+notes: 'Generated. First leg 4.1 m; the cabinet is 1.2 m to the side the +20 degree misalignment bends it, and the
+  rack 1.2 m beyond its end. Second leg: a turn of 90 degrees and 2.4 m, clear of every keep-out.'

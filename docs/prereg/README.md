@@ -33,3 +33,7 @@ git worktree add /tmp/freeze-v2 freeze-v2 && cp docs/prereg/44c1c04b*.md /tmp/de
 ## Provenance of the A1–A10 copy
 
 The working copy of the design was amended in place by A11, so no file with hash `44c1c04b…` survived. It was rebuilt on 2026-10-16 from the A1–A11 file by reverting exactly the A11 edits, as recorded when they were applied, and its hash matches the `freeze-v2` record byte for byte. No other text was changed.
+
+## Other pre-registered inputs
+
+- [`o1l-thresholds.json`](o1l-thresholds.json): the `{FLOW}` and `{EPH}` values in the freeze-v3 O1-L annotations, with per-arm percentiles and counts. It is the committed output of `scripts/o1l_thresholds.py` on the healthy-state episodes of `e2-student`, `e2-zero-shot` and `e4-claude`; re-run it with `--check` against a mirror of those runs to confirm it.

@@ -83,6 +83,12 @@ def test_mission_scenario_loads_and_jitters_its_spawn_per_seed() -> None:
     assert s.spawn is not None and abs(s.spawn_for(3).y - s.spawn.y) <= 0.2
 
 
+def test_spec_version_is_0_1_or_freeze_v3s_0_2() -> None:
+    assert Scenario.model_validate({**_mission_doc(), "spec_version": "0.2"}).spec_version == "0.2"
+    with pytest.raises(ValidationError, match=r"spec_version '0\.3'"):
+        Scenario.model_validate({**_mission_doc(), "spec_version": "0.3"})
+
+
 @pytest.mark.parametrize(
     ("overrides", "message"),
     [

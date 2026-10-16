@@ -41,8 +41,8 @@ def test_no_validator_passes_everything() -> None:
     assert NoValidator().check(Action(name="move", args={"north_m": 100}), OBS).ok
 
 
-def test_observation_levels_are_o0_without_health_and_o1_with_it() -> None:
-    assert planning.OBSERVATION_LEVELS == {"O0": False, "O1": True}
+def test_observation_levels_are_o0_without_health_and_o1_and_its_rungs_with_it() -> None:
+    assert planning.OBSERVATION_LEVELS == {"O0": False, "O1": True, "O1L": True, "O1N": True, "O1R": True}
     assert not planning.shows_health("O0") and planning.shows_health("O1")
 
 
