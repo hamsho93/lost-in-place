@@ -85,3 +85,52 @@ gpt-6.1-sol-fb3:
   notes: >-
     Fallback 3 of gpt-6.1-sol (design 9.2): fallback 2 without the reasoning-effort field, so the
     provider's default effort applies.
+
+claude-sonnet-5-5:
+  provider: bedrock
+  model_id: us.anthropic.claude-sonnet-5-5
+  region: us-east-2
+  max_tokens: 4096
+  temperature: 0
+  tool_choice: auto
+  additional_request_fields: {output_config: {effort: low}}
+  notes: >-
+    E5 fifth arm, approved 2026-10-16 (fifth-arm spec), served from us-east-2. tool_choice auto
+    because Sonnet 5.5 rejects forced tool use; a reply without a tool call is invalid. Effort low
+    (the model's default is high) matches GPT-6.1 Sol and the cost model. Anthropic's docs say
+    Sonnet 5.5 rejects any non-default temperature, so the smoke call is expected to fall back to
+    fb1; the entries below are tried in order, each one change further.
+
+claude-sonnet-5-5-fb1:
+  provider: bedrock
+  model_id: us.anthropic.claude-sonnet-5-5
+  region: us-east-2
+  max_tokens: 4096
+  tool_choice: auto
+  additional_request_fields: {output_config: {effort: low}}
+  notes: >-
+    Fallback 1 of claude-sonnet-5-5: no temperature, so the arm is stochastic and its test-retest
+    is checked.
+
+claude-sonnet-5-5-fb2:
+  provider: bedrock
+  model_id: us.anthropic.claude-sonnet-5-5
+  region: us-east-2
+  max_tokens: 4096
+  tool_choice: auto
+  notes: >-
+    Fallback 2 of claude-sonnet-5-5: fallback 1 without the effort field, so the model's default
+    effort (high) applies.
+
+# Smoke-only: checks the us-east-2 request shape cheaply. Not an E5 arm; no freeze-v3 sweep uses it.
+claude-haiku-5-5:
+  provider: bedrock
+  model_id: us.anthropic.claude-haiku-5-5
+  region: us-east-2
+  max_tokens: 4096
+  tool_choice: auto
+  additional_request_fields: {output_config: {effort: low}}
+  notes: >-
+    Smoke-only, never in a freeze-v3 sweep. The settings of claude-sonnet-5-5-fb1: Anthropic's
+    docs say Haiku 5.5 rejects any non-default temperature, and the smoke flies the configuration
+    expected to work.
