@@ -1,0 +1,142 @@
+# The E5 wave (freeze-v3 plan sections 10 and 12, step 5), as `scripts/e5_submit.py` runs it.
+#
+# Arms run in the listed order, each once its `start_after` conditions hold. The sweep files are
+# written by `scripts/e5_sweeps.py` (WP15) for the template, N and arm set fixed at the freeze-v3
+# tag; the adaptation PR (WP18) updates `n_families`, the sweep paths, GPT-6.1 Sol's canary cost
+# and its pinned smoke config here (A-7). Dollar figures are the plan's medians and P90s at N = 120
+# (section 10.2) and S-7's caps; caps scale by `cap_factor_above_base` at N = 160.
+name: e5
+n_families: 120
+ledger_prefix: manifests/e5/ledger
+queries_log: manifests/e5/queries.log
+poll_s: 60
+topup_min: 5
+array_max: 10
+max_in_flight: 64
+fixed_remaining_usd: 10.0  # retries and other tagged AWS spend (section 10.2)
+
+months:
+  "2026-10": {stop_usd: 420, budget_actual: true, job_p90_check: true}
+  "2026-11": {stop_usd: 400}
+  # Section 10.4: GPT-6.1 Sol moves to December only with an approved budget, added here as
+  # "2026-12": {stop_usd: <approved>, arms: [gpt-6.1-sol, probe-gpt]}.
+deferral_deadline: "2026-11-20"
+
+preflight_commands:
+  - [uv, run, lip, freeze-record, --freeze, v3, --check]
+# S-1: must exit 0 only when every scripted gate of section 6 passes on the gate cells; its output is
+# kept in the ledger. {bucket} and {manifest:<arm>} are filled in at run time. The flags are the
+# interface expected from `lip stats --design v3` (WP9).
+gate_command: [uv, run, lip, stats, --design, v3, --gates, "s3://{bucket}/runs", --manifest, "{manifest:scripted-gate}"]
+
+arms:
+  # Section 6's gated cells (loud O1 and O0, brief, healthy; both cadences) run first, on all N
+  # families, before any LLM episode. The timed-loud and flowscale cells are the scripted remainder.
+  - name: scripted-gate
+    sweep: sweeps/e5/scripted.yaml
+    select: {scenario_regex: '_(loud|brief|healthy)$'}
+    cap: 64
+    ramp_step: 10
+    cap_usd: 10
+    estimate_usd: 4.7
+    p90_usd: 5.4
+
+  - name: claude
+    sweep: sweeps/e5/claude-sonnet-4-6.yaml
+    cap: 25
+    needs_gate: true
+    start_after: [{arm: scripted-gate}]
+    bedrock_model: us.anthropic.claude-sonnet-4-6
+    price: {input_per_mtok: 3.30, output_per_mtok: 16.50}
+    cap_usd: 95
+    estimate_usd: 79
+    p90_usd: 90
+
+  - name: student
+    sweep: sweeps/e5/qwen3-4b-student.yaml
+    cap: 39
+    needs_gate: true
+    start_after: [{arm: scripted-gate}]
+    import_name: lip-qwen3-4b-c1-c6bc0a6
+    cap_usd: 50
+    estimate_usd: 38
+    p90_usd: 45
+
+  - name: probe-student
+    kind: external
+    import_name: lip-qwen3-4b-c1-c6bc0a6
+    cap_usd: 5
+    estimate_usd: 2.5
+    p90_usd: 3
+
+  - name: zero-shot
+    sweep: sweeps/e5/qwen3-4b-zero-shot.yaml
+    cap: 39
+    cap_rules: [{after: {arm: claude}, cap: 64}]
+    needs_gate: true
+    start_after: [{arm: student, fraction: 0.9}]
+    import_name: lip-qwen3-4b-thinking-2507-768f209
+    cap_usd: 105
+    estimate_usd: 77
+    p90_usd: 92
+
+  - name: probe-zero-shot
+    kind: external
+    import_name: lip-qwen3-4b-thinking-2507-768f209
+    cap_usd: 6
+    estimate_usd: 4.5
+    p90_usd: 5.5
+
+  - name: probe-claude
+    kind: external
+    bedrock_model: us.anthropic.claude-sonnet-4-6
+    price: {input_per_mtok: 3.30, output_per_mtok: 16.50}
+    cap_usd: 5
+    estimate_usd: 4.9
+    p90_usd: 5.5
+
+  - name: scripted-rest
+    sweep: sweeps/e5/scripted.yaml
+    select: {scenario_regex: '_(loud|brief|healthy)$', invert: true}
+    cap: 64
+    start_after: [{arm: claude, fraction: 0.9}, {arm: student}]
+    cap_usd: 10
+    estimate_usd: 2.3
+    p90_usd: 2.6
+
+  - name: gpt-6.1-sol
+    sweep: sweeps/e5/gpt-6.1-sol.yaml
+    cap: 40
+    needs_gate: true
+    month_fit: true
+    start_after: [{arm: claude}, {arm: student}, {arm: zero-shot}, {arm: scripted-rest}]
+    bedrock_model: us.openai.gpt-6.1-sol
+    price: {input_per_mtok: 2.20, output_per_mtok: 11.00}
+    estimate_usd: 88
+    p90_usd: 112
+    probe_usd: 5.0
+    # Measured by its canary (A-3) and filled in by the adaptation PR; GPT never starts without it.
+    canary_usd_per_episode: null
+    model: gpt-6.1-sol
+    pinned_model:
+      provider: bedrock
+      model_id: us.openai.gpt-6.1-sol
+      max_tokens: 4096
+      temperature: 0
+      tool_choice: any
+      additional_request_fields: {reasoning_effort: low}
+
+  - name: probe-gpt
+    kind: external
+    counted_in: gpt-6.1-sol
+    bedrock_model: us.openai.gpt-6.1-sol
+    price: {input_per_mtok: 2.20, output_per_mtok: 11.00}
+    estimate_usd: 5.0
+    p90_usd: 6.0
+
+  # The blind-labeller check runs outside AWS; its spend is recorded when its window closes.
+  - name: labeller
+    kind: external
+    cap_usd: 32
+    estimate_usd: 27
+    p90_usd: 31
