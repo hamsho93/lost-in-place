@@ -1,4 +1,5 @@
 import asyncio
+import json
 import math
 from pathlib import Path
 from typing import Any
@@ -410,6 +411,8 @@ def test_rejected_actions_are_held_not_executed() -> None:
     assert all(sp.north_m == 0.0 for sp in drone.offboard.setpoints)
     assert len(ep.result.decisions) == 2 and not ep.first_move.is_set()
     assert ep.history[-1].endswith("rejected: no")
+    assert not any("execution_anchor" in e for e in ep.result.events)
+    assert all(d["flown_args"] is None and d["executed_sim_us"] is None for d in ep.result.decisions)
 
 
 class OneMoveThenLand:
@@ -569,7 +572,9 @@ def test_the_freeze_v2_driver_loses_the_residual_of_every_relative_move() -> Non
     assert flown[0] == 2.0
     # Asked as the first move came within 0.25 m, still flying; the second is fixed from there.
     assert flown[-1] == pytest.approx(3.8, abs=0.051)
-    assert not any("execution_anchor" in e for e in ep.result.events)
+    anchors = [e["execution_anchor"] for e in ep.result.events if "execution_anchor" in e]
+    assert len(anchors) == 2 and all(a["flown"] == a["proposed"] for a in anchors)
+    assert [a["flown"]["north_m"] for a in anchors] == flown[:1] + flown[-1:]
 
 
 def test_the_dexi_driver_fixes_the_target_after_the_latency() -> None:
@@ -579,9 +584,177 @@ def test_the_dexi_driver_fixes_the_target_after_the_latency() -> None:
     proposed = [d for d in ep.result.decisions if d["action"]["name"] == "move" and not d["continued"]]
     # The decision keeps what the planner proposed and the validator checked.
     assert proposed[1]["action"]["args"]["north_m"] == pytest.approx(3.75, abs=0.051)
-    (anchor,) = [e["execution_anchor"] for e in ep.result.events if "execution_anchor" in e]
-    assert anchor["flown"] == {"north_m": 4.0, "east_m": 0.0}
+    first, anchor = [e["execution_anchor"] for e in ep.result.events if "execution_anchor" in e]
+    assert first["flown"] == first["proposed"] == {"north_m": 2.0, "east_m": 0.0}
+    assert anchor["flown"] == {"north_m": 4.0, "east_m": 0.0} and anchor["proposed"] != anchor["flown"]
+    assert proposed[1]["flown_args"] == anchor["flown"]
     assert ep.planner.history[2].endswith("reached: reached (4.0 N, 0.0 E, 1.5 m alt)")  # type: ignore[attr-defined]
+
+
+def _shared_clock(ep: AgentEpisode, speed_mps: float) -> asyncio.Task[None]:
+    """One sim clock for every task: 0.05 s per event-loop turn, stopped while the world is paused,
+    so the fault schedule sees every step. The vehicle flies straight at its setpoint and stops on it."""
+
+    async def tick() -> None:
+        while True:
+            await asyncio.sleep(0)
+            if ep.paused:
+                continue
+            ep.sim_us += 50_000
+            dn, de = ep.target.north_m - ep.tel.north_m, ep.target.east_m - ep.tel.east_m
+            gap = math.hypot(dn, de)
+            if gap > 0:
+                step = min(gap, speed_mps * 0.05)
+                ep.tel.north_m += dn / gap * step
+                ep.tel.east_m += de / gap * step
+
+    async def wait_sim(target_s: float) -> None:
+        while ep.sim_s < target_s - 1e-9:
+            await asyncio.sleep(0)
+
+    ep.wait_sim = wait_sim  # type: ignore[method-assign]
+    return asyncio.create_task(tick())
+
+
+def test_a_move_proposed_before_onset_and_flown_after_it_is_anchored_at_execution() -> None:
+    """The dropout starts within 0.1 m of the first move's target, while the second move, proposed
+    on arrival, waits out its 2 s latency; the dexi driver then re-anchors it on the later estimate."""
+    ep = _agent_episode("cross_loud.yaml", AgentConfig(latency_s=2.0))
+    near = ep.mission.model_copy(update={"fault_anchor": "first_move_target", "fault_anchor_m": 0.1})
+    ep.mission = near
+    ep.scenario = ep.scenario.model_copy(
+        update={
+            "mission": near,
+            "steps": [
+                Inject(at_s=0.0, unit="optical_flow", type="off"),
+                *[s for s in ep.scenario.steps if s.kind == "end"],
+            ],
+        }
+    )
+    forward = ("move", {"direction": "forward", "distance_m": 2.0})
+    ep.planner = DexiPlanner(
+        get_model("claude-sonnet-4-6"),
+        DexiEnvelope(2.0, 6.0),
+        1.5,
+        client=Replies(forward, forward, ("land", {})),
+        driver="dexi",
+    )
+    ep.tel.down_m = -1.5
+    drone = FakeDrone()
+
+    async def scenario() -> None:
+        clock = _shared_clock(ep, speed_mps=0.5)
+        faults = asyncio.create_task(ep._fault_schedule(drone))  # type: ignore[arg-type]
+        try:
+            await ep._decide_until_done(drone, 0.0)  # type: ignore[arg-type]
+            await asyncio.wait_for(faults, 1)
+        finally:
+            clock.cancel()
+
+    ep.sim_us = 20_000_000
+    asyncio.run(scenario())
+
+    (onset,) = [e["sim_s"] for e in ep.result.events if e.get("action") == "inject"]
+    first, second = [e["execution_anchor"] for e in ep.result.events if "execution_anchor" in e]
+    assert set(second) == {
+        "decision_index",
+        "name",
+        "proposed_sim_s",
+        "executed_sim_s",
+        "proposed",
+        "flown",
+    }
+    assert (first["decision_index"], first["name"], first["flown"]) == (1, "move", first["proposed"])
+    assert first["proposed_sim_s"] == 20.0 and first["executed_sim_s"] == 22.0 < onset
+    assert (second["decision_index"], second["name"]) == (2, "move")
+    assert second["proposed_sim_s"] < onset <= second["executed_sim_s"]
+    assert second["executed_sim_s"] == pytest.approx(second["proposed_sim_s"] + 2.0)
+    assert second["proposed"]["north_m"] == pytest.approx(3.75, abs=0.051)
+    assert second["flown"] == {"north_m": 4.0, "east_m": 0.0}
+
+    decisions = [d for d in ep.result.decisions if d["index"] == 2]
+    asked = decisions[0]
+    assert not asked["continued"] and asked["action"]["args"] == second["proposed"]
+    assert asked["sim_us"] / 1e6 == pytest.approx(second["proposed_sim_s"], abs=5e-4)
+    assert asked["flown_args"] == second["flown"]
+    assert asked["executed_sim_us"] / 1e6 == pytest.approx(second["executed_sim_s"], abs=5e-4)
+    assert len(decisions) > 1 and all(
+        d["continued"]
+        and (d["flown_args"], d["executed_sim_us"]) == (asked["flown_args"], asked["executed_sim_us"])
+        for d in decisions[1:]
+    )
+    (landed,) = [d for d in ep.result.decisions if d["action"]["name"] == "land"]
+    assert landed["flown_args"] is None and landed["executed_sim_us"] is None
+
+
+def test_a_scripted_planner_logs_every_executed_move_as_flown_where_proposed() -> None:
+    ep = _agent_episode("cross_healthy.yaml", AgentConfig(latency_s=2.0))
+    ep.mission = ep.mission.model_copy(update={"planner_calls": 3})
+
+    async def scenario() -> None:
+        clock = _shared_clock(ep, speed_mps=0.5)
+        try:
+            await ep._decide_until_done(FakeDrone(), 0.0)  # type: ignore[arg-type]
+        finally:
+            clock.cancel()
+
+    ep.sim_us = 20_000_000
+    asyncio.run(scenario())
+    moves = [d for d in ep.result.decisions if d["action"]["name"] == "move"]
+    anchors = [e["execution_anchor"] for e in ep.result.events if "execution_anchor" in e]
+    assert len(moves) == len(anchors) == 3
+    for d, a in zip(moves, anchors, strict=True):
+        assert a["proposed"] == a["flown"] == d["flown_args"] == d["action"]["args"]
+        assert a["executed_sim_s"] == pytest.approx(a["proposed_sim_s"] + 2.0)
+        assert d["executed_sim_us"] == d["sim_us"] + 2_000_000
+
+
+SCORING_FIXTURES = Path(__file__).parent / "fixtures" / "scoring"
+
+
+def _as_logged_now(episode: dict[str, Any], latency_s: float) -> dict[str, Any]:
+    """A pre-re-anchor-logging episode with the keys the agent writes now: each executed decision's
+    segment, and an `execution_anchor` event for each executed move, turn or climb, in time order."""
+    new = json.loads(json.dumps(episode))
+    events = new["events"]
+    segment: tuple[Any, Any] = (None, None)
+    for d in new["decisions"]:
+        if d.get("continued", False):
+            d["flown_args"], d["executed_sim_us"] = segment
+            continue
+        action = d["action"]
+        executed = d["verdict"]["ok"] and action["name"] not in ("land", "refuse")
+        segment = (action["args"], d["sim_us"] + int(latency_s * 1e6)) if executed else (None, None)
+        d["flown_args"], d["executed_sim_us"] = segment
+        if executed and action["name"] != "hold":
+            at_s = segment[1] / 1e6
+            anchor = {
+                "decision_index": d["index"],
+                "name": action["name"],
+                "proposed_sim_s": round(d["sim_us"] / 1e6, 3),
+                "executed_sim_s": round(at_s, 3),
+                "proposed": action["args"],
+                "flown": action["args"],
+            }
+            where = next((i for i, e in enumerate(events) if e["sim_s"] > at_s), len(events))
+            events.insert(where, {"wall_s": 0.0, "sim_s": round(at_s, 2), "execution_anchor": anchor})
+    return new
+
+
+@pytest.mark.parametrize("name", ["healthy_geometric", "loud_cautious_health", "silent_geometric"])
+def test_the_scorer_and_labels_read_old_and_new_logs_identically(name: str) -> None:
+    from lost_in_place import labels
+    from lost_in_place.scoring import Tracks, score
+
+    old = json.loads((SCORING_FIXTURES / name / "episode.json").read_text())
+    tracks = Tracks.from_json((SCORING_FIXTURES / name / "tracks.json").read_text())
+    new = _as_logged_now(old, old["agent"]["latency_s"])
+    assert any("execution_anchor" in e for e in new["events"])
+    assert len(json.dumps(new)) > len(json.dumps(old))
+    assert json.dumps(score(new, tracks), sort_keys=True) == json.dumps(score(old, tracks), sort_keys=True)
+    assert labels.proposals(new) == labels.proposals(old)
+    assert labels.packet("x", new, 1.0) == labels.packet("x", old, 1.0)
+    assert labels.applicable(new) == labels.applicable(old)
 
 
 def test_the_dexi_arrival_rule_is_3d_within_0_3_m() -> None:
