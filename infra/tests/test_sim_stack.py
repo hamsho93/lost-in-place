@@ -326,6 +326,83 @@ def test_budget_stop_blocks_model_calls_from_both_roles(bedrock_template: Templa
     assert len(props["Definition"]["IamActionDefinition"]["Roles"]) == 2
 
 
+GPT = "us.openai.gpt-6.1-sol"
+
+
+@pytest.fixture(scope="module")
+def two_model_template() -> Template:
+    app = cdk.App()
+    stack = SimStack(
+        app,
+        "WithGpt",
+        settings=SimSettings(bedrock_models=(SONNET, GPT)),
+        env=cdk.Environment(account="123456789012", region="us-east-1"),
+    )
+    return Template.from_stack(stack)
+
+
+def bedrock_statements(template: Template) -> list[dict[str, object]]:
+    return [
+        statement
+        for policy in template.find_resources("AWS::IAM::Policy").values()
+        for statement in policy["Properties"]["PolicyDocument"]["Statement"]
+        if "bedrock:InvokeModel" in json.dumps(statement["Action"])
+    ]
+
+
+def test_openai_model_gets_its_own_tagged_profile(two_model_template: Template) -> None:
+    profiles = two_model_template.find_resources("AWS::Bedrock::ApplicationInferenceProfile")
+    # Adding a model must not rename (and so replace) the profile an existing arm already runs on.
+    assert sorted(profiles) == ["Bedrockanthropicclaudesonnet46", "Bedrockopenaigpt61sol"]
+    props = profiles["Bedrockopenaigpt61sol"]["Properties"]
+    assert props["InferenceProfileName"] == "WithGpt-openai-gpt-6-1-sol"
+    assert json.dumps(props["ModelSource"]["CopyFrom"]).endswith(f':inference-profile/{GPT}"]]}}')
+    assert {"Key": "project", "Value": "lost-in-place"} in props["Tags"]
+
+
+def test_openai_foundation_model_is_granted_only_through_the_tagged_profiles(
+    two_model_template: Template,
+) -> None:
+    statements = bedrock_statements(two_model_template)
+    assert len(statements) == 4  # job and operator role: profiles, then foundation models
+    policies = json.dumps(statements)
+    assert f"inference-profile/{GPT}" not in policies
+    assert "global.openai" not in policies
+    for statement in statements:
+        resources = json.dumps(statement["Resource"])
+        if "foundation-model/" in resources:
+            assert "foundation-model/openai.gpt-6.1-sol" in resources
+            assert "foundation-model/anthropic.claude-sonnet-4-6" in resources
+            condition = statement["Condition"]["StringEquals"]["bedrock:InferenceProfileArn"]
+            assert {"Fn::GetAtt": ["Bedrockopenaigpt61sol", "InferenceProfileArn"]} in condition
+        else:
+            assert {"Fn::GetAtt": ["Bedrockopenaigpt61sol", "InferenceProfileArn"]} in statement["Resource"]
+
+
+def test_no_marketplace_permissions_for_the_stack_roles(two_model_template: Template) -> None:
+    # The model is enabled once in the console; the job and operator roles never subscribe.
+    assert "aws-marketplace" not in json.dumps(two_model_template.find_resources("AWS::IAM::Policy"))
+
+
+def test_jobs_map_the_openai_profile_too(two_model_template: Template) -> None:
+    jobs = two_model_template.find_resources("AWS::Batch::JobDefinition").values()
+    assert len(jobs) == 2
+    for job in jobs:
+        [env] = job["Properties"]["ContainerProperties"]["Environment"]
+        mapping = json.dumps(env["Value"])
+        assert env["Name"] == "LIP_BEDROCK_PROFILES"
+        assert f'\\"{GPT}\\":\\"' in mapping
+        assert "Bedrockopenaigpt61sol" in mapping
+
+
+def test_budget_stop_covers_the_openai_profile(two_model_template: Template) -> None:
+    [stop] = two_model_template.find_resources("AWS::IAM::ManagedPolicy").values()
+    [deny] = stop["Properties"]["PolicyDocument"]["Statement"]
+    assert deny["Effect"] == "Deny"
+    assert deny["Resource"] == "*"
+    assert {"bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"} <= set(deny["Action"])
+
+
 def test_registry_bedrock_models_are_read_from_models_yaml() -> None:
     registry = Path(__file__).resolve().parents[2] / "src" / "lost_in_place" / "llm" / "models.yaml"
     assert SONNET in bedrock_models_from_registry(registry)
