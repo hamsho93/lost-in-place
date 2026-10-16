@@ -226,6 +226,21 @@ def _cmd_label_agree(args: argparse.Namespace) -> int:
 def _cmd_freeze_record(args: argparse.Namespace) -> int:
     from lost_in_place import freeze
 
+    if args.freeze == freeze.Freeze.V3:
+        return _freeze_record_v3(args)
+    v3_only = [
+        flag
+        for flag, value in (
+            ("--tag-message", args.tag_message),
+            ("--template", args.template),
+            ("--n", args.n),
+            ("--arms", args.arms),
+        )
+        if value
+    ]
+    if v3_only:
+        print(f"{', '.join(v3_only)}: only with --freeze v3", file=sys.stderr)
+        return 2
     spec = args.root / freeze.SPEC
     if args.analysis:
         return _pinned_script_record(args, spec, freeze.ANALYSIS_ROW)
@@ -265,6 +280,75 @@ def _pinned_script_record(args: argparse.Namespace, spec: Path, row: str) -> int
         sha = "(not a git checkout)"
     print(f"path: {freeze.PINNED_SCRIPTS[row]}\ngit SHA: {sha}\nSHA-256: {digest}")
     return 0
+
+
+def _freeze_record_v3(args: argparse.Namespace) -> int:
+    """SPEC-v3.md's record. `--write` needs the adaptation outcomes and the image digest and refuses
+    a missing artifact or a dirty checkout; `--check` reads the outcomes from the record;
+    `--tag-message` prints the `freeze-v3-pre` hash list. A missing artifact exits 1."""
+    from lost_in_place import freeze
+
+    if args.analysis or args.e4_supplement:
+        print(
+            "--analysis and --e4-supplement are freeze-v2 pins; v3's analysis row is in its record",
+            file=sys.stderr,
+        )
+        return 2
+    if args.tag_message:
+        values, missing = freeze.tag_hashes(args.root, args.image_digest)
+        for label, reason in missing.items():
+            print(f"missing: {label}: {reason}", file=sys.stderr)
+        print("freeze-v3-pre: the E5 pre-registration (docs/prereg/freeze-v3-design.md, section 2.1)\n")
+        print("\n".join(f"- {label}: `{value}`" for label, value in values.items() if value))
+        return 1 if missing else 0
+    spec = args.root / freeze.SPEC_V3
+    if not spec.is_file():
+        print(f"no {spec}", file=sys.stderr)
+        return 1
+    given = [args.template, args.n, args.arms]
+    if any(v is not None for v in given) and None in given:
+        print("--template, --n and --arms go together", file=sys.stderr)
+        return 2
+    try:
+        if args.template is not None:
+            adaptation = freeze.Adaptation(args.template, args.n, freeze.parse_arms(args.arms))
+        elif args.write:
+            print("--write needs --template, --n and --arms (the A-1 to A-5 outcomes)", file=sys.stderr)
+            return 2
+        else:
+            adaptation = freeze.adaptation_from_record(spec.read_text())
+    except ValueError as e:
+        if args.check or args.template is not None:
+            print(e, file=sys.stderr)
+            return 1
+        adaptation = None
+    if args.write and not args.image_digest:
+        print("--write needs --image-digest", file=sys.stderr)
+        return 2
+    values, missing = freeze.record_v3(args.root, args.image_digest, adaptation, args.design)
+    problems = [f"{row}: missing ({reason})" for row, reason in missing.items()]
+    if args.check:
+        problems += freeze.mismatches_v3(spec.read_text(), values)
+        if not args.image_digest:
+            print(f"{freeze.IMAGE_ROW} not compared: pass --image-digest", file=sys.stderr)
+        for problem in problems:
+            print(problem, file=sys.stderr)
+        return 1 if problems else 0
+    if args.write:
+        if values[freeze.GIT_ROW].endswith("-dirty"):
+            problems.append(f"{freeze.GIT_ROW}: {values[freeze.GIT_ROW]}; --write needs a clean checkout")
+        if problems:
+            for problem in problems:
+                print(problem, file=sys.stderr)
+            return 1
+        spec.write_text(freeze.write_record_v3(spec.read_text(), values))
+    for problem in problems:
+        print(problem, file=sys.stderr)
+    print("| Artifact | Hash |\n|---|---|")
+    for row, value in values.items():
+        shown = f"`{value}`" if value else ("(missing)" if row in missing else "")
+        print(f"| {row} | {shown} |")
+    return 1 if problems else 0
 
 
 def _cmd_stats(args: argparse.Namespace) -> int:
@@ -625,7 +709,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     fr = sub.add_parser("freeze-record", help="SHA-256 of each artifact in SPEC's freeze record")
     fr.add_argument("--root", type=Path, default=Path(), help="repo root (default: .)")
-    fr.add_argument("--design", type=Path, help="the experiment design document")
+    fr.add_argument(
+        "--freeze",
+        choices=["v2", "v3"],
+        default="v2",
+        help="v2: SPEC.md (E1-E4, the default); v3: SPEC-v3.md (E5)",
+    )
+    fr.add_argument(
+        "--design",
+        type=Path,
+        help="the experiment design document (v3 default: docs/prereg/freeze-v3-design.md under --root)",
+    )
     fr.add_argument("--image-digest", help="the sweep image's digest, sha256:...")
     pin = fr.add_mutually_exclusive_group()
     pin.add_argument(
@@ -640,8 +734,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="the same, for the E4 supplement script (scripts/e4_supplement.py)",
     )
     mode = fr.add_mutually_exclusive_group()
-    mode.add_argument("--write", action="store_true", help="fill in SPEC.md's freeze record")
-    mode.add_argument("--check", action="store_true", help="fail if SPEC.md's record no longer matches")
+    mode.add_argument(
+        "--write", action="store_true", help="fill in SPEC.md's (or SPEC-v3.md's) freeze record"
+    )
+    mode.add_argument(
+        "--check", action="store_true", help="fail if SPEC.md's (or SPEC-v3.md's) record no longer matches"
+    )
+    mode.add_argument(
+        "--tag-message",
+        action="store_true",
+        help="v3: print the freeze-v3-pre tag message's SHA-256 list (design section 2.1); exit 1 if any"
+        " artifact is missing",
+    )
+    v3 = fr.add_argument_group("freeze-v3 adaptation outcomes (with --freeze v3; required by --write)")
+    v3.add_argument("--template", choices=["t0", "t1"], help="the wording template chosen by A-1")
+    v3.add_argument("--n", type=int, choices=[120, 160], help="families per cell, by A-2")
+    v3.add_argument(
+        "--arms", help="the confirmatory arm keys, comma-separated (A-3, A-4); m = 4 x their number"
+    )
     fr.set_defaults(func=_cmd_freeze_record)
 
     doctor = sub.add_parser("doctor", help="check that PX4 and Gazebo are where we expect")
