@@ -9,8 +9,9 @@ from typing import Any
 import pytest
 from e5_fixtures import e4_mirror, episode, load_script, write
 
-from lost_in_place import replay
+from lost_in_place import freeze, replay
 
+ROOT = Path(__file__).resolve().parents[1]
 RUNGS = ("O1-L", "O1-N", "O1-R", "O1-V")
 
 
@@ -256,11 +257,11 @@ def test_a5_m_is_four_per_confirmatory_arm_up_to_20(adm: ModuleType) -> None:
     d = adm.decide(*_inputs())
     assert (d["A-5"]["m"], d["A-5"]["max_m"]) == (20, 20)
     assert d["A-5"]["confirmatory_arms"] == [
-        "dexi-qwen3-4b-student.driver-dexi.prompt-dexi-v2",
-        "dexi-qwen3-4b-zero-shot.driver-dexi.prompt-dexi-v2",
-        "dexi-claude-sonnet-4-6.driver-dexi.prompt-dexi-v2",
-        "dexi-gpt-6.1-sol.driver-dexi.prompt-dexi-v2",
-        "dexi-claude-sonnet-5-5-fb1.driver-dexi.prompt-dexi-v2",
+        "claude-sonnet-4-6",
+        "claude-sonnet-5-5-fb1",
+        "gpt-6.1-sol",
+        "qwen3-4b-student",
+        "qwen3-4b-zero-shot",
     ]
     assert adm.decide(*_inputs(loud=30))["A-5"]["m"] == 16
     assert adm.decide(*_inputs(s55_canary={"usd": 10.0}))["A-5"]["m"] == 16
@@ -408,4 +409,29 @@ def test_dry_run_from_recorded_runs_to_the_adaptation_block(
     if smoke is ACCEPTED_FB1:
         assert s55["entry"] == SONNET_FB1 and s55["checks"]["5_retest"]["required"] is True
         assert s55["checks"]["5_retest"]["r_tr"] == 0.0 and s55["checks"]["5_retest"]["ok"]
-    assert (f"dexi-{SONNET_FB1}.driver-dexi.prompt-dexi-v2" in d["A-5"]["confirmatory_arms"]) is (m == 20)
+    assert (SONNET_FB1 in d["A-5"]["confirmatory_arms"]) is (m == 20)
+    adaptation = freeze.Adaptation("t1", d["A-2"]["N"], freeze.parse_arms(d["A-5"]["record_arms"]))
+    assert adaptation.m == m and freeze.unknown_arms(ROOT, adaptation) == []
+
+
+@pytest.mark.parametrize(
+    ("gpt", "sonnet"),
+    [(GPT, SONNET_FB1), ("gpt-6.1-sol-fb2", SONNET), ("gpt-6.1-sol-fb3", "claude-sonnet-5-5-fb2")],
+)
+def test_the_arms_are_named_as_the_freeze_record_and_stats_v3_read_them(
+    adm: ModuleType, gpt: str, sonnet: str
+) -> None:
+    d = adm.decide(*_inputs(entry=gpt, sonnet=sonnet))["A-5"]
+    arms = freeze.parse_arms(d["record_arms"])
+    assert list(arms) == d["confirmatory_arms"] and gpt in arms and sonnet in arms
+    assert not any(a.startswith("dexi-") for a in arms)
+    adaptation = freeze.Adaptation("t0", 120, arms)
+    assert adaptation.m == d["m"] == 20 and freeze.unknown_arms(ROOT, adaptation) == []
+    assert {freeze.base_arm(a) for a in arms} == {*EXISTING, GPT, SONNET}
+    for arm, entries in adm.SMOKED.items():
+        assert {freeze.base_arm(e) for e in entries} == {arm}
+    phase0, smoke, canary = _inputs(entry=gpt, sonnet=sonnet, loud=30, s55_canary={"usd": 10.0})
+    canary["arms"]["qwen3-4b-zero-shot"] = _arm(invalid=50)
+    d = adm.decide(phase0, smoke, canary)["A-5"]
+    assert d["record_arms"] == "claude-sonnet-4-6, qwen3-4b-student" and d["m"] == 8
+    assert freeze.Adaptation("t0", 120, freeze.parse_arms(d["record_arms"])).m == 8

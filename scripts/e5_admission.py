@@ -21,7 +21,9 @@ The rules, in the order the design applies them:
 - A-2, N: 160 if, for Claude Sonnet 4.6 or a confirmatory smoked arm, any rung (O1-L, O1-N, O1-R, O1-V)
   against O1, in loud or in brief, has more than 10% of prompts discordant in each direction; else 120.
 - A-4, each existing arm: descriptive if more than 2% of its canary planner calls are invalid.
-- A-5: m = 4 x the confirmatory arms, at most 20.
+- A-5: m = 4 x the confirmatory arms, at most 20. Arms are registry model names, a smoked arm by the
+  entry it flies (e.g. `claude-sonnet-5-5-fb1`), as `lip freeze-record --freeze v3 --arms` and
+  `stats_v3` read them; `record_arms` is that flag's value.
 
     uv run --extra aws python scripts/e5_admission.py canary-health s3://<bucket>/runs --template t1 \\
         --usd gpt-6.1-sol=4.10 --usd claude-sonnet-5-5-fb1=3.50 --out runs/canary/health.json
@@ -223,10 +225,6 @@ def a4(canary: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def arm_key(model: str) -> str:
-    return f"dexi-{model}.driver-dexi.prompt-dexi-v2"
-
-
 def decide(phase0: dict[str, Any], smoke: dict[str, Any], canary: dict[str, Any]) -> dict[str, Any]:
     n_before = a2(phase0, [CLAUDE])["N"]
     smoked = {arm: a3(phase0, smoke, canary, n_before, arm) for arm in SMOKED}
@@ -244,7 +242,12 @@ def decide(phase0: dict[str, Any], smoke: dict[str, Any], canary: dict[str, Any]
         **{RULES[arm]: r for arm, r in smoked.items()},
         "A-2": n_rule,
         "A-4": existing,
-        "A-5": {"confirmatory_arms": [arm_key(a) for a in confirmatory], "m": m, "max_m": MAX_M},
+        "A-5": {
+            "confirmatory_arms": sorted(confirmatory),
+            "record_arms": ", ".join(sorted(confirmatory)) or "none",
+            "m": m,
+            "max_m": MAX_M,
+        },
         "order": "A-3 and A-3b (check 5 at the N A-2 gives from Claude Sonnet 4.6 alone), then A-2, A-4, A-5",
     }
 
