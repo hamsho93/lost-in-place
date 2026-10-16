@@ -17,7 +17,7 @@
 3. `freeze-v3` may differ from `freeze-v3-pre` only by applying the adaptation rules in §2.3, and a script checks the diff.
 4. Mahmood signs off on the `freeze-v3` tag, and only then does the wave run.
 
-**Budget:** $450 a month in October and November. The pre-freeze work has a median of $62; the November wave a median of $340, under a metered hard stop at $400. GPT-6.1 Sol and then Claude Sonnet 5.5 run last, each in November only if a month-fit check passes; otherwise in December, on up to about $370 of December budget (§10).
+**Budget:** $450 a month in October and November. The pre-freeze work has a median of $82 (P90 $96), which brings October close to its $420 stop; the November wave a median of $340, under a metered hard stop at $400. GPT-6.1 Sol and then Claude Sonnet 5.5 run last, each in November only if a month-fit check passes; otherwise in December, on up to about $370 of December budget (§10).
 
 ## 1. Why a new freeze, and what happens to freeze-v2
 
@@ -572,7 +572,7 @@ The smoke call is `lip propose <entry> --planner dexi`, on each entry in turn.
 2. Invalid planner calls are ≤ 2%, both in the Phase 0 action calls and in its canary.
 3. In its canary, loud `manipulation_decision_ok` passes in ≥ 40 of 42 episodes, and brief `manipulation_ok` in ≥ 35 of 36.
 4. The canary's cost per episode is ≤ **$0.060**.
-5. If temperature was dropped, test-retest is checked. Phase 0 sends each prompt twice, and r_tr is half the share of prompts whose safe/unsafe call differs. Refute power under a null with r = r_tr, at the wave's N and 98.75%, computed by exact enumeration as in §8 (`oc` in `scripts/prereg/methodology_power_check.py`), must be ≥ 60%. Roughly, that means r_tr ≤ 7%.
+5. If temperature was dropped, test-retest is checked. Phase 0 sends each prompt twice, and r_tr is half the share of prompts whose safe/unsafe call differs. Refute power under a null with r = r_tr, at the wave's N and 98.75%, computed by exact enumeration as in §8 (`oc` in `scripts/prereg/methodology_power_check.py`), must be ≥ 60%. The 60% bar is crossed at r_tr ≈ 6.2% at N = 120 and ≈ 9.5% at N = 160.
 
 **Otherwise:**
 - if checks 1 and 4 hold but 2, 3 or 5 fails, the arm is **descriptive**;
@@ -621,6 +621,12 @@ claude-sonnet-5-5:
 - **Claude Sonnet 5.5:** the same prices, about 6 calls per episode, about 30% more tokens for the same text, and about 200 reasoning tokens per call at `low`: about **$0.045** of inference per episode at the median, P90 about $0.065.
 - **Compute:** $0.004–0.007 per episode.
 
+**Phase 0 calls** (`scripts/e5_phase0.py`'s plan):
+- **Claude Sonnet 4.6:** 2,820 calls, about $11.50.
+- **GPT-6.1 Sol:** 1,620 calls at temperature 0, about $8.23; 2,220 if temperature is dropped and the action calls go twice, about $11.93.
+- **Claude Sonnet 5.5:** priced at `-fb1`, 2,220 calls, about $14.04, because temperature is usually rejected alongside thinking.
+- **Total:** about $33.80 with GPT at temperature 0, or $37.50 with it dropped. The cost model's median is $37 and its P90 $48, after the reasoning-token spread.
+
 **Episode counts:**
 - **N = 120:** 11,640 episodes: 5 × 2,040 LLM plus 1,440 scripted.
 - **N = 160:** 14,720 episodes: 5 × 2,560 plus 1,920.
@@ -631,30 +637,34 @@ The figures below come from a Monte Carlo cost model (20,000 draws), `scripts/pr
 
 | Item | Month | Median | P90 |
 |---|---|---|---|
-| Phase 0: replay, first-step prompts, GPT test-retest | Oct | $15 | $19 |
-| Wording check: student dry run plus probe | Oct | $9 | $11 |
-| Canaries: 4 arms × 78 episodes, scripted, Qwen warm-ups | Oct | $16 | $20 |
-| Claude Sonnet 5.5: Phase 0 (1,620 calls), wording probe (792), canary (78 episodes) | Oct | $21 | $32 |
-| **Pre-freeze total** | **Oct** | **$62** | **$74** |
+| Frontier smoke (Oct 16; capped at $24) | Oct | $14 | $15 |
+| Phase 0, Claude Sonnet 4.6 (2,820 calls) | Oct | $12 | $13 |
+| Phase 0, GPT-6.1 Sol (1,620 calls, or 2,220 with test-retest) | Oct | $10 | $17 |
+| Phase 0, Claude Sonnet 5.5 (`-fb1`, 2,220 calls) | Oct | $14 | $22 |
+| Wording check: student dry run plus probes, Claude Sonnet 5.5's included (792 calls, about $2.81) | Oct | $12 | $14 |
+| Canaries: 4 arms × 78 episodes, scripted, Qwen warm-ups | Oct | $16 | $19 |
+| Canary, Claude Sonnet 5.5 (78 episodes) | Oct | $4 | $6 |
+| **Pre-freeze total** | **Oct** | **$82** | **$96** |
 | Scripted control (1,440) | Nov | $7 | $8 |
 | Student (2,040) | Nov | $38 | $45 |
 | Zero-shot (2,040) | Nov | $77 | $92 |
 | Claude Sonnet 4.6 (2,040) | Nov | $79 | $90 |
-| GPT-6.1 Sol (2,040) plus its probe, when it runs | Nov | $93 | $117 |
-| Claude Sonnet 5.5 (2,040) plus its probe, when it runs (in November in 15% of draws) | Nov or Dec | $102 | $123 |
+| GPT-6.1 Sol (2,040) plus its probe, when it runs | Nov | $93 | $119 |
+| Claude Sonnet 5.5 (2,040) plus its probe, when it runs (in November in 16% of draws) | Nov or Dec | $102 | $123 |
 | Comprehension probes, Claude and Qwen | Nov | $12 | $14 |
 | Blind-labeller check (10% per cell) | Nov | $27 | $31 |
 | Retries and other tagged AWS spend | Nov | $10 | $12 |
-| **November total** | **Nov** | **$340** | **$370** (P99 $389) |
+| **November total** | **Nov** | **$340** | **$370** (P99 $391) |
 
 **Other scenarios:**
-- **Warm-copy waste as in E2:** $351 median, $380 P90.
-- **If pre-freeze work slips into November:** $321 median, $381 P90, because GPT-6.1 Sol and Claude Sonnet 5.5 then move to December more often.
-- **At N = 160:** November is $312 median and $345 P90, because GPT-6.1 Sol almost always moves to December and Claude Sonnet 5.5 always does.
+- **Warm-copy waste as in E2:** $352 median, $380 P90.
+- **If pre-freeze work slips into November:** $335 median, $366 P90, because GPT-6.1 Sol then moves to December in 73% of draws and Claude Sonnet 5.5 in every draw in which it is admitted.
+- **At N = 160:** November is $312 median and $343 P90, because GPT-6.1 Sol almost always moves to December and Claude Sonnet 5.5 always does.
 
 ### 10.3 The two months
 
-- **October ($450).** Actual spend to Oct 15 was about $290–320; the billing dashboard lags 18–24 h. Pre-freeze work adds about $62–74, so October should land at about $350–395.
+- **October ($450).** Actual spend to Oct 15 was about $290–320; the billing dashboard lags 18–24 h. Pre-freeze work adds about $82 (median) to $96 (P90), so October should land at about $372–416, close to the $420 stop.
+  - **The margin is thin.** At the top of that range, the last pre-freeze jobs (the late arms' canaries) may not fit under the October stop and move to Nov 6, which is the "slips into November" case in §10.2.
   - **The October stop:** no pre-freeze job is submitted if the October estimate plus that job's P90 would exceed **$420**. The estimate is the Budgets actual plus the meter since the actual's last update.
   - **Anything that doesn't fit** waits for Nov 6 or later. November then carries it, and the month-fit rule absorbs it.
 - **November ($450).** The metered hard stop is **$400** (S-9). That leaves $50 for the meter's lag, in-flight episodes (≤ about $10) and untagged spend. The AWS budget action fires at 100% of actual spend and denies the job role, and it persists into the next month. It must never be reached.
@@ -664,9 +674,9 @@ The figures below come from a Monte Carlo cost model (20,000 draws), `scripts/pr
 
 **The late arms run last, in a fixed order:** GPT-6.1 Sol, then Claude Sonnet 5.5, after the three existing arms and the scripted control have settled. Just before each late arm is submitted, the submitter computes:
 
-> November metered spend so far + the remaining fixed items (labeller, outstanding probes, retries) + the projection of any late arm already placed in November + 1.15 × (this arm's episodes × its canary $/episode + its probe)
+> November metered spend so far + the remaining fixed items (labeller, outstanding probes, retries) + 1.15 × (this arm's episodes × its canary $/episode + its probe)
 
-For GPT-6.1 Sol, no late arm has been placed yet. For Claude Sonnet 5.5, GPT's projection is included when GPT runs in November.
+Claude Sonnet 5.5's check is made after GPT-6.1 Sol has settled, so GPT's metered cost is already in "November metered spend so far".
 
 **What happens next, for each late arm:**
 - If that sum is **≤ $400**, the arm runs in November.
@@ -677,10 +687,12 @@ For GPT-6.1 Sol, no late arm has been placed yet. For Claude Sonnet 5.5, GPT's p
 
 **In the cost model:**
 
-| Case | GPT: Nov | GPT: Dec | GPT: not admitted | Sonnet 5.5: Nov | Sonnet 5.5: Dec | Sonnet 5.5: not admitted | December spend, when any (median, P90) |
+| Case | GPT: Nov | GPT: Dec | GPT: not admitted | Sonnet 5.5: Nov | Sonnet 5.5: Dec | Sonnet 5.5: not admitted | December need, 1.15 × projection (median, P90, max) |
 |---|---|---|---|---|---|---|---|
-| N = 120 | 75% | 3% | 22% | 15% | 59% | 26% | $103, $129 |
-| N = 160 | 5% | 73% | 22% | 0% | 73% | 27% | $221, $279 |
+| N = 120 | 75% | 3% | 22% | 16% | 58% | 26% | $118, $144, $296 |
+| N = 160 | 5% | 73% | 22% | 0% | 73% | 27% | $248, $316, $375 |
+
+**A second estimate** (the submitter's own Monte Carlo) puts Claude Sonnet 5.5 in November in about 22% of draws at N = 120 and 2% at N = 160, with not-admitted at 17% and the December need peaking at about $292 and $367. The main difference is whether the canary's cost per episode counts compute. The table above counts it, as for GPT-6.1 Sol. Without it, Sonnet 5.5's figures here become 20% November and 16% not admitted. The second estimate also uses a narrower per-episode distribution (lognormal, median $0.045, P90 $0.065). Either way, the December P90 is under the ~$370 request; only the extreme tail at N = 160 reaches it.
 
 So Claude Sonnet 5.5 is effectively a December arm at either N. **If N → 160 fires**, the three existing arms run at 160 in November (median $312), and GPT-6.1 Sol is a December arm as well. This is mechanical: no further decision is needed beyond the December budget.
 
@@ -702,7 +714,7 @@ All stop rules are harness or cost signals; none reads an outcome column.
 | S-9 | November metered total > $400; October estimate > $420 | Hard stop on all submissions; Mahmood decides |
 
 **Operations** follow the runbook `docs/runbooks/e5-wave.md` (`scripts/e5_submit.py`, `scripts/e5_meter.py`, `lip e5 health`). The meter reads Claude Sonnet 5.5's usage in us-east-2.
-- **Submission:** per-arm rolling top-up with in-flight caps (Claude 25, student 39, zero-shot 39 rising to 64, GPT 40). No whole-arm arrays.
+- **Submission:** per-arm rolling top-up with in-flight caps (Claude Sonnet 4.6 25, student 39, zero-shot 39 rising to 64, GPT 40, Claude Sonnet 5.5 40, the last because us-east-2 has a lower token quota). No whole-arm arrays.
 - **Ledger:** the ledger and heartbeat live in the results bucket under `manifests/e5/ledger/`, and resume is idempotent.
 - **Imports:** a pinger with a 5-minute dead-man switch tied to the submitter heartbeat. Imports are warmed one at a time and submitted on the first successful call.
 - **Credentials:** the operator role is refreshed before it expires.
@@ -765,7 +777,7 @@ The admission script, `scripts/e5_admission.py`, computes A-2 to A-5 (A-3b inclu
 | Nov 6–8 | The wave (day 3 is slack and the labeller) |
 | From Dec 1 | Deferred arms, then the analysis |
 
-**If `freeze-v3-pre` is not tagged by Oct 29,** the pre-freeze runs move to Nov 6 and the wave starts about Nov 9. The month-fit rule then moves GPT-6.1 Sol to December in about 60% of draws, and Claude Sonnet 5.5 in nearly all draws in which it is admitted.
+**If `freeze-v3-pre` is not tagged by Oct 29,** the pre-freeze runs move to Nov 6 and the wave starts about Nov 9. The month-fit rule then moves GPT-6.1 Sol to December in about 73% of draws, and Claude Sonnet 5.5 in every draw in which it is admitted.
 
 ## 13. Known limits
 
@@ -779,6 +791,9 @@ The admission script, `scripts/e5_admission.py`, computes A-2 to A-5 (A-3b inclu
   - **Region.** It is called in us-east-2, through its own profile, permissions and meter. If that path isn't deployed, its smoke call fails and it is not run (A-3b, check 1).
 - **Two late arms, likely in December.** Claude Sonnet 5.5 is a December arm in most draws, and GPT-6.1 Sol too at N = 160. If no December budget is approved by Nov 20, they are dropped and m stays as tagged, so the wave-wide column is stricter than the reporting arms need.
 - **The budget action is sticky.** It persists into the next month. The stops sit at $400 and $420 so that it never fires.
+- **Claude Sonnet 5.5's billing.** AWS bills it as AWS Marketplace software usage, which the tag-filtered budget, and so the budget action, may not see. The meter's S-9 stop, which reads its us-east-2 usage, is the guard. That the meter and Cost Explorer agree is checked after the frontier smoke.
+- **The canary cap may reject Claude Sonnet 5.5.** At the expected P90 of $0.065 per episode, the $0.060 cap rejects it in about 17% of draws, or about 26% if compute counts. The cap is unchanged.
+- **The October margin is thin.** October lands at about $372–416 against the $420 stop (§10.3).
 - **Explanation (e) stays open.** CSA is procedural. In-room harm is rare and invisible to the planner.
 - **Generalisation.** All families come from one room template.
 
