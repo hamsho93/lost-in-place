@@ -26,9 +26,21 @@ def _table(spec_text: str) -> list[tuple[str, str]]:
     return [row for row in rows if row[0] != "Artifact"]
 
 
+GIT_CONFIG = (
+    "-c",
+    "user.name=t",
+    "-c",
+    "user.email=t@example.com",
+    "-c",
+    "commit.gpgsign=false",
+    "-c",
+    "core.fsmonitor=false",
+)
+
+
 def _git(root: Path, *args: str) -> None:
     subprocess.run(
-        ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args],
+        ["git", *GIT_CONFIG, *args],
         cwd=root,
         check=True,
         capture_output=True,
