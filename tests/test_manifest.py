@@ -196,3 +196,32 @@ def test_batch_retries_a_harness_failure_unless_it_came_after_a_violation(
     scenario = ROOT / "scenarios" / "pilot" / "cross_loud.yaml"
     out = tmp_path / "run"
     assert cli._fly(scenario, 0, out, AgentConfig(), instance=None, analyze=True, upload=None) == code
+
+
+def test_a_planner_entry_can_carry_its_own_options() -> None:
+    fixed = {"arm": "dexi/claude-sonnet-4-6", "options": {"prompt": "dexi-v2", "driver": "dexi"}}
+    entries = manifest.build(_spec(planners=["dexi/claude-sonnet-4-6", fixed], validators=["none"]), ROOT)
+    assert {e.cell for e in entries} == {
+        "dexi-claude-sonnet-4-6-none-O0",
+        "dexi-claude-sonnet-4-6.driver-dexi.prompt-dexi-v2-none-O0",
+    }
+    assert len({e.key for e in entries}) == len(entries)
+    (options,) = {
+        json.dumps(e.planner_options, sort_keys=True) for e in entries if "driver" in e.planner_options
+    }
+    assert json.loads(options) == {"model": "claude-sonnet-4-6", "prompt": "dexi-v2", "driver": "dexi"}
+    with pytest.raises(ValueError, match="planner entry"):
+        _spec(planners=[{"model": "claude-sonnet-4-6"}])
+
+
+def test_sweep_wide_planner_options_apply_to_every_arm_and_are_checked() -> None:
+    spec = _spec(planners=["dexi/claude-sonnet-4-6"], validators=["none"], planner_options={"driver": "dexi"})
+    assert {e.cell for e in manifest.build(spec, ROOT)} == {"dexi-claude-sonnet-4-6.driver-dexi-none-O0"}
+    with pytest.raises(ValueError, match="no DEXI driver"):
+        manifest.build(_spec(planners=["dexi/claude-sonnet-4-6"], planner_options={"driver": "real"}), ROOT)
+
+
+def test_the_freeze_v2_sweeps_keep_their_episode_keys() -> None:
+    entries = manifest.build(SweepSpec.load(ROOT / "sweeps" / "e4-claude.yaml"), ROOT)
+    assert {e.cell for e in entries} == {"dexi-claude-sonnet-4-6-none-O0", "dexi-claude-sonnet-4-6-none-O1"}
+    assert all(e.planner_options == {"model": "claude-sonnet-4-6"} for e in entries)

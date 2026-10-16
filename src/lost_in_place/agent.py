@@ -12,6 +12,8 @@ Each decision:
 5. Execute the action (or hold if the validator rejected it) for at most one epoch, then loop.
    A `PrimitivePlanner` (the DEXI-prompt arms) isn't asked again until its move, turn or climb
    ends; each further epoch is still checked by the validator and recorded as `continued`.
+   An `ExecutionTimePlanner` (the DEXI arms with `driver=dexi`) turns a relative primitive into
+   its target here, from the estimate after the latency, and brings its driver's arrival rule.
 
 Faults are scheduled from arming, from the first executed move, or from the estimate coming within
 `mission.fault_anchor_m` of that move's target (`mission.fault_anchor`).
@@ -41,7 +43,9 @@ from lost_in_place.planning import (
     DEXI_PLANNER,
     REJECTED,
     Action,
+    Arrival,
     EstimatorHealth,
+    ExecutionTimePlanner,
     Observation,
     Outcome,
     Planner,
@@ -58,8 +62,6 @@ if TYPE_CHECKING:
 
 ObservationLevel = Literal["O0", "O1"]
 
-ARRIVED_M = 0.25
-ARRIVED_DEG = 5.0
 UNDER_WAY = "still under way"
 MAX_HOLD_S = 15.0
 HISTORY_LENGTH = 8
@@ -93,6 +95,7 @@ def make_planner(config: AgentConfig, scenario: Scenario) -> Planner:
         options["mission"] = scenario.mission
     elif config.planner == DEXI_PLANNER:
         options["scenario"] = scenario
+        options["validator"] = config.validator
     return load_planner(config.planner, **options)
 
 
@@ -315,6 +318,10 @@ class AgentEpisode(_Episode):
         return self.sim_s - self._floor_since >= ON_FLOOR_SIM_S
 
     @property
+    def arrival(self) -> Arrival:
+        return self.planner.arrival if isinstance(self.planner, ExecutionTimePlanner) else Arrival()
+
+    @property
     def in_control(self) -> bool:
         return self.tel.armed and self.tel.mode in (None, FlightMode.OFFBOARD) and not self.on_floor()
 
@@ -370,6 +377,10 @@ class AgentEpisode(_Episode):
                 self.history.append(history_entry(self.sim_s - start, action, verdict))
                 self.log(loop_end=action.name)
                 return
+            if verdict.ok and isinstance(self.planner, ExecutionTimePlanner):
+                proposed, action = action, self.planner.at_execution(action, self.observe())
+                if action != proposed:
+                    self.log(execution_anchor={"proposed": proposed.args, "flown": action.args})
             began = self.sim_s
             status = await self._execute(drone, action if verdict.ok else self._hold())
             self.history.append(history_entry(self.sim_s - start, action, verdict, status))
@@ -482,42 +493,69 @@ class AgentEpisode(_Episode):
         self.target = target
         await drone.offboard.set_position_ned(target)
 
-    async def _run_until(self, deadline_s: float, done: Callable[[], bool]) -> None:
-        while self.sim_s < deadline_s and self.in_control and not done():
-            await self.wait_sim(min(self.sim_s + 0.1, deadline_s))
+    async def _run_until(
+        self, deadline_s: float, done: Callable[[], bool], poll_s: float | None = None
+    ) -> None:
+        """Run until `deadline_s`, loss of control, or `done`; `done` is checked every 0.1 s, or only
+        every `poll_s` from now (control is still checked every 0.1 s)."""
+        next_poll = self.sim_s
+        while self.sim_s < deadline_s and self.in_control:
+            if poll_s is None or self.sim_s >= next_poll:
+                if done():
+                    return
+                if poll_s is not None:
+                    next_poll += poll_s
+            step_end = min(self.sim_s + 0.1, deadline_s)
+            await self.wait_sim(step_end if poll_s is None else min(step_end, next_poll))
+
+    def _off_setpoint(self, target: PositionNedYaw, horizontal: bool) -> float:
+        """How far the estimate is from a move's or climb's setpoint, by the arrival rule: freeze-v2
+        measures a move horizontally and a climb vertically, a `vertical` rule both in 3-D."""
+        dn, de = target.north_m - self.tel.north_m, target.east_m - self.tel.east_m
+        dd = target.down_m - self.tel.down_m
+        if self.arrival.vertical:
+            return math.sqrt(dn * dn + de * de + dd * dd)
+        return math.hypot(dn, de) if horizontal else abs(dd)
 
     async def _execute(self, drone: System, action: Action) -> str:
         """Run one action for up to an epoch; returns how far it got, for the planner's history."""
         t = self.target
         epoch_end = self.sim_s + self.config.epoch_s
+        rule = self.arrival
         if action.name == "move":
             n, e = float(action.args["north_m"]), float(action.args["east_m"])
-            await self._setpoint(drone, PositionNedYaw(n, e, t.down_m, t.yaw_deg))
+            target = PositionNedYaw(n, e, t.down_m, t.yaw_deg)
+            await self._setpoint(drone, target)
             self.log(action="move", north_m=n, east_m=e)
             if not self.first_move.is_set():
                 self.first_move_target = (n, e)
                 self.first_move.set()
             await self._run_until(
-                epoch_end, lambda: math.hypot(n - self.tel.north_m, e - self.tel.east_m) < ARRIVED_M
+                epoch_end, lambda: self._off_setpoint(target, True) < rule.position_m, rule.poll_s
             )
-            left = math.hypot(n - self.tel.north_m, e - self.tel.east_m)
-            return "arrived" if left < ARRIVED_M else self._unfinished(f"{left:.1f} m from the target")
+            left = self._off_setpoint(target, True)
+            return "arrived" if left < rule.position_m else self._unfinished(f"{left:.1f} m from the target")
         elif action.name == "rotate":
             heading = float(action.args["heading_deg"]) % 360.0
             await self._setpoint(drone, PositionNedYaw(t.north_m, t.east_m, t.down_m, heading))
             self.log(action="rotate", heading_deg=heading)
             await self._run_until(
-                epoch_end, lambda: abs((self.tel.yaw_deg - heading + 180.0) % 360.0 - 180.0) < ARRIVED_DEG
+                epoch_end,
+                lambda: abs((self.tel.yaw_deg - heading + 180.0) % 360.0 - 180.0) < rule.yaw_deg,
+                rule.poll_s,
             )
             off = abs((self.tel.yaw_deg - heading + 180.0) % 360.0 - 180.0)
-            return "arrived" if off < ARRIVED_DEG else self._unfinished(f"{off:.0f} deg from the target")
+            return "arrived" if off < rule.yaw_deg else self._unfinished(f"{off:.0f} deg from the target")
         elif action.name == "take_off":
             altitude = float(action.args.get("altitude_m", self.scenario.altitude_m))
-            await self._setpoint(drone, PositionNedYaw(t.north_m, t.east_m, -altitude, t.yaw_deg))
+            target = PositionNedYaw(t.north_m, t.east_m, -altitude, t.yaw_deg)
+            await self._setpoint(drone, target)
             self.log(action="take_off", altitude_m=altitude)
-            await self._run_until(epoch_end, lambda: abs(altitude + self.tel.down_m) < ARRIVED_M)
-            off = abs(altitude + self.tel.down_m)
-            return "arrived" if off < ARRIVED_M else self._unfinished(f"{off:.1f} m from the target")
+            await self._run_until(
+                epoch_end, lambda: self._off_setpoint(target, False) < rule.position_m, rule.poll_s
+            )
+            off = self._off_setpoint(target, False)
+            return "arrived" if off < rule.position_m else self._unfinished(f"{off:.1f} m from the target")
         else:  # hold, and anything rejected
             seconds = min(max(float(action.args.get("seconds", self.config.epoch_s)), 0.5), MAX_HOLD_S)
             here = PositionNedYaw(self.tel.north_m, self.tel.east_m, t.down_m, t.yaw_deg)
