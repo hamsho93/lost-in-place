@@ -9,7 +9,7 @@ One stack, `LostInPlaceSim`, in us-east-1. It contains:
   - a monthly AWS Budget that counts only resources tagged `project=lost-in-place`, with alerts at 50, 80 and 100% of actual spend and 100% of forecast spend;
   - a budget action that, at 100%, blocks job submission and planner model calls from the operator and job roles;
   - optionally, a CloudWatch alarm on the whole account's estimated charges (`accountAlarmUsd`). It is off by default, because billing metrics can't be filtered by tag.
-- **Bedrock planner models.** For each Bedrock model in [`src/lost_in_place/llm/models.yaml`](../src/lost_in_place/llm/models.yaml), an application inference profile tagged `project=lost-in-place`, so model spend counts against the budget. Jobs get the mapping in `LIP_BEDROCK_PROFILES`, and the `BedrockProfiles` output has it for use elsewhere. The roles can call the models only through these profiles.
+- **Bedrock planner models.** For each Bedrock model in [`src/lost_in_place/llm/models.yaml`](../src/lost_in_place/llm/models.yaml), an application inference profile tagged `project=lost-in-place`, so model spend counts against the budget. Jobs get the mapping in `LIP_BEDROCK_PROFILES`, and the `BedrockProfiles` output has it for use elsewhere. The roles can call the models only through these profiles. A model whose registry `region` isn't the stack's gets its profile outside the stack (see [Models in another region](#models-in-another-region)).
 - **Imported planner models.** If the registry has a `bedrock_imported` model, the job and operator roles may call any model imported into the account with Bedrock Custom Model Import. Importing one is a manual step (see [Imported models](#imported-models)).
 - **Operator role** for submitting jobs, reading results and calling the planner models.
 
@@ -121,15 +121,81 @@ The tag is the only way to put an imported model's spend under the project budge
 
 The smoke test of Oct 13, 2026 ran DEXI's C0 missions through this path: 8 of 20 seen missions passed, against arm 2's 38% on Ollama. With 16 missions in flight, a single copy kept each call above 100 tokens/s, about 1,100 tokens/s in total. The student (`qwen3-4b-student`, also 2 CMUs) then flew all 100 of DEXI's frozen missions in under 4 minutes, with a median call of 0.35 s once warm. It passed 35 of 50 seen and 28 of 50 unseen missions, against arm 3's 35 and 27 on `mlx_lm.server`, with the same per-template counts except one more unseen coverage pass.
 
+## Models in another region
+
+Claude Sonnet 5.5 and Haiku 5.5 have quota only in us-east-2 (6M and 10M tokens per minute; 0 in us-east-1), so their registry entries say `region: us-east-2` and the client calls the us-east-2 endpoint. A profile has to live in the region it's called in, and CloudFormation creates resources only in its stack's region. So the stack makes no profile for such an entry. Copying from the us-east-1 system profile would be the wrong one, with no quota.
+
+Instead, each of these profiles is created once, by CLI, in its region and with the project tag. Its ARN is then passed as `-c useast2Profiles='{"<model id>": "<ARN>", ...}'`. With the ARN, the stack:
+
+- lets both roles invoke the profile;
+- lets both roles invoke `foundation-model/<model>*` (any region) only under `bedrock:InferenceProfileArn` equal to one of the project's profiles;
+- adds the ARN to `LIP_BEDROCK_PROFILES` and `BedrockProfiles`.
+
+Synth fails unless the ARN is an `application-inference-profile` of this account in the entry's region, so a system profile can't slip in. An entry without an ARN gets a synth warning and no grant: the roles can't call it at all.
+
+**Create the profiles** once. It costs nothing, and needs `bedrock:CreateInferenceProfile` and `bedrock:TagResource` in us-east-2: the account administrator has both, and `drone`, the operator role and the CDK deploy role have neither.
+
+```bash
+acc=$(aws sts get-caller-identity --query Account --output text)
+for m in claude-sonnet-5-5 claude-haiku-5-5; do
+  aws bedrock create-inference-profile --region us-east-2 \
+    --inference-profile-name "LostInPlaceSim-anthropic-$m" \
+    --description "lost-in-place planner calls to us.anthropic.$m" \
+    --model-source copyFrom="arn:aws:bedrock:us-east-2:$acc:inference-profile/us.anthropic.$m" \
+    --tags key=project,value=lost-in-place \
+    --query '[inferenceProfileArn,status]' --output text | sed "s/$acc/<account>/g"
+done
+```
+
+**Read them back** wherever the ARNs are needed. This uses `bedrock:ListInferenceProfiles`, `GetInferenceProfile` and `ListTagsForResource` in us-east-2:
+
+```bash
+east2_arn() { aws bedrock list-inference-profiles --region us-east-2 --type-equals APPLICATION \
+  --query "inferenceProfileSummaries[?inferenceProfileName=='LostInPlaceSim-anthropic-$1'].inferenceProfileArn" \
+  --output text; }
+east2=$(printf '{"us.anthropic.claude-sonnet-5-5":"%s","us.anthropic.claude-haiku-5-5":"%s"}' \
+  "$(east2_arn claude-sonnet-5-5)" "$(east2_arn claude-haiku-5-5)")
+for arn in $(east2_arn claude-sonnet-5-5) $(east2_arn claude-haiku-5-5); do
+  aws bedrock get-inference-profile --region us-east-2 --inference-profile-identifier "$arn" \
+    --query '[status,models[].modelArn]' --output text
+  aws bedrock list-tags-for-resource --region us-east-2 --resource-arn "$arn" --query tags --output text
+done
+```
+
+Each one should be `ACTIVE`, list only its own 5.5 foundation model (once per `us.` region), and carry `project lost-in-place`.
+
+**The budget covers them.** Budgets and cost allocation tags are account-wide, not regional, so the tag filter counts the us-east-2 profiles' spend as it does us-east-1's. Check Cost Explorer, filtered by `project=lost-in-place` and region us-east-2, the day after the first call. `BudgetStop` denies `bedrock:InvokeModel*` on `*` with no condition, and IAM is global, so once attached it blocks the us-east-2 endpoint too. The wave submitter's CloudWatch reads are on `*`, so it can meter `AWS/Bedrock` in us-east-2 as well.
+
+**Deleting them** (only after every arm on them has settled) takes `aws bedrock delete-inference-profile --region us-east-2 --inference-profile-identifier <ARN>`. Then deploy without that `useast2Profiles` entry.
+
+**The alternative: a companion stack.** A second stack in us-east-2 holding only the two `AWS::Bedrock::ApplicationInferenceProfile` resources would also work, but it adds a stack on top of the same two resources. It can be deployed without `cdk bootstrap` in us-east-2, but only one way:
+
+- **`LegacyStackSynthesizer`, or the same resources as a hand-written template.** CloudFormation gets the template inline (it's far under 51,200 bytes), and there are no assets. `CliCredentialsStackSynthesizer` doesn't work: it still uploads the template to the bucket `cdk-hnb659fds-assets-<account>-us-east-2`, which only a bootstrap creates.
+- **The us-east-1 CDK deploy role.** It would deploy the stack, passing the us-east-1 CloudFormation execution role (IAM roles are global) as the stack's role, the way `LipSmokeAuditFixes` was made. In bootstrap v31, the deploy role's CloudFormation statement is on `*`, and it may pass that execution role, which has AdministratorAccess by default.
+
+The ARNs would still have to reach this stack by context: a cross-region reference needs SSM parameters and a custom resource. The companion stack would also be a second stack to deploy here, against "only `LostInPlaceSim`" in [`AGENTS.md`](AGENTS.md).
+
 ## The freeze-v3 deploy
 
-One deploy, from `main`, before the `freeze-v3-pre` tag (WP17 in the freeze-v3 plan). After it, the stack and the compute environment's AMI stay as they are until the wave ends. The one exception is an A-6 harness fix, which repeats steps 2 to 6 with the new image.
+One deploy, from `main`, before the `freeze-v3-pre` tag (WP17 in the freeze-v3 plan). After it, the stack and the compute environment's AMI stay as they are until the wave ends. The one exception is an A-6 harness fix, which repeats steps 3 to 7 with the new image.
+
+**Steps that need Mahmood's OK, in this order.** The rest are read-only.
+
+1. Enable GPT-6.1 Sol in the Bedrock console playground (below).
+2. Step 2: create the two us-east-2 profiles.
+3. Step 3: build and push the image.
+4. Step 4: tag the freeze-v3 and freeze-v2 images `freeze-*`.
+5. Step 6: deploy `LostInPlaceSim`.
+6. Step 8: update `LipSmokeAuditFixes`.
+
+None of them needs `cdk bootstrap`, in us-east-2 or anywhere else.
 
 **What it changes, and nothing else:**
 
 - **A tagged application inference profile** `LostInPlaceSim-openai-gpt-6-1-sol`, copied from `us.openai.gpt-6.1-sol`. It comes from WP6's `gpt-6.1-sol` entry in `models.yaml`; the stack needs no code for it.
 - **Both roles' grants.** The job and operator roles may invoke that profile, and may invoke `foundation-model/openai.gpt-6.1-sol` (any region, since `us.` routes to us-east-1, us-east-2 and us-west-2) only under `bedrock:InferenceProfileArn` equal to one of the stack's profiles. Nothing is granted on the system profile.
-- **`LIP_BEDROCK_PROFILES`** in both job definitions, and the `BedrockProfiles` output, gain the GPT mapping.
+- **The same grants for Sonnet 5.5 and Haiku 5.5,** on their us-east-2 profiles from step 2 (WP6's `claude-sonnet-5-5`, `-fb1`, `-fb2` and smoke-only `claude-haiku-5-5` entries). The foundation-model grants are `foundation-model/anthropic.claude-sonnet-5-5*` and `anthropic.claude-haiku-5-5*`, under the same condition. The stack creates no profile for them.
+- **`LIP_BEDROCK_PROFILES`** in both job definitions, and the `BedrockProfiles` output, gain the GPT, Sonnet 5.5 and Haiku 5.5 mappings.
 - **Both job definitions move to the freeze-v3 image digest.** That is the whole of the v3 job definition: the command, resources, retries, timeout and roles stay the same. CloudFormation registers a new revision and deregisters the freeze-v2 one (`SweepEpisode…:19`, image `e879c1ef`). Re-running a freeze-v2 sweep afterwards therefore needs a redeploy with that digest.
 - **The ECR lifecycle rule** that keeps `freeze-*` images.
 - **Read-only grants on the operator role** for the wave submitter (`lost_in_place.wave`):
@@ -148,9 +214,14 @@ One deploy, from `main`, before the `freeze-v3-pre` tag (WP17 in the freeze-v3 p
 
 ### 0. Before starting
 
-- **The image's inputs are merged:** WP1, WP3, WP4, WP5, WP6, WP10 and WP12. The image bakes in `src/` and `scenarios/`, so it needs their code, the `gpt-6.1-sol` and scripted `rule-*` entries in `models.yaml`, and both E5 template trees under `scenarios/e5/`.
+- **The image's inputs are merged:** WP1, WP3, WP4, WP5, WP6, WP10 and WP12. The image bakes in `src/` and `scenarios/`, so it needs:
+  - their code;
+  - the `gpt-6.1-sol`, `claude-sonnet-5-5` (with fallbacks), `claude-haiku-5-5` and scripted `rule-*` entries in `models.yaml`;
+  - both E5 template trees under `scenarios/e5/`.
+
+  The stack reads the same `models.yaml` at synth, so deploy from the commit the image was built from.
 - **GPT-6.1 Sol is enabled,** as above.
-- **Credentials can assume `cdk-hnb659fds-deploy-role`.** Use the same ones as the Oct 16 budget deploy; `drone` can't.
+- **Credentials can assume `cdk-hnb659fds-deploy-role`** and are an administrator in us-east-2 (for step 2). Use the same ones as the Oct 16 budget deploy; `drone` can't.
 - **Nothing is in flight** on the job queue, so no sweep mixes images.
 
 ### 1. Pre-flight (S-0, read-only)
@@ -183,7 +254,11 @@ Don't start unless:
 
 If the action isn't `STANDBY`, the stop has fired and its deny is still attached. The account owner reverses it in the Budgets console before anything else.
 
-### 2. Build the image
+### 2. Create the us-east-2 profiles
+
+Run the create and read-back commands in [Models in another region](#models-in-another-region). Keep `$east2` for step 5. If a profile already exists, `create-inference-profile` fails with a conflict, and the read-back finds the existing one; don't create a second.
+
+### 3. Build the image
 
 Run the `image` workflow on `main`: Actions → image → Run workflow, branch `main`. Or use the API:
 
@@ -194,7 +269,7 @@ curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/v
 
 It pushes `latest` and the first 12 characters of the commit it built. Take the full SHA from the run's page.
 
-### 3. Record and protect the digest
+### 4. Record and protect the digest
 
 ```bash
 name=$(out ImageRepository); name=${name#*/}
@@ -217,9 +292,9 @@ The digest and the full git SHA go in three places:
 - the `freeze-v3-pre` tag message (M1);
 - `lip freeze-record --freeze v3 --image-digest`.
 
-Re-tagging uploads no layers. `--image-digest` makes the call fail if the manifest bytes don't hash to the digest. The `freeze-` tags protect both images once step 5 is live. Until then, the freeze-v2 image expires after seven more images (as of Oct 16), counting step 2's push.
+Re-tagging uploads no layers. `--image-digest` makes the call fail if the manifest bytes don't hash to the digest. The `freeze-` tags protect both images once step 6 is live. Until then, the freeze-v2 image expires after seven more images (as of Oct 16), counting step 3's push.
 
-### 4. Diff
+### 5. Diff
 
 ```bash
 git switch main && git pull && cd infra && uv sync
@@ -227,18 +302,19 @@ email=$(aws sns list-subscriptions-by-topic --topic-arn "$(aws cloudformation de
   --stack-name LostInPlaceSim --logical-resource-id Alerts91F83244 \
   --query StackResourceDetail.PhysicalResourceId --output text)" \
   --query "Subscriptions[?Protocol=='email'].Endpoint" --output text)
-flags=(-c alertEmail="$email" -c budgetUsd=450 -c maxVcpus=128 -c imageTag="$digest")
+flags=(-c alertEmail="$email" -c budgetUsd=450 -c maxVcpus=128 -c imageTag="$digest" -c useast2Profiles="$east2")
 npx -y aws-cdk@2 diff LostInPlaceSim --no-change-set "${flags[@]}" 2>&1 | mask
 ```
 
 **Expected diff:**
 
 - the changes listed above;
-- `Image` on `Episode` and `SweepEpisode`, from `@sha256:e879c1ef…` to `@$digest`.
+- `Image` on `Episode` and `SweepEpisode`, from `@sha256:e879c1ef…` to `@$digest`;
+- one new resource, the GPT profile. No profile for a 5.5 model: their ARNs appear only in the grants, the job definitions' environment and the output.
 
-Stop if anything else appears: the budget, the SNS subscription, the compute environment, the VPC, or a replaced profile. `--no-change-set` keeps the diff read-only. Pass every flag every time: `cdk.json` says `imageTag: latest`, and a deploy without `-c alertEmail` deletes the alert subscription.
+Stop if anything else appears: the budget, the SNS subscription, the compute environment, the VPC, or a replaced profile. Stop also on a `No profile ARN for …` warning. `--no-change-set` keeps the diff read-only. Pass every flag every time: `cdk.json` says `imageTag: latest`, a deploy without `-c alertEmail` deletes the alert subscription, and one without `-c useast2Profiles` drops the 5.5 grants.
 
-### 5. Deploy
+### 6. Deploy
 
 ```bash
 npx -y aws-cdk@2 deploy LostInPlaceSim "${flags[@]}" --require-approval never 2>&1 | mask
@@ -246,7 +322,7 @@ npx -y aws-cdk@2 deploy LostInPlaceSim "${flags[@]}" --require-approval never 2>
 
 Deploy only `LostInPlaceSim`: never `--all`, and never `cdk bootstrap`.
 
-### 6. Verify
+### 7. Verify
 
 ```bash
 aws cloudformation describe-stacks --stack-name LostInPlaceSim --query 'Stacks[0].StackStatus' --output text
@@ -262,17 +338,46 @@ aws budgets describe-budget-actions-for-budget "${b[@]}" --query 'Actions[].Stat
 
 - `UPDATE_COMPLETE`;
 - one active revision of the sweep job definition, on `$digest`. Record it as `<SweepJobDefinition>:<revision>`;
-- two profiles in the output;
+- four profiles in the output: Sonnet 4.6 and GPT-6.1 Sol in us-east-1, and Sonnet 5.5 and Haiku 5.5 in us-east-2, matching `$east2`;
 - the `freeze-v3-pre` tag resolves to `$digest`;
 - the action is still `STANDBY`.
 
-The first GPT-6.1 Sol call by the stack's roles is M2's smoke call (`lip propose gpt-6.1-sol` as `OperatorRole`, with `LIP_BEDROCK_PROFILES` from the output). It is paid, and it isn't part of this deploy.
+The first GPT-6.1 Sol and Sonnet 5.5 calls by the stack's roles are M2's smoke calls (`lip propose gpt-6.1-sol` or `claude-sonnet-5-5` as `OperatorRole`, with `LIP_BEDROCK_PROFILES` from the output). They are paid, and they aren't part of this deploy.
+
+### 8. Point the smoke stack at the new image
+
+`LipSmokeAuditFixes` (the Oct 16 audit-fix smoke test, outside this repository) is a hand-written template with one job definition. It reuses this stack's job role, so step 6 already gave it the new grants. To fly the new models it needs only two changes: the image, and a profile map with all four entries. Its `LIP_BEDROCK_PROFILES` is a literal that today maps Sonnet 4.6 only.
+
+The stack was created by the CDK deploy role, with the us-east-1 CloudFormation execution role as its stack role: the operator role can't register job definitions, and `drone` can't pass the job role. So update it the same way, with a session of `cdk-hnb659fds-deploy-role-<account>-us-east-1`:
+
+```bash
+aws cloudformation get-template --stack-name LipSmokeAuditFixes --query TemplateBody --output json > smoke.json
+jq --arg image "$(out ImageRepository)@$digest" --arg profiles "$(out BedrockProfiles)" \
+  '.Resources.SmokeJobDefinition.Properties.ContainerProperties |=
+     (.Image = $image | .Environment = [{Name: "LIP_BEDROCK_PROFILES", Value: $profiles}])' \
+  smoke.json > smoke-v3.json
+diff <(jq -S . smoke.json) <(jq -S . smoke-v3.json) | mask   # Image and the map, nothing else
+cs=(--stack-name LipSmokeAuditFixes --change-set-name freeze-v3)
+aws cloudformation create-change-set "${cs[@]}" --template-body file://smoke-v3.json \
+  --role-arn "arn:aws:iam::$acc:role/cdk-hnb659fds-cfn-exec-role-$acc-us-east-1"
+aws cloudformation wait change-set-create-complete "${cs[@]}"
+aws cloudformation describe-change-set "${cs[@]}" \
+  --query 'Changes[].ResourceChange.[Action,LogicalResourceId,Replacement]' --output text
+aws cloudformation execute-change-set "${cs[@]}"
+aws cloudformation wait stack-update-complete --stack-name LipSmokeAuditFixes
+aws batch describe-job-definitions --job-definition-name LipSmokeAuditFixes --status ACTIVE \
+  --query 'jobDefinitions[].[revision,containerProperties.image]' --output text | mask
+```
+
+The change set should show one `Modify` of `SmokeJobDefinition` with `Replacement` `False`. Changing `ContainerProperties` registers a new revision under the same name and deregisters the old one. Only `JobDefinitionName` and `Tags` force a replacement, and replacing a resource with a fixed name fails, so leave both alone. Keep the retry rule, parameters, roles and log group as they are.
 
 ### Rollback
 
 - **A failed deploy rolls itself back** (`UPDATE_ROLLBACK_COMPLETE`). Diff again before retrying.
 - **To undo the image only,** redeploy `main` with `-c imageTag=sha256:e879c1ef…`.
 - **To undo the GPT profile and grants as well,** deploy the same flags from a worktree of `main` with the `gpt-6.1-sol` entry removed from `models.yaml`.
+- **To undo the 5.5 grants only,** deploy the same flags without `-c useast2Profiles`. The us-east-2 profiles stay, unused and free, until deleted by hand.
+- **The smoke stack** goes back the same way, with `smoke.json` as the template.
 - **Either way,** CloudFormation registers a new job definition revision; old revisions can't be reactivated.
 - **Never delete** the repository, the bucket or the `freeze-` tags.
 
@@ -287,6 +392,7 @@ The first GPT-6.1 Sol call by the stack's roles is M2's smoke call (`lip propose
 | `githubRepo` | `hamsho93@17190997/lost-in-place@1411196677` (cdk.json) | Repository segment of the GitHub OIDC subject whose `main` branch may push images; empty skips the push role |
 | `imageTag` | latest | Image tag or digest (`sha256:...`) the job definition runs. Pin a digest for any run whose results count: the `image` workflow rebuilds `latest` every Monday |
 | `region` | us-east-1 | Billing metrics only exist in us-east-1 |
+| `useast2Profiles` | none | JSON map from Bedrock model id to the tagged profile ARN made for it in its registry region ([Models in another region](#models-in-another-region)). Pass it with `-c` only: it holds the account ID, so it never goes in `cdk.json` |
 
 Untagged costs, such as data transfer and the instances' root EBS volumes, fall outside the budget. They are small next to instance hours.
 
