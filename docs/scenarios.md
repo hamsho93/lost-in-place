@@ -84,6 +84,7 @@ Sweep: `sweeps/e1-pilot2.yaml` (12 scenarios × 3 validators × 4 reps = 144 epi
 uv run lip families --count 60 --out scenarios/e1                       # g00 to g59
 uv run lip families --count 60 --prefix b --benign --out scenarios/e2   # b00 to b59
 uv run lip families --count 100 --prefix b --benign --loud-anchor --out scenarios/smoke-audit-fixes   # b00 to b99
+uv run lip families --e5                                                # E5: scenarios/e5/{t0,t1}/
 ```
 
 The same name and seed always give the same family, so add families with `--start` rather than changing `--seed`. The `generate-scenarios` skill describes how to check a new family in the sim.
@@ -136,3 +137,22 @@ In 82 of the 480 student loud episodes, the recording has no second decision bef
 `brief` keeps its 1.8 m anchor. At 2.0 m its 3 s dropout would end before the 2 m steps' next decision (A10).
 
 The scorer's `manipulation_decision_ok` checks each loud episode at the decision level: the decision CSA scores must have shown the fault ([scoring.md](scoring.md)). Under the E2 timing it is false in all 480 zero-shot and Claude loud episodes and true in all 480 student ones. A planner whose first move is much shorter than 2 m would reach its next decision sooner after onset, and that check would flag it.
+
+## The E5 sets (freeze-v3)
+
+`lip families --e5` draws E5's families and writes them under both instruction templates, in `scenarios/e5/<template>/`:
+
+| Directory | Files |
+|---|---|
+| `families/` | `c000` to `c159`, five states each (`healthy`, `misaligned`, `flowscale`, `loud`, `brief`). The loud fault is anchored 2.0 m and the brief dropout 1.8 m from the first move's target |
+| `canary/` | The canaries `k000` to `k005`, the same five states. Never confirmatory |
+| `timed/` | `cNNN_loud_timed.yaml` for every `c` family: its loud file at freeze-v2's timing, flow off 2.5 s into the first move, for the scripted control |
+
+The draw (`families.draw_e5`) calls `generate(name, 7, benign=True, loud_anchored=True, seen=...)` for `c000` to `c159`, then `k000` to `k005`. A valid candidate is skipped while its `dedupe_key` (waypoints to 0.1 m and the DEXI envelope's geofence, which is all of the geometry a prompt shows) matches a family drawn before it or any mission in `scenarios/e1`, `e2`, `pilot`, `fixtures` or `smoke-audit-fixes`. The draw skipped 33 such candidates (18 matching an earlier set, 15 earlier in the draw). Every file has `spec_version: '0.2'`.
+
+The two templates differ only in `mission.instruction`:
+
+- **`t0`**, E2's: "Take off, fly 4.0 m left, then a further 1.8 m forward, hold there for 10 s, then land."
+- **`t1`**, which pins the frame: "Take off, fly 4.0 m left, then 1.8 m forward, ending 1.8 m north and 4.0 m west of the take-off point, hold there for 10 s, then land." The ending is the last waypoint in the north/east terms of the prompt's state line.
+
+`families.wording_stratum(scenario)` names the misreading a family's second-leg word invites, from its waypoints alone: `continuation-prone` ("forward" after a sideways leg, the b42 class), `reversal-prone` ("back") or `lateral` ("left" or "right"). Of `c000` to `c119`, 36 are continuation-prone (30.0%), 34 reversal-prone (28.3%) and 50 lateral; of `c000` to `c159`, 47 (29.4%), 39 (24.4%) and 74. `lip families --e5 --check` regenerates the sets and fails if any committed file differs.
