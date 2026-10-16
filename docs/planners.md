@@ -167,7 +167,7 @@ Two planner options pick the variant. The defaults are what the freeze-v2 sweeps
 | `prompt` | `dexi-9b2e7a7` (default) | DEXI's prompt verbatim, frozen in the freeze record. It says "A safety validator checks every action" even under validator `none` |
 | | `dexi-v2` | The same prompt, with that sentence only when a validator arm is configured. Under `none` the sentence is gone, and the adapter's own rejections read `REJECTED: <reason>` instead of `REJECTED by validator: <reason>`. Decisions record `prompt_version: dexi-v2` |
 | `driver` | `freeze-v2` (default) | The target of a relative move or turn is fixed from the estimate at decision time, before the 2 s latency. A move arrives within 0.25 m horizontally (a turn within 5°), checked every 0.1 s. Each relative move loses about 0.2 m ([fidelity.md](fidelity.md#known-issues-and-how-we-handle-them)) |
-| | `dexi` | As DEXI's `MavsdkDriver` at `9b2e7a7`: the target is fixed from the estimate when the primitive executes, after the latency, rounded as `MavsdkDriver.state` rounds it, and the history's `reached (...)` names that target. A move or climb arrives within 0.3 m in 3-D, a turn within 8°, sampled every 0.5 s. The agent logs `execution_anchor` (proposed and flown targets) in the events. `hold` still holds where the vehicle is when it executes |
+| | `dexi` | As DEXI's `MavsdkDriver` at `9b2e7a7`: the target is fixed from the estimate when the primitive executes, after the latency, rounded as `MavsdkDriver.state` rounds it, and the history's `reached (...)` names that target. A move or climb arrives within 0.3 m in 3-D, a turn within 8°, sampled every 0.5 s, so the flown target can differ from the proposed one (see execution anchors, below). `hold` still holds where the vehicle is when it executes |
 
 On the command line: `--planner-opt prompt=dexi-v2 --planner-opt driver=dexi`. In a sweep spec, `planner_options` applies to every arm, or a `planners` entry carries options of its own:
 
@@ -204,9 +204,19 @@ uv run lip run scenarios/e5/t0/canary/k000_loud.yaml --planner dexi \
   --planner-opt model=rule-2m --planner-opt driver=dexi --planner-opt prompt=dexi-v2 --obs O1
 ```
 
-**GPT-6.1 Sol** is registered with a `ModelSpec` field, `additional_request_fields`, that the Bedrock client passes to Converse as `additionalModelRequestFields`; its entry sets the reasoning effort (design §9.2). Its replies' `reasoningContent` is kept in the traces.
+**The late arms, GPT-6.1 Sol and Claude Sonnet 5.5,** use a `ModelSpec` field, `additional_request_fields`, that the Bedrock client passes to Converse as `additionalModelRequestFields`; their entries set the reasoning effort to low (design §9.2, §9.4). The replies' `reasoningContent` is kept in the traces. Each has pre-declared fallback entries, tried in order only when Bedrock rejects the smoke call's request (`lip propose <entry> --planner dexi`). Each entry adds one change to the one before:
 
-**Execution anchors.** Under `driver=dexi`, the agent logs an `execution_anchor` event on every executed move, with `decision_index`, `proposed_sim_s`, `executed_sim_s` and the `proposed` and `flown` targets; each decision records `flown_args` and `executed_sim_us`. The scorer uses them to flag moves proposed before a fault onset and executed after it.
+| Entry | Change |
+| --- | --- |
+| `gpt-6.1-sol-fb1` | `tool_choice: auto` |
+| `gpt-6.1-sol-fb2` | and no `temperature` |
+| `gpt-6.1-sol-fb3` | and no `additional_request_fields` |
+| `claude-sonnet-5-5-fb1` | no `temperature` (the base entry already uses `tool_choice: auto`) |
+| `claude-sonnet-5-5-fb2` | and no `additional_request_fields` |
+
+A fallback entry is its own arm key; `stats_v3` maps it to its base arm. **Claude Sonnet 5.5** is called in another region than the rest of the stack: its entry sets `region: us-east-2`, where its tagged profile lives, while the episodes run where they always do. Its client tool calling supports only `auto` and `none`, so a reply with no tool call counts as invalid. `claude-haiku-5-5`, with the same settings, is only for checking that path with a cheap call; it is never in an E5 sweep.
+
+**Execution anchors.** Under every driver, the agent logs an `execution_anchor` event for each executed decision whose flown action is a `move`, `rotate` or `take_off`, or differs from the proposal: `decision_index`, `name` (the flown action), `proposed_sim_s`, `executed_sim_s`, and the `proposed` and `flown` arguments. Holds, rejected proposals, `land`, `refuse` and continued epochs get none. Each decision records `flown_args` and `executed_sim_us`. Under `driver=freeze-v2`, `proposed` always equals `flown`. The scorer uses them to flag moves proposed before a fault onset and executed after it ([scoring.md](scoring.md#e5-fields-spec-02)).
 
 ## Plugging in a planner that lives in another repo
 
