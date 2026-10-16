@@ -2,7 +2,7 @@
 
 How to fly the E5 wave (freeze-v3 plan §10.5 and §12 step 5), following the cost and operations review. The submitter, the import pinger, the meter and the health report all run on the operator's machine, in tmux. They read and write AWS through OperatorRole, whose credentials refresh themselves. The bucket, queue, role and inference profiles come from the `LostInPlaceSim` stack's outputs at run time.
 
-Arms, caps, order, prices and thresholds live in `src/lost_in_place/wave/e5.yaml`. The adaptation PR (WP18) fills in the E5 sweep paths, `n_families`, GPT-6.1 Sol's canary cost per episode and its pinned smoke config. Nothing else should change after the `freeze-v3` tag.
+Arms, caps, order, prices and thresholds live in `src/lost_in_place/wave/e5.yaml`. The adaptation PR (WP18) fills in the E5 sweep paths, `n_families`, and the canary cost per episode and pinned smoke config of GPT-6.1 Sol and Claude Sonnet 5.5 (including Sonnet's effort field, once the smoke call confirms its spelling). Nothing else should change after the `freeze-v3` tag.
 
 ```bash
 alias e5='uv run --extra aws python scripts/e5_submit.py'
@@ -24,7 +24,8 @@ Run these before the wave starts, and again whenever the submitter is restarted 
    - the meter reads;
    - no imported model exists outside the config, and none has outlived its arms;
    - every arm's sweep exists, and its manifest equals any copy already in S3;
-   - GPT-6.1 Sol's `models.yaml` entry equals its pinned smoke config;
+   - the `models.yaml` entries of GPT-6.1 Sol and Claude Sonnet 5.5 equal their pinned smoke configs;
+   - every Bedrock arm's `models.yaml` entry exists, and its `region` is the region of the arm's tagged profile in the stack's `BedrockProfiles` (otherwise the meter would read the wrong region);
    - the freeze-record check passes.
 3. `e5 --dry-run run --once` goes through one full cycle and makes no AWS writes. Its ledger goes to `.e5-dryrun/`. Check the planned submissions it prints.
 
@@ -43,10 +44,13 @@ The submitter starts each arm once its conditions hold. It tops the arm up to it
 | 2 | `zero-shot` | student ≥ 90% settled and its import's first successful call | 39, then 64 when Claude ends | $105 |
 | 3 | `scripted-rest`: timed loud, flowscale, misaligned | Claude ≥ 90% and the student settled | 64 | |
 | 4 | `gpt-6.1-sol` | every other Batch arm settled, S-8 admitted, §10.4 sum fits | 40 | none; S-8 governs |
-| 5 | probes: `probe-claude`, `probe-student`, `probe-zero-shot`, `probe-gpt` | operator, by window | | $16 in total |
+| 4 | `claude-sonnet-5-5` (us-east-2) | GPT settled, not admitted or dropped; S-8 admitted; §10.4 sum fits with GPT's spend included | ramps 10, 20, … to 40 | none; S-8 governs |
+| 5 | probes: `probe-claude`, `probe-student`, `probe-zero-shot`, `probe-gpt`, `probe-sonnet-5-5` | operator, by window | | $16 in total, plus GPT's and Sonnet's, which count in their arms |
 | 6 | `labeller` (outside AWS) | operator, by window | | $32 |
 
 The S-7 caps scale by 1.25 when `n_families` is above 120. S-4 lowers an arm's cap by 5 each time it fires.
+
+Claude Sonnet 5.5 has quota only in us-east-2, so its jobs (still on Batch in us-east-1) call a tagged profile there. us-east-2 lists a 6M tokens-per-minute quota for it, and no requests-per-minute or tokens-per-day quota. A call holds its input plus `max_tokens` (about 2.5k + 4,096 tokens) when it starts and settles at input plus 10 to 15 × its output tokens. At about one call per slot a minute, 40 slots use under 0.3M TPM. So its cap matches GPT's 40, and the ramp and S-4 cover any limit that isn't listed. The cap only changes wall time (about 5 h at 40), not cost.
 
 ## 3. Imports and warm-up
 
@@ -90,7 +94,7 @@ The ledger is in S3 under `manifests/e5/ledger/`:
 |---|---|
 | `jobs/<arm>/<time>-<offset>-<pid>-<n>.json` | one record per submission: job id, manifest, offset, array size |
 | `heartbeat.json` | the last cycle: time, `running` or `stopped`, per-arm counts, import ping flags, month estimate |
-| `state.json` | pauses, cap cuts, ramp, gate result, metering windows, month-fit decision, deleted imports. Only the submitter writes it |
+| `state.json` | pauses, cap cuts, ramp, gate result, metering windows, the month-fit decision per arm (with the month it was taken for, and whether it is a preview), deleted imports. Only the submitter writes it |
 | `commands.log` | operator commands, applied at the next cycle |
 | `warm/<import>.json` | the pinger's warm-up record |
 | `s4.log` | one line per attempt: time, arm, episode key, attempt label, `result` or `retry` |
@@ -112,7 +116,7 @@ So a restart never resubmits an episode that has a result or is running.
 |---|---|
 | `e5 status` | the heartbeat, pauses, gate, windows and warm-up records |
 | `e5 pause <arm> --reason "..."` | stop topping the arm up |
-| `e5 resume <arm>` | resume; S-2, S-3 and S-8 then look only at attempts after now |
+| `e5 resume <arm>` | resume; S-2, S-3 and S-8 then look only at attempts after now. For a month-fit arm, the §10.4 decision is taken again |
 | `e5 clear-stop` | lift a hard stop. Only after Mahmood's decision |
 | `e5 gate --rerun` | evaluate the S-1 gate again (after a dated v3 amendment) |
 | `e5 window <arm> start` / `end [--usd X]` | open or close an external arm's metering window. `--usd` records spend outside AWS |
@@ -125,11 +129,15 @@ meter now        # before each arm, and hourly
 
 The meter has three parts:
 
-- tokens on the stack's tagged inference profiles × price;
+- tokens on the stack's tagged inference profiles × price, read in each profile's own region (us-east-2 for Claude Sonnet 5.5, from its `models.yaml` entry; us-east-1 for the rest);
 - imported-model copy-minutes × $0.114;
 - Batch attempt run time × 2 vCPU × $0.025, plus attempts still running.
 
 It lags about 1 to 5 minutes. The month estimate is the metered spend plus spend recorded outside AWS. In October it is the AWS Budgets actual plus the meter since 24 h before the actual's last update. Per-arm spend is the same meter over the arm's windows, plus the arm's own job time.
+
+Claude Sonnet 5.5 is priced at its us-east-2 regional list price, $2.20 / $11 per million input / output tokens. Its tokenizer yields about 30% more tokens per text than Sonnet 4.6's, and that is already in the counted tokens. AWS bills it as AWS Marketplace software usage (usage types `USE2-MP:…`), so it may not show under Bedrock in Cost Explorer, and the tag-filtered AWS budget may not count it. For that arm the metered S-9 stop is the guard. The day after its first calls (the smoke and canary), compare Cost Explorer's Marketplace charges for it with `meter now`.
+
+Reading us-east-2 needs nothing extra from OperatorRole: its `cloudwatch:GetMetricData` and `cloudwatch:ListMetrics` grant is on `*` with no region condition, and those actions have no resource-level permissions. `e5 preflight` fails with "the meter is broken" if a read is refused in either region.
 
 `meter --as-caller --dry-run validate --sweep e4-claude` checks the meter on E4 history: the episode traces' tokens and the jobs' run time against CloudWatch. Copy-minutes at $0.114 read about 30% above Cost Explorer for Oct 13–15, so the meter overstates import cost and stops early. After the canary days, compare one day with Cost Explorer and adjust `copy_minute_usd` in the config if needed.
 
@@ -144,13 +152,21 @@ It lags about 1 to 5 minutes. The month estimate is the metered spend plus spend
 | S-4 | throttles > 1% of calls over 15 min | cuts the arm's cap by 5 | none |
 | S-5 | warm-up fails after 30 min | doesn't submit the arm | `e5 ping --restart` later |
 | S-6 | copy up for 10 min, none of its episodes running | stops pings | `e5 unkill` if the arm still has work |
-| S-7 | projected arm spend > its cap (after 100 settled, then every 250) | continues if the month still fits with GPT; moves GPT to December if it fits only without it; otherwise pauses | page Mahmood on a pause |
-| S-8 | GPT canary > $0.060/episode, or rolling 100-episode cost > 1.5 × canary | doesn't admit GPT, or pauses it | resume only if the §10.4 sum still fits |
-| S-9 | November metered > $400; October estimate > $420; no approved budget for the month | hard stop on all submissions | page Mahmood |
+| S-7 | projected arm spend > its cap (after 100 settled, then every 250) | continues if the month still fits without the month-fit arms not yet started, and records which of them (in order) it pushes to December; otherwise pauses | page Mahmood on a pause |
+| S-8 | a month-fit arm's canary > $0.060/episode, or its rolling 100-episode cost > 1.5 × canary | doesn't admit the arm, or pauses it | resume only if the §10.4 sum still fits |
+| S-9 | November metered > $400; October estimate > $420; December metered > its `stop_usd` | hard stop on all submissions | page Mahmood |
+| S-9 | no `stop_usd` for the month (December until Mahmood sets it) | submits nothing; no hard stop | none |
 
 In October, an arm also doesn't start if the estimate plus its P90 would exceed $420.
 
-**§10.4 month fit.** Just before GPT's first submission, the submitter computes: metered spend this month, plus the other arms' remaining projected cost, plus $10 of retries, plus 1.15 × (GPT episodes × canary $/episode + its probe). If that is at most $400, GPT runs. Otherwise it waits for December, which needs Mahmood to approve a budget. Add it to `months` with `arms: [gpt-6.1-sol, probe-gpt]`. Without one by Nov 20, GPT is dropped. `e5 month-fit` prints the sum at any time.
+**§10.4 month fit.** It covers the month-fit arms in order: GPT-6.1 Sol first, then Claude Sonnet 5.5. The committed spend is the metered spend this month, plus the other arms' remaining projected cost, plus $10 of retries. Each arm's projection is 1.15 × (its open episodes × canary $/episode + its probe).
+
+- **GPT** runs if the committed spend plus its projection is at most $400.
+- **Sonnet** runs if the committed spend plus GPT's projection (when GPT runs this month) plus its own is at most $400.
+- **An arm that doesn't fit** goes to December, if December's `stop_usd` covers its projection on top of any arm deferred before it. Arms keep their order, so if GPT goes to December, Sonnet goes too. An arm that isn't admitted is left out, and the next arm is summed without it.
+- **December's `stop_usd`** is set by Mahmood, up to about $370 (GPT and Sonnet at most about $185 each). The config lists December's four arms without a stop. Until a stop is set, the deferred arms wait, and nothing is submitted in December. If none is set by Nov 20, the deferred arms are dropped.
+
+The sum is taken when GPT is about to start. At that point Sonnet also gets a preview decision, so a December request can go to Mahmood early (at the plan's medians, Sonnet is expected to go to December). Sonnet's own decision is taken again when GPT has settled, with GPT's spend measured by then. A decision is kept until the month or a budget in the config changes. `e5 resume <arm>` makes the submitter take it again. `e5 month-fit` prints every month-fit arm's sum at any time, and `e5 status` shows the recorded decisions.
 
 ## 7. The S4 rule
 
@@ -160,8 +176,9 @@ Each cycle classifies new attempts. An attempt is the episode's result unless it
 
 - An arm settles when every entry has a result or 3 attempts, and nothing is live. Its metering window closes then, and its import is deleted once every arm sharing it has settled.
 - Probes and the labeller: run `e5 window <arm> start` before and `e5 window <arm> end` after. Add `--usd` for spend outside AWS.
-- `e5 run` exits when every Batch arm has settled. Check `e5 status` and `meter now`, then confirm in the Bedrock console that no import is left.
-- The one pinned analysis run, `lip stats --design v3`, comes only after the last arm settles, or GPT is deferred to December or dropped (§2.5).
+- `e5 run` exits when every Batch arm has settled, been dropped, failed admission, or waits for next month. It names the waiting arms. Check `e5 status` and `meter now`, then confirm in the Bedrock console that no import is left.
+- **December:** once Mahmood has set `stop_usd` for `"2026-12"` in the config, run `e5 preflight` and then `e5 run` again on December 1 or later. GPT goes first, then Sonnet. The December stop is enforced like November's.
+- The one pinned analysis run, `lip stats --design v3`, comes only after every arm, including any deferred to December, has settled or been dropped (§2.5).
 - No infra, AMI or stack change from the WP17 deploy until the wave ends.
 
 ## 9. Who to page
@@ -170,7 +187,7 @@ Page Mahmood for:
 
 - a hard stop (S-1, S-9);
 - an S-7 pause;
-- a GPT deferral or drop;
+- a deferral or drop of GPT-6.1 Sol or Claude Sonnet 5.5, including a Sonnet preview deferral (December's `stop_usd` must be approved by Nov 20);
 - any S-0 failure that needs an IAM or budget change.
 
 The submitter keeps writing its heartbeat while stopped, so the pingers stand down. Nothing more is submitted until `e5 clear-stop`.
