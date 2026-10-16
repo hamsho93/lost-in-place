@@ -254,8 +254,12 @@ def test_script_plans_and_estimates_without_calling_a_model(
     assert "792 calls" in capsys.readouterr().out and not out.exists()
     assert script.main(["--scenarios", str(SCENARIOS), "estimate"]) == 0
     est = json.loads(capsys.readouterr().out)
-    assert est["dryrun"]["episodes"] == 132 and [p["calls"] for p in est["probes"]] == [792, 792]
+    assert est["dryrun"]["episodes"] == 132 and [p["calls"] for p in est["probes"]] == [792, 792, 792]
     assert all(p["usd"] is not None and p["usd"] < 10 for p in est["probes"])
+    gpt, sonnet55 = est["probes"][1], est["probes"][2]
+    assert sonnet55["input_tokens"] > gpt["input_tokens"] and sonnet55["usd"] > gpt["usd"]
+    fb1 = wording.probe_cost("claude-sonnet-5-5-fb1", script._prompts(SCENARIOS))
+    assert fb1 == {**sonnet55, "model": "claude-sonnet-5-5-fb1"}
     assert script.main(["--scenarios", str(SCENARIOS), "prompts", "--out", str(tmp_path / "p.json")]) == 0
     assert len(json.loads((tmp_path / "p.json").read_text())) == 264
 
