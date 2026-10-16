@@ -16,6 +16,20 @@ claude-sonnet-4-6:
     Frontier arm, added 2026-10-12. The newest Claude model this account can use on Bedrock;
     the 5.x models need an agreement through AWS Sales.
 
+rule-2m:
+  provider: scripted
+  model_id: scripted-rule-dexi-2m
+  notes: >-
+    Not a model: freeze-v3's scripted DEXI-cadence control (design 6), added 2026-10-16. Run as
+    dexi/rule-2m. It reads the rendered prompt, flies each leg in 2.0 m moves, holds 2 s on bad
+    health and lands if it is still bad (lost_in_place/llm/scripted_dexi.py). No model call.
+
+rule-leg:
+  provider: scripted
+  model_id: scripted-rule-dexi-leg
+  notes: >-
+    As rule-2m, at whole-leg cadence: one move per leg, as DEXI's student flies them.
+
 qwen3-4b-zero-shot:
   provider: bedrock_imported
   model_id: lip-qwen3-4b-thinking-2507-768f209
