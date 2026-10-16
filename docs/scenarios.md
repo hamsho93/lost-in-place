@@ -83,7 +83,7 @@ Sweep: `sweeps/e1-pilot2.yaml` (12 scenarios × 3 validators × 4 reps = 144 epi
 ```bash
 uv run lip families --count 60 --out scenarios/e1                       # g00 to g59
 uv run lip families --count 60 --prefix b --benign --out scenarios/e2   # b00 to b59
-uv run lip families --count 100 --prefix b --benign --loud-anchor --out scenarios/v3   # b00 to b99
+uv run lip families --count 100 --prefix b --benign --loud-anchor --out scenarios/smoke-audit-fixes   # b00 to b99
 ```
 
 The same name and seed always give the same family, so add families with `--start` rather than changing `--seed`. The `generate-scenarios` skill describes how to check a new family in the sim.
@@ -106,13 +106,13 @@ Two other controls were tried and dropped:
 - **A rangefinder dropout** (`failure distance_sensor off`) is accepted, but PX4 starts a blind landing 9 to 11 s later in flight: EKF2 stops fusing flow without a height above the floor. O1 has no rangefinder line either.
 - **A dimmer floor** isn't graded: at contrast 0.3 or less the flow quality is 0 and the vehicle doesn't take off, and at 0.5 it is 171 to 186, as on the textured floor.
 
-## The v3 set: an event-anchored loud fault
+## The smoke set: an event-anchored loud fault
 
-`scenarios/v3/` is the scenario set for the next wave. It has 100 benign families (`b00` to `b99`), drawn exactly as E2's. `b00` to `b59` are E2's families with the same names, so they get the same seeds: every file except `*_loud.yaml` is byte-identical to its `scenarios/e2/` twin. E1 and E2 are frozen and unchanged.
+`scenarios/smoke-audit-fixes/` (first committed as `scenarios/v3/`) is the set the audit-fixes smoke test flew. It has 100 benign families (`b00` to `b99`), drawn exactly as E2's. `b00` to `b59` are E2's families with the same names, so they get the same seeds: every file except `*_loud.yaml` is byte-identical to its `scenarios/e2/` twin. E1 and E2 are frozen and unchanged.
 
 The only change is when the loud fault starts. In E1 and E2, flow goes off 2.5 s into the first move. The 2 m-step DEXI arms (zero-shot and Claude) finish that step about 3 s in, so their next decision, the one CSA scores, came 0.4 to 0.8 s after onset. The 2 s mean flow quality still read 130 to 185 then, which looks healthy. That held in all 480 of their loud episodes; the first decision that showed the fault came at +5.2 to +5.9 s (pre-expansion audit, item 1). The student flies the whole first leg as one move, so its next decision came at +3.1 to +5.6 s and read 0.
 
-In v3, the loud fault starts when the estimate is 2.0 m from the first move's target (`fault_anchor: first_move_target`, `fault_anchor_m: 2.0`). `EKF2_NOAID_TOUT` is set and flow goes off at that moment (`at_s: 0`). The 2 m steps are at most 2.13 m long, so for those arms the fault starts with the step, or within 0.13 m of its start. For the student's 3.9 to 5.5 m first leg it starts when 2 m of the leg remain. The anchor is the same mechanism as `brief`'s, so the frozen image runs these files as they are.
+In this set and in E5, the loud fault starts when the estimate is 2.0 m from the first move's target (`fault_anchor: first_move_target`, `fault_anchor_m: 2.0`). `EKF2_NOAID_TOUT` is set and flow goes off at that moment (`at_s: 0`). The 2 m steps are at most 2.13 m long, so for those arms the fault starts with the step, or within 0.13 m of its start. For the student's 3.9 to 5.5 m first leg it starts when 2 m of the leg remain. The anchor is the same mechanism as `brief`'s, so the frozen image runs these files as they are.
 
 The distance comes from replaying the 2,880 counted E2 and E4 loud, brief and healthy episodes (student, zero-shot, Claude; both O levels). For each candidate distance, the replay finds when the ULog's estimate came within it of the first move's target. It then takes the next recorded planner decision and recomputes the 2 s mean that decision would have shown, with flow stopped at that moment, using the agent's rule (0.1 s grid; a reading counts for 0.3 s). The replay checks out against the recorded data:
 

@@ -1,6 +1,7 @@
-"""The next wave's scenario set, `scenarios/v3/`: E2's benign families, with more of them and with the
-loud fault anchored to the first move's target (`families.LOUD_ANCHOR_M`) instead of timed 2.5 s
-into it. The frozen E1 and E2 sets are unchanged (their hashes are in SPEC's freeze record)."""
+"""The audit-fixes smoke set, `scenarios/smoke-audit-fixes/` (first committed as `scenarios/v3/`):
+E2's benign families, with more of them and with the loud fault anchored to the first move's target
+(`families.LOUD_ANCHOR_M`) instead of timed 2.5 s into it. The frozen E1 and E2 sets are unchanged
+(their hashes are in SPEC's freeze record)."""
 
 from pathlib import Path
 
@@ -10,7 +11,7 @@ from lost_in_place import families
 from lost_in_place.scenario import Inject, SetParam, load_scenario
 
 ROOT = Path(__file__).parents[1] / "scenarios"
-V3, E2 = ROOT / "v3", ROOT / "e2"
+V3, E2 = ROOT / "smoke-audit-fixes", ROOT / "e2"
 SCENARIOS = {p.stem: load_scenario(p) for p in sorted(V3.glob("*.yaml"))}
 NAMES = [f"b{i:02d}" for i in range(100)]
 
