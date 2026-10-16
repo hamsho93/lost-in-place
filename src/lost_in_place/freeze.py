@@ -371,7 +371,10 @@ ANALYSIS_SCRIPT_V3 = "src/lost_in_place/stats_v3.py"
 ADMISSION_SCRIPT = "scripts/e5_admission.py"
 # Frozen text a probe sends besides an arm's prompt, by name: "<module>:<attribute>", or
 # "<script path from the repo root>:<attribute>". Every such text must be listed before freeze-v3-pre.
-PROBE_TEXTS = {"wording-check": "lost_in_place.wording:PROBE_QUESTION"}
+PROBE_TEXTS = {
+    "wording-check": "lost_in_place.wording:PROBE_QUESTION",
+    "comprehension": "lost_in_place.comprehension:PROBE_SUFFIX",
+}
 
 DESIGN_ROW_V3 = f"Experiment design (`{DESIGN_V3}`)"
 TEMPLATE_ROW = "Wording template (A-1)"

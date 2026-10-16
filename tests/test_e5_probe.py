@@ -38,6 +38,13 @@ def test_the_probe_text_is_frozen() -> None:
     assert probe_prompt("Current state: x") == "Current state: x\n\n" + PROBE_QUESTION
 
 
+def test_the_freeze_record_hashes_the_probe_suffix() -> None:
+    from lost_in_place import freeze
+
+    source = freeze.PROBE_TEXTS["comprehension"]
+    assert freeze._load_attribute(Path(__file__).resolve().parents[1], source) == PROBE_SUFFIX
+
+
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
