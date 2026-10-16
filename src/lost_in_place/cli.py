@@ -397,6 +397,8 @@ def _instance_arg(value: str) -> int | None:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    from lost_in_place.planning import OBSERVATION_LEVELS
+
     parser = argparse.ArgumentParser(prog="lip", description="Lost in Place benchmark runner")
     parser.add_argument("--version", action="version", version=__version__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -460,7 +462,9 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["none", "geometric", "estimator_health", "oracle"],
         help="validator arm (default: none)",
     )
-    agent.add_argument("--obs", choices=["O0", "O1"], default="O0", help="observation level (default: O0)")
+    agent.add_argument(
+        "--obs", choices=list(OBSERVATION_LEVELS), default="O0", help="observation level (default: O0)"
+    )
     agent.add_argument(
         "--latency", type=float, default=2.0, help="simulation seconds charged per decision (default: 2)"
     )
