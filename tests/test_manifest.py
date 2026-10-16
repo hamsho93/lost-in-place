@@ -225,3 +225,20 @@ def test_the_freeze_v2_sweeps_keep_their_episode_keys() -> None:
     entries = manifest.build(SweepSpec.load(ROOT / "sweeps" / "e4-claude.yaml"), ROOT)
     assert {e.cell for e in entries} == {"dexi-claude-sonnet-4-6-none-O0", "dexi-claude-sonnet-4-6-none-O1"}
     assert all(e.planner_options == {"model": "claude-sonnet-4-6"} for e in entries)
+
+
+def test_a_sweep_with_an_unknown_observation_level_is_rejected() -> None:
+    with pytest.raises(ValueError, match="unknown observation level 'O1-L'"):
+        _spec(observations=["O0", "O1-L"])
+    assert {e.observation for e in manifest.build(_spec(observations=["O0", "O1"]), ROOT)} == {"O0", "O1"}
+
+
+def test_a_manifest_entry_with_an_unknown_observation_level_is_rejected() -> None:
+    with pytest.raises(ValueError, match="unknown observation level 'O1-L'"):
+        Entry("scenarios/pilot/cross_loud.yaml", "cross_loud", 0, 1, observation="O1-L")
+    spec = _spec()
+    text = manifest.dumps(spec, manifest.build(spec, ROOT)).replace(
+        '"observation": "O0"', '"observation": "O1-L"'
+    )
+    with pytest.raises(ValueError, match="unknown observation level 'O1-L'"):
+        manifest.loads(text)

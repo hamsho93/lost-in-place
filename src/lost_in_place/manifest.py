@@ -20,7 +20,13 @@ from typing import Any
 
 import yaml
 
-from lost_in_place.planning import DEXI_PLANNER, LLM_PLANNER, arm_name, available_planners
+from lost_in_place.planning import (
+    DEXI_PLANNER,
+    LLM_PLANNER,
+    arm_name,
+    available_planners,
+    check_observation_level,
+)
 from lost_in_place.scenario import load_scenario
 
 BATCH_ARRAY_MAX = 10_000
@@ -68,6 +74,9 @@ class Entry:
     latency_s: float = 2.0
     planner_options: dict[str, str] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        check_observation_level(self.observation)
+
     @property
     def cell(self) -> str:
         return f"{arm_name(self.planner, self.planner_options)}-{self.validator}-{self.observation}"
@@ -103,7 +112,9 @@ class SweepSpec:
             _planner_entry(p) for p in data.get("planners", ["scripted-naive"])
         ]
         self.validators: list[str] = list(data.get("validators", ["none"]))
-        self.observations: list[str] = list(data.get("observations", ["O0"]))
+        self.observations: list[str] = [
+            check_observation_level(str(o)) for o in data.get("observations", ["O0"])
+        ]
         self.latency_s = float(data.get("latency_s", 2.0))
         self.planner_options = {str(k): str(v) for k, v in (data.get("planner_options") or {}).items()}
         self.shuffle_seed = int(data.get("shuffle_seed", 0))

@@ -23,6 +23,20 @@ LLM_PLANNER = "llm"
 DEXI_PLANNER = "dexi"
 # How a history line ends when the validator rejected the action; scripted planners key on it.
 REJECTED = " - rejected: "
+# Every observation level a planner can fly at, and whether it is shown estimator health. A level
+# missing here is an error wherever it is read (sweep spec, manifest entry, agent config, observe),
+# so a typo or a level this build doesn't implement can never fly as O0.
+OBSERVATION_LEVELS: dict[str, bool] = {"O0": False, "O1": True}
+
+
+def check_observation_level(level: str) -> str:
+    if level not in OBSERVATION_LEVELS:
+        raise ValueError(f"unknown observation level {level!r}: use one of {', '.join(OBSERVATION_LEVELS)}")
+    return level
+
+
+def shows_health(level: str) -> bool:
+    return OBSERVATION_LEVELS[check_observation_level(level)]
 
 
 def arm_name(planner: str, options: dict[str, str] | None = None) -> str:

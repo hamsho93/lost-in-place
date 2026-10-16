@@ -39,3 +39,16 @@ def test_unknown_planner_lists_installed(monkeypatch: pytest.MonkeyPatch) -> Non
 
 def test_no_validator_passes_everything() -> None:
     assert NoValidator().check(Action(name="move", args={"north_m": 100}), OBS).ok
+
+
+def test_observation_levels_are_o0_without_health_and_o1_with_it() -> None:
+    assert planning.OBSERVATION_LEVELS == {"O0": False, "O1": True}
+    assert not planning.shows_health("O0") and planning.shows_health("O1")
+
+
+@pytest.mark.parametrize("level", ["O1-L", "O1-N", "O1-R", "O1-V", "o1", "O1 ", "O2", ""])
+def test_unknown_observation_levels_are_rejected(level: str) -> None:
+    with pytest.raises(ValueError, match="unknown observation level"):
+        planning.check_observation_level(level)
+    with pytest.raises(ValueError, match="unknown observation level"):
+        planning.shows_health(level)

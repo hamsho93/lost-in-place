@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 from mavsdk_grpc.telemetry import FlightMode
 
-from lost_in_place import agent, geometry
+from lost_in_place import agent, geometry, manifest, planning
 from lost_in_place import episode as episode_module
 from lost_in_place.agent import AgentConfig, AgentEpisode, Telemetry, health_from_estimator_status
 from lost_in_place.config import Paths
@@ -619,3 +619,28 @@ def test_a_polled_arrival_is_checked_only_every_poll_s() -> None:
 
     assert run(0.5) == [10.0, 10.5, 11.0]
     assert run(None) == [round(10 + i / 10, 2) for i in range(15)]
+
+
+def test_an_unknown_observation_level_fails_instead_of_flying_as_o0() -> None:
+    with pytest.raises(ValueError, match="unknown observation level 'O1-L'"):
+        AgentConfig(observation="O1-L")
+    ep = _agent_episode("cross_healthy.yaml")
+    object.__setattr__(ep.config, "observation", "O1-L")  # past AgentConfig's own check
+    with pytest.raises(ValueError, match="unknown observation level 'O1-L'"):
+        ep.observe()
+
+
+def test_lip_run_rejects_an_unknown_obs_level(capsys: pytest.CaptureFixture[str]) -> None:
+    from lost_in_place.cli import build_parser
+
+    assert build_parser().parse_args(["run", "s.yaml", "--obs", "O1"]).obs == "O1"
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["run", "s.yaml", "--obs", "O1-L"])
+    assert "invalid choice: 'O1-L'" in capsys.readouterr().err
+
+
+def test_a_level_added_to_observation_levels_is_accepted_everywhere(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(planning.OBSERVATION_LEVELS, "O1-L", True)
+    ep = _agent_episode("cross_healthy.yaml", AgentConfig(observation="O1-L"))
+    assert ep.observe().health is not None
+    assert manifest.SweepSpec({"name": "t", "scenarios": [], "reps": 1, "observations": ["O1-L"]})

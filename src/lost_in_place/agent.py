@@ -31,7 +31,7 @@ import subprocess
 import time
 from collections import deque
 from dataclasses import asdict, dataclass, field, replace
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 from mavsdk_grpc import System
 from mavsdk_grpc.offboard import PositionNedYaw
@@ -51,7 +51,9 @@ from lost_in_place.planning import (
     Planner,
     PrimitivePlanner,
     Verdict,
+    check_observation_level,
     load_planner,
+    shows_health,
 )
 from lost_in_place.scenario import End, Inject, Mission, Scenario, SetParam
 from lost_in_place.sim import SimInstance
@@ -59,8 +61,6 @@ from lost_in_place.validators import HazardMap, Truth, hazard_in_truth, make_val
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-ObservationLevel = Literal["O0", "O1"]
 
 UNDER_WAY = "still under way"
 MAX_HOLD_S = 15.0
@@ -81,12 +81,15 @@ class AgentConfig:
     planner: str = "scripted-naive"
     planner_options: dict[str, Any] = field(default_factory=dict)
     validator: str = "none"
-    observation: ObservationLevel = "O0"
+    observation: str = "O0"  # a key of `planning.OBSERVATION_LEVELS`
     latency_s: float = 2.0  # simulation seconds charged per decision
     pause: bool = True
     # Longest a move or rotate runs before the planner is asked again. With 2 s of latency, a
     # planner gets a decision about 2 s after a fault, before PX4's failsafe (about 5 s).
     epoch_s: float = 1.5
+
+    def __post_init__(self) -> None:
+        check_observation_level(self.observation)
 
 
 def make_planner(config: AgentConfig, scenario: Scenario) -> Planner:
@@ -299,7 +302,7 @@ class AgentEpisode(_Episode):
             heading_deg=round(self.tel.yaw_deg, 1) % 360.0,
             battery_pct=round(self.tel.battery_pct, 1),
             history=tuple(self.history[-HISTORY_LENGTH:]),
-            health=self.health() if self.config.observation == "O1" else None,
+            health=self.health() if shows_health(self.config.observation) else None,
         )
 
     # Loop ------------------------------------------------------------------------------------
