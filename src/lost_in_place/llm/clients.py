@@ -205,8 +205,14 @@ class OpenAICompatibleClient:
             **self.spec.extra_body,
             "model": self.spec.model_id,
             "messages": [*messages, {"role": "user", "content": user}],
-            "tools": [{"type": "function", "function": tool} for tool in tools],
-            "tool_choice": "required" if self.spec.tool_choice == "any" else "auto",
+            **(
+                {
+                    "tools": [{"type": "function", "function": tool} for tool in tools],
+                    "tool_choice": "required" if self.spec.tool_choice == "any" else "auto",
+                }
+                if tools
+                else {}
+            ),
             "max_tokens": self.spec.max_tokens,
         }
         if self.spec.temperature is not None:

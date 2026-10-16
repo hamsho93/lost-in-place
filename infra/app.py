@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """CDK entry point. Settings come from cdk.json context or `-c key=value`."""
 
+import json
 import os
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from lost_in_place_infra.sim_stack import (
     SimSettings,
     SimStack,
     bedrock_models_from_registry,
+    bedrock_regions_from_registry,
     imported_models_from_registry,
 )
 
@@ -23,6 +25,11 @@ def ctx(key: str, default: str) -> str:
     return default if value is None else str(value)
 
 
+def ctx_map(key: str) -> dict[str, str]:
+    value = app.node.try_get_context(key)  # a JSON string from -c, an object from cdk.json
+    return dict(json.loads(value) if isinstance(value, str) else value or {})
+
+
 settings = SimSettings(
     budget_usd=float(ctx("budgetUsd", "100")),
     max_vcpus=int(ctx("maxVcpus", "128")),
@@ -31,6 +38,8 @@ settings = SimSettings(
     account_alarm_usd=float(ctx("accountAlarmUsd", "0")),
     github_repo=ctx("githubRepo", ""),
     bedrock_models=bedrock_models_from_registry(MODEL_REGISTRY),
+    bedrock_regions=bedrock_regions_from_registry(MODEL_REGISTRY),
+    external_profiles=ctx_map("useast2Profiles"),
     imported_models=imported_models_from_registry(MODEL_REGISTRY),
 )
 SimStack(

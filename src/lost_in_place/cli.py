@@ -435,6 +435,55 @@ def _families_e5(args: argparse.Namespace) -> int:
     return 1 if bad else 0
 
 
+def _cmd_dryrun(args: argparse.Namespace) -> int:
+    import asyncio
+    from dataclasses import asdict
+
+    from lost_in_place import dryrun, wording
+    from lost_in_place.llm.clients import make_client
+    from lost_in_place.llm.registry import get_model
+
+    spec = get_model(args.model)
+    episodes = [(t, s) for t in args.templates for s in dryrun.wording_families(args.scenarios, t)]
+    cost = wording.dryrun_cost(len(episodes)) if spec.provider == "bedrock_imported" else None
+    print(
+        f"dry run: {args.model} ({spec.provider}), {len(episodes)} episodes"
+        f" ({', '.join(args.templates)} x {len(episodes) // len(args.templates)} families),"
+        f" prompt {args.prompt}, {args.obs}, driver dexi, validator none, latency 0"
+    )
+    if cost is not None:
+        print(f"  about {cost['calls']} calls; {cost['copy_minutes']} copy-minutes -> ${cost['usd']}")
+    if not args.live:
+        print("  plan only: add --live to call the model (it costs money)")
+        return 0
+
+    def progress(run: dryrun.DryRun) -> None:
+        state = run.harness_error or ("success" if run.success else run.end)
+        print(f"  {run.template} {run.family}: {state}", flush=True)
+
+    runs = asyncio.run(
+        dryrun.run_all(
+            episodes, spec, lambda: make_client(spec), args.prompt, args.obs, args.jobs, progress=progress
+        )
+    )
+    summary = dryrun.summarise(runs)
+    doc = {
+        "model": args.model,
+        "prompt": args.prompt,
+        "observation": args.obs,
+        "driver": "dexi",
+        "validator": "none",
+        "latency_s": 0.0,
+        "summary": summary,
+        "episodes": [asdict(r) for r in runs],
+    }
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_text(json.dumps(doc, indent=1) + "\n")
+    print(json.dumps(summary))
+    print(args.out)
+    return 1 if any(row["harness_error"] for row in summary.values()) else 0
+
+
 def _instance_arg(value: str) -> int | None:
     if value == "auto":
         return None
@@ -500,6 +549,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="with --e5: compare with <out> instead of writing; exit 1 if any differ",
     )
     fam.set_defaults(func=_cmd_families)
+
+    dry = sub.add_parser(
+        "dryrun",
+        help="fly a model through DEXI's prompt against a kinematic double, for the E5 wording check"
+        " (b00-b59 re-worded plus k000-k005, per template); plans only, unless --live",
+    )
+    dry.add_argument("model", help="a model in llm/models.yaml (the wording check flies qwen3-4b-student)")
+    dry.add_argument("--templates", nargs="+", choices=("t0", "t1"), default=["t0", "t1"])
+    dry.add_argument("--prompt", choices=("dexi-v2", "dexi-9b2e7a7"), default="dexi-v2")
+    dry.add_argument("--obs", choices=list(OBSERVATION_LEVELS), default="O0")
+    dry.add_argument("--jobs", type=int, default=8, help="episodes in flight (default: 8)")
+    dry.add_argument("--scenarios", type=Path, default=Path("scenarios"), help="default: scenarios")
+    dry.add_argument("--out", type=Path, default=Path("runs/wording-check/dryrun.json"))
+    dry.add_argument(
+        "--live", action="store_true", help="call the model; without it, print the plan and cost"
+    )
+    dry.set_defaults(func=_cmd_dryrun)
 
     run = sub.add_parser("run", help="fly one scenario")
     run.add_argument("scenario", type=Path)
