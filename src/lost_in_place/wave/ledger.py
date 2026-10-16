@@ -64,7 +64,9 @@ class State:
     gate: dict[str, Any] | None = None
     windows: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     s7_checked: dict[str, int] = field(default_factory=dict)
-    month_fit: dict[str, Any] | None = None
+    # {month-fit arm: its section 10.4 decision, the month it was made for, and `preview` when it was
+    # made ahead of the arm's turn (informational; decided again when the arm becomes startable)}.
+    month_fit: dict[str, dict[str, Any]] = field(default_factory=dict)
     kill_pings: dict[str, str] = field(default_factory=dict)
     deleted_imports: dict[str, str] = field(default_factory=dict)
     import_arns: dict[str, str] = field(default_factory=dict)
@@ -79,6 +81,9 @@ class State:
         if not text:
             return cls()
         data = json.loads(text)
+        decisions = data.get("month_fit")
+        if decisions is None or "decision" in decisions:
+            data.pop("month_fit", None)
         known = set(cls.__dataclass_fields__)
         return cls(**{k: v for k, v in data.items() if k in known})
 

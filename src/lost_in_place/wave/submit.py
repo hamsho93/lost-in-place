@@ -28,7 +28,7 @@ from lost_in_place.llm.registry import ModelSpec
 from lost_in_place.manifest import Entry
 from lost_in_place.wave import meter, rules
 from lost_in_place.wave.aws import Clients, Stack, account_id, mask, utcnow
-from lost_in_place.wave.config import After, Arm, Wave
+from lost_in_place.wave.config import After, Arm, Month, Wave
 from lost_in_place.wave.episodes import Episode, Runs, S3Runs, Scanner, attempts_in_order, results_in_order
 from lost_in_place.wave.ledger import JobRecord, Ledger, iso, parse_iso
 from lost_in_place.wave.store import Store
@@ -443,6 +443,8 @@ class Submitter:
 
     def settled_fraction(self, cond: After) -> float:
         arm = self.wave.arm(cond.arm)
+        if self.excluded(arm):
+            return 1.0
         if arm.kind == "external":
             return 1.0 if self.arm_done(arm.name) else 0.0
         run = self.arm_run(arm)
@@ -460,32 +462,111 @@ class Submitter:
             return arm.estimate_usd
         return max(0.0, arm.estimate_usd - self.arm_spent(arm, now))
 
-    def month_fit(self, arm: Arm, now: datetime) -> rules.MonthFitResult:
-        assert arm.canary_usd_per_episode is not None
-        month = meter.month_key(now)
-        nxt = meter.month_key(meter.month_start(now) + timedelta(days=32))
-        next_rule = self.wave.months.get(nxt)
-        next_budget = (
-            next_rule.stop_usd
-            if next_rule and (next_rule.arms is None or arm.name in next_rule.arms)
-            else None
+    # ---------------------------------------------------------------- section 10.4
+
+    def excluded(self, arm: Arm) -> bool:
+        """A month-fit arm that won't run in E5: not admitted (canary cost over the limit) or dropped."""
+        if not arm.month_fit:
+            return False
+        if arm.canary_usd_per_episode is not None and rules.s8_admitted(arm, self.wave.rules):
+            return True
+        decision = self.state.month_fit.get(arm.name) or {}
+        return decision.get("decision") == "drop" and not decision.get("preview")
+
+    def waits_next_month(self, arm: Arm, now: datetime) -> bool:
+        """Deferred by section 10.4 this month, or ordered after an arm that is."""
+        decision = self.state.month_fit.get(arm.name) or {}
+        if (
+            decision.get("decision") == "defer"
+            and not decision.get("preview")
+            and decision.get("month") == meter.month_key(now)
+        ):
+            return True
+        return any(self.waits_next_month(self.wave.arm(c.arm), now) for c in arm.start_after)
+
+    def next_month(self, now: datetime) -> Month | None:
+        return self.wave.months.get(meter.month_key(meter.month_start(now) + timedelta(days=32)))
+
+    def fit_budgets(self, now: datetime) -> list[float | None]:
+        """This month's stop and next month's: a decision is taken again when either changes."""
+        rule, nxt = self.wave.months.get(meter.month_key(now)), self.next_month(now)
+        return [rule.stop_usd if rule else None, nxt.stop_usd if nxt else None]
+
+    def fit_arm(self, arm: Arm, now: datetime) -> rules.FitArm:
+        """Its projection: open episodes x the canary's cost per episode, plus its probe until the
+        probe's window closes. Until the canary is measured (or the sweep is written), the planned
+        median stands in, for previews."""
+        probes = [a for a in self.wave.arms if a.counted_in == arm.name]
+        probe = 0.0 if probes and all(self.arm_done(p.name) for p in probes) else arm.probe_usd
+        started = False
+        projection = rules.fit_projection(1, arm.estimate_usd, probe, self.wave.rules)
+        if (self.root / str(arm.sweep)).exists():
+            run = self.arm_run(arm)
+            started = run.started
+            per_episode = arm.canary_usd_per_episode
+            if per_episode is None:
+                per_episode = arm.estimate_usd / run.total if run.total else 0.0
+            projection = rules.fit_projection(run.total - run.settled, per_episode, probe, self.wave.rules)
+        nxt = self.next_month(now)
+        return rules.FitArm(
+            arm.name,
+            projection,
+            started=started,
+            next_month=nxt is not None and (nxt.arms is None or arm.name in nxt.arms),
         )
+
+    def fit_arms(self, now: datetime) -> list[rules.FitArm]:
+        return [self.fit_arm(a, now) for a in self.wave.month_fit_arms() if not self.excluded(a)]
+
+    def month_fit_results(self, now: datetime) -> dict[str, rules.MonthFitResult]:
+        """Section 10.4 for every month-fit arm still in E5, in run order."""
+        committed = (
+            self.month_estimate(now)
+            + sum(self.remaining_usd(a, now) for a in self.wave.outside_month_fit())
+            + self.wave.fixed_remaining_usd
+        )
+        stop, next_stop = self.fit_budgets(now)
         deadline = self.wave.deferral_deadline
-        others = [a for a in self.wave.outside_month_fit() if a.name != arm.name]
-        remaining = sum(self.remaining_usd(a, now) for a in others) + self.wave.fixed_remaining_usd
-        run = self.arm_run(arm)
-        episodes = run.total - run.settled
-        return rules.month_fit(
-            self.month_estimate(now),
-            remaining,
-            episodes,
-            arm.canary_usd_per_episode,
-            arm.probe_usd,
-            self.wave.rules,
-            self.wave.months[month].stop_usd,
-            next_month_budget=next_budget,
+        return rules.month_fit_sequence(
+            committed,
+            self.fit_arms(now),
+            stop,
+            next_month_budget=next_stop,
             deadline_passed=deadline is not None and now.date() > date.fromisoformat(deadline),
         )
+
+    def month_fit_decision(self, arm: Arm, now: datetime) -> dict[str, Any]:
+        """The arm's decision for this month, taken when it first becomes startable and kept until
+        the month or its budgets change (or the operator resumes it). The later month-fit arms get a
+        preview decision at the same time, so a December request can go to Mahmood early."""
+        month, budgets = meter.month_key(now), self.fit_budgets(now)
+
+        def final(name: str) -> dict[str, Any] | None:
+            decision = self.state.month_fit.get(name)
+            if decision and not decision.get("preview") and decision.get("month") == month:
+                return decision
+            return None
+
+        kept = final(arm.name)
+        if kept is not None and kept.get("budgets") == budgets:
+            return kept
+        results = self.month_fit_results(now)
+        if arm.name not in results:
+            return self.state.month_fit.get(arm.name) or {"decision": "drop", "reason": "not run in E5"}
+        names = list(results)
+        for name in names[names.index(arm.name) :]:
+            preview = name != arm.name
+            if preview and final(name) is not None:
+                continue
+            result = results[name]
+            entry: dict[str, Any] = {**result.as_dict(), "month": month, "budgets": budgets, "at": iso(now)}
+            if preview:
+                entry["preview"] = True
+            self.state.month_fit[name] = entry
+            self.ledger.event(now, "month_fit", arm=name, preview=preview, **result.as_dict())
+            label = f"{name} (preview)" if preview else name
+            self.out(f"month fit for {label}: {result.decision} ({result.reason})")
+        return self.state.month_fit[arm.name]
 
     # ---------------------------------------------------------------- rules
 
@@ -516,8 +597,7 @@ class Submitter:
                         "S-3": 1,
                         "S-8": len(results_in_order(run.episodes.values())),
                     }
-                if self.wave.arm(arm).month_fit:
-                    self.state.month_fit = None
+                self.state.month_fit.pop(arm, None)
             elif name == "clear-stop":
                 self.state.hard_stop = None
             elif name == "window" and arm:
@@ -584,29 +664,41 @@ class Submitter:
         arm = run.arm
         spent = self.arm_spent(arm, now)
         month = meter.month_key(now)
-        stop = self.wave.months[month].stop_usd if month in self.wave.months else 0.0
+        rule = self.wave.months.get(month)
+        stop = rule.stop_usd if rule and rule.stop_usd is not None else 0.0
         estimate = self.month_estimate(now)
         others = sum(self.remaining_usd(a, now) for a in self.wave.outside_month_fit() if a.name != arm.name)
         projected = spent / run.settled * run.total if run.settled else spent
-        base = estimate + max(0.0, projected - spent) + others + self.wave.fixed_remaining_usd
-        gpt = [a for a in self.wave.arms if a.month_fit and not self.arm_done(a.name)]
-        gpt_usd = sum(
-            self.wave.rules.month_fit_factor
-            * (self.arm_run(a).total * (a.canary_usd_per_episode or 0) + a.probe_usd)
-            for a in gpt
-            if a.kind == "batch" and a.sweep and (self.root / a.sweep).exists()
+        fits = [] if self.wave.cap_usd(arm) is None else self.fit_arms(now)
+        base = (
+            estimate
+            + max(0.0, projected - spent)
+            + others
+            + self.wave.fixed_remaining_usd
+            + sum(f.projection_usd for f in fits if f.started)
         )
+        pending = [(f.name, f.projection_usd) for f in fits if not f.started]
         verdict = rules.s7_projection(
-            arm.name, spent, run.settled, run.total, self.wave.cap_usd(arm), base + gpt_usd, base, stop
+            arm.name, spent, run.settled, run.total, self.wave.cap_usd(arm), base, pending, stop
         )
         self.ledger.event(
             now, "s7", arm=arm.name, spent=round(spent, 2), projected=round(verdict.projected_usd, 2)
         )
         if verdict.verdict == "pause":
             self.pause(arm.name, verdict.reason, now)
-        elif verdict.verdict == "continue-gpt-december":
-            self.state.month_fit = {"decision": "defer", "reason": verdict.reason, "at": iso(now)}
-            self.ledger.event(now, "month_fit", decision="defer", reason=verdict.reason)
+        elif verdict.verdict == "defer":
+            self.ledger.event(now, "s7_over_cap", arm=arm.name, reason=verdict.reason)
+            self.out(verdict.reason)
+            for name in verdict.deferred:
+                decision = self.state.month_fit.get(name) or {}
+                if decision.get("preview") or decision.get("month") != month:
+                    self.state.month_fit[name] = {
+                        "decision": "defer",
+                        "reason": verdict.reason,
+                        "month": month,
+                        "preview": True,
+                        "at": iso(now),
+                    }
         elif verdict.reason:
             self.ledger.event(now, "s7_over_cap", arm=arm.name, reason=verdict.reason)
 
@@ -717,9 +809,10 @@ class Submitter:
             out.append(("paused", self.state.paused[arm.name]))
         month = meter.month_key(now)
         rule = self.wave.months.get(month)
-        if rule is None:
-            out.append(("month", f"S-9: no approved budget for {month}"))
-        elif rule.arms is not None and arm.name not in rule.arms:
+        budget = rules.s9_budget(month, self.wave.months)
+        if budget:
+            out.append(("month", budget))
+        elif rule is not None and rule.arms is not None and arm.name not in rule.arms:
             out.append(("month", f"{arm.name} may not run in {month}"))
         for cond in arm.start_after:
             if self.settled_fraction(cond) < cond.fraction:
@@ -731,13 +824,7 @@ class Submitter:
             if reason:
                 out.append(("admission", reason))
             elif not run.started:
-                decision = self.state.month_fit
-                if decision is None:
-                    result = self.month_fit(arm, now)
-                    decision = {**result.as_dict(), "at": iso(now)}
-                    self.state.month_fit = decision
-                    self.ledger.event(now, "month_fit", **result.as_dict())
-                    self.out(f"month fit for {arm.name}: {result.decision} ({result.reason})")
+                decision = self.month_fit_decision(arm, now)
                 if decision["decision"] != "run":
                     out.append(
                         ("month-fit", f"section 10.4: {decision['decision']}: {decision.get('reason', '')}")
@@ -889,7 +976,7 @@ class Submitter:
         month = meter.month_key(now)
         estimate = self.month_estimate(now)
         reason = rules.s9_stop(month, self.wave.months, estimate)
-        if reason and month in self.wave.months:
+        if reason:
             self.hard_stop(reason, now)
         for run in runs:
             if run.started:
@@ -951,7 +1038,21 @@ class Submitter:
         return summary
 
     def finished(self) -> bool:
-        return all(self.arm_run(a).done for a in self.batch_arms())
+        """Every Batch arm has settled, won't run in E5, or waits for next month (see `waiting`)."""
+        now = self.clock()
+        return all(
+            self.arm_run(a).done or self.excluded(a) or self.waits_next_month(a, now)
+            for a in self.batch_arms()
+        )
+
+    def waiting(self) -> list[str]:
+        """The arms left for next month, for the operator to restart the submitter then."""
+        now = self.clock()
+        return [
+            a.name
+            for a in self.batch_arms()
+            if not self.arm_run(a).done and not self.excluded(a) and self.waits_next_month(a, now)
+        ]
 
 
 def _brief(exc: Exception) -> str:

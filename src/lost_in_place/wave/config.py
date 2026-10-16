@@ -86,13 +86,15 @@ class Arm(Strict):
     estimate_usd: float = Field(0.0, ge=0)
     p90_usd: float = Field(0.0, ge=0)
     # Section 10.4 and S-8: the arm runs last, only if the month-fit sum passes, and pauses when its
-    # rolling cost per episode exceeds `s8_factor` x its canary's.
+    # rolling cost per episode exceeds `s8_factor` x its canary's. Month-fit arms are summed in the
+    # order listed (GPT-6.1 Sol, then Claude Sonnet 5.5).
     month_fit: bool = False
     canary_usd_per_episode: float | None = Field(None, gt=0)
     probe_usd: float = Field(0.0, ge=0)
     # An arm whose cost is already inside another arm's projection (GPT's probe, in `probe_usd`).
     counted_in: str | None = None
-    # S-0: the models.yaml entry must equal this, field by field (the smoke call's accepted config).
+    # The arm's models.yaml entry, whose `region` is where its tokens are metered; S-0 checks that the
+    # entry equals `pinned_model` field by field (the smoke call's accepted config).
     model: str | None = None
     pinned_model: dict[str, Any] | None = None
 
@@ -115,9 +117,11 @@ class Month(Strict):
     """A budget month. `stop_usd` is the metered hard stop (S-9). With `budget_actual`, the month's
     estimate is the AWS Budgets actual plus the meter since `budget_lag_h` before its last update
     (October, which started before the meter); otherwise the meter alone. With `job_p90_check`, an arm
-    starts only if the estimate plus its P90 stays under the stop. `arms` limits which arms may run."""
+    starts only if the estimate plus its P90 stays under the stop. `arms` limits which arms may run.
+    A month without `stop_usd` has no approved budget yet: nothing is submitted in it, and a month-fit
+    arm can't be deferred to it."""
 
-    stop_usd: float = Field(gt=0)
+    stop_usd: float | None = Field(None, gt=0)
     budget_actual: bool = False
     job_p90_check: bool = False
     arms: tuple[str, ...] | None = None
@@ -208,6 +212,9 @@ class Wave(Strict):
 
     def sharing_import(self, import_name: str) -> list[Arm]:
         return [a for a in self.arms if a.import_name == import_name]
+
+    def month_fit_arms(self) -> list[Arm]:
+        return [a for a in self.arms if a.month_fit]
 
     def outside_month_fit(self) -> list[Arm]:
         """Arms whose remaining cost counts as a fixed item in the month-fit sum."""

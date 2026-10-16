@@ -75,7 +75,7 @@ def s6_idle(
     return bool(recent) and all(v > 0 for v in recent)
 
 
-S7Verdict = Literal["continue", "continue-gpt-december", "pause"]
+S7Verdict = Literal["continue", "defer", "pause"]
 
 
 @dataclass(frozen=True)
@@ -84,6 +84,7 @@ class S7:
     projected_usd: float = 0.0
     verdict: S7Verdict = "continue"
     reason: str = ""
+    deferred: tuple[str, ...] = ()  # month-fit arms the month no longer fits
 
 
 def s7_due(settled: int, last_checked: int, rules: Rules) -> bool:
@@ -101,19 +102,28 @@ def s7_projection(
     settled: int,
     total: int,
     cap: float | None,
-    month_projection_with_gpt: float,
-    month_projection_without_gpt: float,
+    month_projection: float,
+    month_fit_projections: Sequence[tuple[str, float]],
     stop_usd: float,
 ) -> S7:
+    """Over its cap, an arm continues while the month (without the month-fit arms not yet started)
+    fits under the stop, and pauses otherwise. The month-fit arms, in run order, that no longer fit
+    on top are projected to next month."""
     projected = spent / settled * total if settled else spent
     if cap is None or projected <= cap:
         return S7(True, projected)
     over = f"S-7: {arm} projects to ${projected:.2f}, over its ${cap:.2f} cap"
-    if month_projection_with_gpt <= stop_usd:
-        return S7(True, projected, "continue", f"{over}; the month still fits with GPT")
-    if month_projection_without_gpt <= stop_usd:
-        return S7(True, projected, "continue-gpt-december", f"{over}; the month fits only without GPT")
-    return S7(True, projected, "pause", f"{over}; the month does not fit")
+    if month_projection > stop_usd:
+        return S7(True, projected, "pause", f"{over}; the month does not fit")
+    running = month_projection
+    for i, (_, usd) in enumerate(month_fit_projections):
+        running += usd
+        if running > stop_usd:
+            later = tuple(name for name, _ in month_fit_projections[i:])
+            return S7(
+                True, projected, "defer", f"{over}; the month fits only without {', '.join(later)}", later
+            )
+    return S7(True, projected, "continue", f"{over}; the month still fits with every month-fit arm")
 
 
 def s8_admitted(arm: Arm, rules: Rules) -> str | None:
@@ -141,21 +151,31 @@ def s8_rolling(costs: Sequence[float], canary: float, rules: Rules) -> str | Non
     return None
 
 
-def s9_stop(month: str, months: dict[str, Month], estimate: float) -> str | None:
-    """Hard stop: no approved budget this month, or the month's estimate is over its stop."""
-    if month not in months:
+def s9_budget(month: str, months: dict[str, Month]) -> str | None:
+    """Nothing is submitted in a month without an approved stop."""
+    rule = months.get(month)
+    if rule is None or rule.stop_usd is None:
         return f"S-9: no approved budget for {month}"
-    stop = months[month].stop_usd
-    if estimate > stop:
-        return f"S-9: {month} estimate ${estimate:.2f} is over the ${stop:.0f} stop"
+    return None
+
+
+def s9_stop(month: str, months: dict[str, Month], estimate: float) -> str | None:
+    """Hard stop: the month's estimate is over its stop."""
+    rule = months.get(month)
+    if rule is None or rule.stop_usd is None:
+        return None
+    if estimate > rule.stop_usd:
+        return f"S-9: {month} estimate ${estimate:.2f} is over the ${rule.stop_usd:.0f} stop"
     return None
 
 
 def s9_job_fits(month: str, months: dict[str, Month], estimate: float, job_p90: float) -> str | None:
     """October: a job starts only if the month's estimate plus its P90 stays under the stop."""
-    rule = months.get(month)
-    if rule is None:
-        return f"S-9: no approved budget for {month}"
+    reason = s9_budget(month, months)
+    if reason:
+        return reason
+    rule = months[month]
+    assert rule.stop_usd is not None
     if rule.job_p90_check and estimate + job_p90 > rule.stop_usd:
         return f"S-9: {month} estimate ${estimate:.2f} + job P90 ${job_p90:.2f} exceeds ${rule.stop_usd:.0f}"
     return None
@@ -167,46 +187,80 @@ MonthFit = Literal["run", "defer", "drop"]
 @dataclass(frozen=True)
 class MonthFitResult:
     decision: MonthFit
-    total_usd: float
-    gpt_usd: float
+    total_usd: float  # this month's sum up to and including the arm
+    arm_usd: float  # the arm's own 1.15 x projection
     reason: str
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "decision": self.decision,
             "total_usd": round(self.total_usd, 2),
-            "gpt_usd": round(self.gpt_usd, 2),
+            "arm_usd": round(self.arm_usd, 2),
             "reason": self.reason,
         }
 
 
-def month_fit(
-    metered: float,
-    remaining_fixed: float,
-    episodes: int,
-    canary_usd_per_episode: float,
-    probe_usd: float,
-    rules: Rules,
-    stop_usd: float,
+@dataclass(frozen=True)
+class FitArm:
+    """A month-fit arm as section 10.4 sees it: its projection (`fit_projection` of its open episodes),
+    whether it has started this month, and whether next month's config lets it run."""
+
+    name: str
+    projection_usd: float
+    started: bool = False
+    next_month: bool = False
+
+
+def fit_projection(episodes: int, usd_per_episode: float, probe_usd: float, rules: Rules) -> float:
+    return rules.month_fit_factor * (episodes * usd_per_episode + probe_usd)
+
+
+def month_fit_sequence(
+    committed: float,
+    arms: Sequence[FitArm],
+    stop_usd: float | None,
     *,
     next_month_budget: float | None,
     deadline_passed: bool,
-) -> MonthFitResult:
-    """Section 10.4: metered spend + remaining fixed items + 1.15 x (episodes x canary $/episode +
-    probe) must be at most the stop; otherwise GPT runs next month if that month's budget covers its
-    1.15 x projection, and is dropped if no such budget is approved by the deadline."""
-    gpt = rules.month_fit_factor * (episodes * canary_usd_per_episode + probe_usd)
-    total = metered + remaining_fixed + gpt
-    if total <= stop_usd:
-        return MonthFitResult("run", total, gpt, f"${total:.2f} <= ${stop_usd:.0f}")
-    if next_month_budget is not None and gpt <= next_month_budget:
-        return MonthFitResult(
-            "defer", total, gpt, f"${total:.2f} > ${stop_usd:.0f}; next month's budget covers ${gpt:.2f}"
-        )
-    if deadline_passed:
-        return MonthFitResult(
-            "drop", total, gpt, f"${total:.2f} > ${stop_usd:.0f} and no next-month budget by the deadline"
-        )
-    return MonthFitResult(
-        "defer", total, gpt, f"${total:.2f} > ${stop_usd:.0f}; waiting for a next-month budget"
-    )
+) -> dict[str, MonthFitResult]:
+    """Section 10.4 for the month-fit arms in run order (GPT-6.1 Sol, then Claude Sonnet 5.5).
+
+    `committed` is the month's metered spend plus its remaining fixed items. An arm runs this month if
+    `committed` + the projections of the earlier arms that run this month + its own is at most the
+    stop. Otherwise it goes to next month if that month's budget covers its projection on top of the
+    earlier deferred arms', and is dropped if no such budget is approved by the deadline. Arms keep
+    their order, so once one goes to next month every later one does too. An arm already started
+    counts its open projection and keeps running."""
+    out: dict[str, MonthFitResult] = {}
+    total, deferred = committed, 0.0
+    behind: str | None = None
+    for arm in arms:
+        own = arm.projection_usd
+        here = total + own
+        if arm.started:
+            total = here
+            out[arm.name] = MonthFitResult("run", here, own, "started")
+            continue
+        if behind is None and stop_usd is not None and here <= stop_usd:
+            total = here
+            out[arm.name] = MonthFitResult("run", here, own, f"${here:.2f} <= ${stop_usd:.0f}")
+            continue
+        if behind is not None:
+            why = f"runs after {behind}, which goes to next month"
+        elif stop_usd is None:
+            why = "no approved budget this month"
+        else:
+            why = f"${here:.2f} > ${stop_usd:.0f}"
+        covered = next_month_budget is not None and deferred + own <= next_month_budget
+        if arm.next_month and covered:
+            deferred += own
+            behind = arm.name
+            out[arm.name] = MonthFitResult(
+                "defer", here, own, f"{why}; next month's budget covers ${deferred:.2f}"
+            )
+        elif deadline_passed:
+            out[arm.name] = MonthFitResult("drop", here, own, f"{why}; no next-month budget by the deadline")
+        else:
+            behind = arm.name
+            out[arm.name] = MonthFitResult("defer", here, own, f"{why}; waiting for a next-month budget")
+    return out

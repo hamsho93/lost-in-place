@@ -18,7 +18,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from lost_in_place.wave import config, health, meter
+from lost_in_place.wave import config, health, meter, rules
 from lost_in_place.wave.aws import Clients, Stack, boto3_factory, discover, mask, utcnow
 from lost_in_place.wave.config import Wave
 from lost_in_place.wave.episodes import LocalRuns, Runs, S3Runs
@@ -141,7 +141,12 @@ def _cmd_run(ctx: Context, args: argparse.Namespace, sleep: Callable[[float], No
             break
         sleep(ctx.wave.poll_s)
     if submitter.finished():
-        print("every arm has settled")
+        waiting = submitter.waiting()
+        if waiting:
+            print(f"every arm has settled or been dropped, except for next month: {', '.join(waiting)}")
+            print("run the submitter again once that month starts with an approved stop_usd")
+        else:
+            print("every arm has settled")
     return 0
 
 
@@ -183,14 +188,22 @@ def _cmd_month_fit(ctx: Context, args: argparse.Namespace) -> int:
     submitter = ctx.submitter(args.root)
     submitter.observe()
     now = submitter.clock()
-    for arm in ctx.wave.arms:
-        if not arm.month_fit:
-            continue
-        if arm.canary_usd_per_episode is None:
-            print(f"{arm.name}: no canary cost per episode in the config")
-            continue
-        result = submitter.month_fit(arm, now)
-        print(json.dumps({"arm": arm.name, **result.as_dict()}, sort_keys=True))
+    results = submitter.month_fit_results(now)
+    for arm in ctx.wave.month_fit_arms():
+        shown: dict[str, Any] = {"arm": arm.name}
+        if arm.name in results:
+            shown.update(results[arm.name].as_dict())
+            if arm.canary_usd_per_episode is None:
+                shown["note"] = "no canary cost per episode yet: projected at the planned median"
+        else:
+            shown["decision"] = "not run in E5"
+            shown["reason"] = rules.s8_admitted(arm, ctx.wave.rules) or (
+                submitter.state.month_fit.get(arm.name) or {}
+            ).get("reason", "dropped")
+        decided = submitter.state.month_fit.get(arm.name)
+        if decided:
+            shown["recorded"] = decided
+        print(json.dumps(shown, sort_keys=True, default=str))
     return 0
 
 
