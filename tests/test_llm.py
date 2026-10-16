@@ -287,9 +287,9 @@ def test_sonnet_5_5_fallbacks_drop_temperature_then_effort() -> None:
     }
 
 
-def test_haiku_5_5_smoke_entry_has_the_sonnet_settings() -> None:
-    haiku, sonnet = get_model("claude-haiku-5-5"), get_model("claude-sonnet-5-5")
-    assert haiku.model_id == "us.anthropic.claude-haiku-5-5"
+def test_haiku_5_5_smoke_entry_has_the_sonnet_fb1_settings() -> None:
+    haiku, sonnet = get_model("claude-haiku-5-5"), get_model("claude-sonnet-5-5-fb1")
+    assert (haiku.model_id, haiku.temperature) == ("us.anthropic.claude-haiku-5-5", None)
     assert haiku.model_dump(exclude={"name", "notes", "model_id"}) == sonnet.model_dump(
         exclude={"name", "notes", "model_id"}
     )
