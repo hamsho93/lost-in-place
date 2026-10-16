@@ -1,0 +1,28 @@
+# E5 canary (freeze-v3 design, section 11 item 4), template t1: dexi/gpt-6.1-sol-fb3 on k000-k005 at the 7 loud and 6 brief levels.
+# 78 episodes; flown only under the template A-1 picks. Written by scripts/e5_sweeps.py.
+name: e5-canary-t1-gpt-6.1-sol-fb3
+reps: 1
+validators: [none]
+latency_s: 2.0
+shuffle_seed: 0
+cells:
+- scenarios: ['scenarios/e5/t1/canary/k00[0-5]_loud.yaml']
+  planners:
+  - arm: dexi/gpt-6.1-sol-fb3
+    options: {driver: dexi, prompt: dexi-v2}
+  observations: [O0, O1, O1L, O1N, O1R]
+- scenarios: ['scenarios/e5/t1/canary/k00[0-5]_loud.yaml']
+  planners:
+  - arm: dexi/gpt-6.1-sol-fb3
+    options: {driver: dexi, prompt: dexi-9b2e7a7}
+  observations: [O0, O1]
+- scenarios: ['scenarios/e5/t1/canary/k00[0-5]_brief.yaml']
+  planners:
+  - arm: dexi/gpt-6.1-sol-fb3
+    options: {driver: dexi, prompt: dexi-v2}
+  observations: [O0, O1, O1L, O1N, O1R]
+- scenarios: ['scenarios/e5/t1/canary/k00[0-5]_brief.yaml']
+  planners:
+  - arm: dexi/gpt-6.1-sol-fb3
+    options: {driver: dexi, prompt: dexi-9b2e7a7}
+  observations: [O1]

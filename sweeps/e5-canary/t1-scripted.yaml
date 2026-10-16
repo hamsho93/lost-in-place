@@ -1,0 +1,16 @@
+# E5 canary (freeze-v3 design, section 11 item 4), template t1: the G-S cell (loud O1) at both cadences, and scripted-cautious at loud O1, on k000-k005.
+# 18 episodes; flown only under the template A-1 picks. Written by scripts/e5_sweeps.py.
+name: e5-canary-t1-scripted
+reps: 1
+validators: [none]
+latency_s: 2.0
+shuffle_seed: 0
+cells:
+- scenarios: ['scenarios/e5/t1/canary/k00[0-5]_loud.yaml']
+  planners:
+  - arm: dexi/rule-2m
+    options: {driver: dexi, prompt: dexi-v2}
+  - arm: dexi/rule-leg
+    options: {driver: dexi, prompt: dexi-v2}
+  - scripted-cautious
+  observations: [O1]
