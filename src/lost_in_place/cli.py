@@ -1,6 +1,6 @@
 """Command line: `lip worlds`, `lip run`, `lip analyze`, `lip manifest`, `lip run-manifest`, `lip report`,
 `lip stats`, `lip label-sample`, `lip label-agree`, `lip freeze-record`, `lip doctor`, `lip models`,
-`lip propose`."""
+`lip propose`, `lip e5 health`."""
 
 from __future__ import annotations
 
@@ -830,6 +830,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--prompt", default="dexi-v2", help="with --planner dexi: the DEXI prompt version (default dexi-v2)"
     )
     propose.set_defaults(func=_cmd_propose)
+
+    from lost_in_place.wave.cli import add_e5_parser
+
+    add_e5_parser(sub)
     return parser
 
 
