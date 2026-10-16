@@ -64,13 +64,24 @@ def test_family_globs_match_exactly_the_first_n_names(gen: ModuleType, n: int) -
 
 
 @pytest.mark.parametrize(
-    ("template", "n", "gpt"), [("t0", 120, "gpt-6.1-sol"), ("t1", 160, "gpt-6.1-sol-fb2")]
+    ("template", "n", "gpt", "sonnet55"),
+    [
+        ("t0", 120, "gpt-6.1-sol", "claude-sonnet-5-5-fb1"),
+        ("t1", 160, "gpt-6.1-sol-fb2", "claude-sonnet-5-5"),
+    ],
 )
 def test_wave_sweeps_have_the_designs_cells(
-    gen: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str], template: str, n: int, gpt: str
+    gen: ModuleType,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    template: str,
+    n: int,
+    gpt: str,
+    sonnet55: str,
 ) -> None:
-    files = gen.wave(template, n, gen.ARMS, gpt)
+    files = gen.wave(template, n, gen.ARMS, gpt, sonnet55=sonnet55)
     assert set(files) == {f"{a}.yaml" for a in gen.ARMS}
+    assert "claude-sonnet-5-5.yaml" in files and "haiku" not in "".join(files.values())
     assert gen.write(files, tmp_path, check=False) == 0
     capsys.readouterr()
     assert gen.write(files, tmp_path, check=True) == 0
@@ -80,6 +91,7 @@ def test_wave_sweeps_have_the_designs_cells(
         entries = expand(tmp_path / f"{arm}.yaml", tmp_path / f"{arm}.json", capsys)
         doc = json.loads((tmp_path / f"{arm}.json").read_text())
         names.add(doc["name"])
+        assert doc["name"] == f"e5-{arm}"
         assert doc["spec"]["shuffle_seed"] == 0
         assert all(e["validator"] == "none" and e["latency_s"] == 2.0 and e["rep"] == 0 for e in entries)
         assert all(e["planner"] == "dexi" and e["planner_options"]["driver"] == "dexi" for e in entries)
@@ -94,7 +106,7 @@ def test_wave_sweeps_have_the_designs_cells(
                 assert {k for k in got if k[0] == key} == want
                 assert all(got[k] == _names("c", n) for k in want)
             continue
-        model = gpt if arm == gen.GPT_ARM else arm
+        model = {gen.GPT_ARM: gpt, gen.SONNET55_ARM: sonnet55}.get(arm, arm)
         assert len(entries) == expected[0]
         assert {e["planner_options"]["model"] for e in entries} == {model}
         by_state: dict[str, set[str]] = collections.defaultdict(set)
@@ -120,6 +132,10 @@ def test_the_arm_set_and_parameters_are_checked(gen: ModuleType) -> None:
         gen.wave("t0", 140, gen.ARMS, "gpt-6.1-sol")
     with pytest.raises(ValueError, match="entry"):
         gen.wave("t0", 120, gen.ARMS, "gpt-6.1-sol-fb4")
+    with pytest.raises(ValueError, match="claude-sonnet-5-5 entry 'claude-haiku-5-5'"):
+        gen.wave("t0", 120, gen.ARMS, sonnet55="claude-haiku-5-5")
+    with pytest.raises(SystemExit):
+        gen.main(["wave", "--template", "t0", "--n", "120", "--sonnet55", "claude-haiku-5-5", "--check"])
     with pytest.raises(ValueError, match="arms"):
         gen.wave("t0", 120, ("qwen3-4b",), "gpt-6.1-sol")
 
@@ -138,3 +154,17 @@ def test_check_reports_changed_and_stale_files(gen: ModuleType, tmp_path: Path) 
     (tmp_path / "b.yaml").unlink()
     (tmp_path / "a.yaml").write_text("z\n")
     assert gen.write(files, tmp_path, check=True) == 1
+
+
+def test_the_cli_passes_both_smoked_entries(gen: ModuleType, tmp_path: Path) -> None:
+    out = tmp_path / "e5"
+    argv = ["wave", "--template", "t1", "--n", "120", "--arms", "gpt-6.1-sol", "claude-sonnet-5-5"]
+    assert (
+        gen.main(
+            [*argv, "--gpt", "gpt-6.1-sol-fb3", "--sonnet55", "claude-sonnet-5-5-fb2", "--out", str(out)]
+        )
+        == 0
+    )
+    assert sorted(p.name for p in out.iterdir()) == ["claude-sonnet-5-5.yaml", "gpt-6.1-sol.yaml"]
+    assert "dexi/claude-sonnet-5-5-fb2" in (out / "claude-sonnet-5-5.yaml").read_text()
+    assert "dexi/gpt-6.1-sol-fb3" in (out / "gpt-6.1-sol.yaml").read_text()
