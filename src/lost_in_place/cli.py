@@ -301,8 +301,7 @@ def _cmd_stats_v3(args: argparse.Namespace) -> int:
 
     status = stats_v3.gate(args.root)
     if not status["open"]:
-        for problem in status["problems"]:
-            print(f"refusing to print E5 outcomes: {problem}", file=sys.stderr)
+        print(stats_v3.refusal(status), file=sys.stderr)
         return 3
     try:
         design = stats_v3.read_design((args.root / stats_v3.SPEC_V3).read_text())
@@ -577,7 +576,8 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["v2", "v3"],
         default="v2",
         help="v2: freeze-v2's analysis (stats.py, default); v3: E5's (stats_v3.py), which refuses to run"
-        " until SPEC-v3.md pins it and docs/prereg/freeze-v3-signoff.md exists",
+        " until SPEC-v3.md pins it and docs/prereg/freeze-v3-signoff.md and"
+        " docs/prereg/freeze-v3-unblind.md exist",
     )
     st.set_defaults(func=_cmd_stats)
 

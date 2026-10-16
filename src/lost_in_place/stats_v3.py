@@ -4,10 +4,11 @@ design, sections 3 to 8; SPEC-v3.md).
 This file is pinned in SPEC-v3.md's freeze record before the first E5 episode. Freeze-v2's `stats.py`
 is a different script and stays as it is.
 
-**Blinding.** Nothing is read, and no outcome is printed, until the checkout has both the freeze-v3
-record's analysis row in `SPEC-v3.md`, matching this file's SHA-256, and Mahmood's sign-off file
-`docs/prereg/freeze-v3-signoff.md` (`gate`). The wave's confirmatory arms, its wave-wide m and N are
-read from the same record (`read_design`), never from the data.
+**Blinding.** Nothing is read, and no outcome is printed, until the checkout has the freeze-v3
+record's analysis row in `SPEC-v3.md`, matching this file's SHA-256, Mahmood's sign-off file
+`docs/prereg/freeze-v3-signoff.md`, and the unblinding marker `docs/prereg/freeze-v3-unblind.md`,
+committed after the wave (`gate`). The wave's confirmatory arms, its wave-wide m and N are read from
+the same record (`read_design`), never from the data.
 
 **Inputs** are scored attempts read as `lip report` reads them: an episode's result is its first
 attempt that is one (`report.counted`). With manifests, an episode that has no attempt yet is
@@ -73,6 +74,8 @@ Metric = Callable[[Score], bool | None]
 SCRIPT = "src/lost_in_place/stats_v3.py"
 SPEC_V3 = "SPEC-v3.md"
 SIGNOFF = "docs/prereg/freeze-v3-signoff.md"
+# None drops the third unblinding condition.
+UNBLIND: str | None = "docs/prereg/freeze-v3-unblind.md"
 RECORD_HEADING = "## Freeze record"
 ANALYSIS_ROW = f"Analysis script (`{SCRIPT}`)"
 ARMS_ROW = "Confirmatory arms"
@@ -566,8 +569,9 @@ def script_sha256() -> str:
 
 
 def gate(root: Path) -> dict[str, Any]:
-    """Whether outcomes may be printed: `SPEC-v3.md`'s freeze record pins this script, and the
-    sign-off file exists (design section 2.5)."""
+    """Whether outcomes may be printed: `SPEC-v3.md`'s freeze record pins this script, the sign-off
+    file exists, and so does the unblinding marker (design sections 2.5 and 10.4). The first two land
+    at M3, before the wave; the marker is committed once the last arm settles or GPT is dropped."""
     spec = root / SPEC_V3
     recorded = record_rows(spec.read_text()).get(ANALYSIS_ROW) if spec.exists() else None
     sha = script_sha256()
@@ -580,7 +584,23 @@ def gate(root: Path) -> dict[str, Any]:
         problems.append(f"{SPEC_V3} pins {recorded}, but this script is {sha}")
     if not (root / SIGNOFF).exists():
         problems.append(f"no sign-off file {SIGNOFF}")
-    return {"open": not problems, "sha256": sha, "recorded": recorded, "problems": problems}
+    if UNBLIND is not None and not (root / UNBLIND).exists():
+        problems.append(f"no unblinding marker {UNBLIND}")
+    conditions = 2 + (UNBLIND is not None)
+    return {
+        "open": not problems,
+        "sha256": sha,
+        "recorded": recorded,
+        "problems": problems,
+        "conditions": conditions,
+    }
+
+
+def refusal(status: dict[str, Any]) -> str:
+    return (
+        f"refusing to print E5 outcomes: {len(status['problems'])} of {status['conditions']} conditions"
+        f" not met: {'; '.join(status['problems'])}"
+    )
 
 
 # --- contrasts ----------------------------------------------------------------------------------

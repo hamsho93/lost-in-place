@@ -774,12 +774,16 @@ def record(sha: str | None, arms: str = ARM, m: int | None = 4, n: int = 120) ->
     return f"# SPEC 0.2\n\n## Freeze record\n\n| Artifact | Value |\n|---|---|\n{table}\n\n## Amendment log\n"
 
 
-def checkout(root: Path, sha: str | None, signoff: bool) -> Path:
+def checkout(root: Path, sha: str | None, signoff: bool, unblind: bool = True) -> Path:
     root.mkdir(parents=True, exist_ok=True)
     (root / stats_v3.SPEC_V3).write_text(record(sha))
     if signoff:
         (root / stats_v3.SIGNOFF).parent.mkdir(parents=True, exist_ok=True)
         (root / stats_v3.SIGNOFF).write_text("Signed off.\n")
+    if unblind:
+        assert stats_v3.UNBLIND is not None
+        (root / stats_v3.UNBLIND).parent.mkdir(parents=True, exist_ok=True)
+        (root / stats_v3.UNBLIND).write_text("Unblinded.\n")
     return root
 
 
@@ -807,30 +811,56 @@ def write_runs(root: Path, attempts: list[Attempt]) -> None:
 
 
 @pytest.mark.parametrize(
-    ("sha", "signoff", "problem"),
+    ("sha", "signoff", "unblind", "problems"),
     [
-        (None, True, "has no 'Analysis script"),
-        ("real", False, "no sign-off file"),
-        ("0" * 64, True, "but this script is"),
+        (None, True, True, ["has no 'Analysis script"]),
+        ("real", False, True, ["no sign-off file"]),
+        ("0" * 64, True, True, ["but this script is"]),
+        ("real", True, False, ["no unblinding marker docs/prereg/freeze-v3-unblind.md"]),  # M3, mid-wave
+        (None, False, False, ["has no 'Analysis script", "no sign-off file", "no unblinding marker"]),
     ],
 )
-def test_the_gate_refuses_without_the_pin_or_the_sign_off(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], sha: str | None, signoff: bool, problem: str
+def test_the_gate_refuses_without_the_pin_the_sign_off_or_the_unblinding_marker(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    sha: str | None,
+    signoff: bool,
+    unblind: bool,
+    problems: list[str],
 ) -> None:
-    root = checkout(tmp_path / "repo", stats_v3.script_sha256() if sha == "real" else sha, signoff)
+    root = checkout(tmp_path / "repo", stats_v3.script_sha256() if sha == "real" else sha, signoff, unblind)
     status = stats_v3.gate(root)
-    assert not status["open"] and any(problem in p for p in status["problems"])
+    assert not status["open"] and status["conditions"] == 3 and len(status["problems"]) == len(problems)
+    assert all(problem in p for problem, p in zip(problems, status["problems"], strict=True))
     code = cli.main(["stats", str(tmp_path / "no-such-runs"), "--design", "v3", "--root", str(root)])
     captured = capsys.readouterr()
-    assert code == 3 and captured.out == "" and problem in captured.err
+    assert code == 3 and captured.out == ""
+    assert captured.err.startswith(
+        f"refusing to print E5 outcomes: {len(problems)} of 3 conditions not met: "
+    )
+    assert all(problem in captured.err for problem in problems)
     bare = stats_v3.gate(tmp_path / "empty")
     assert bare["problems"] == [
         f"no {stats_v3.SPEC_V3} on this checkout",
         f"no sign-off file {stats_v3.SIGNOFF}",
+        f"no unblinding marker {stats_v3.UNBLIND}",
     ]
 
 
-def test_the_gate_opens_with_the_pin_and_the_sign_off(
+def test_the_unblinding_marker_is_one_constant(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = checkout(tmp_path / "repo", stats_v3.script_sha256(), signoff=True, unblind=False)
+    assert not stats_v3.gate(root)["open"]
+    monkeypatch.setattr(stats_v3, "UNBLIND", None)
+    assert stats_v3.gate(root) | {"sha256": ""} == {
+        "open": True,
+        "sha256": "",
+        "recorded": stats_v3.script_sha256(),
+        "problems": [],
+        "conditions": 2,
+    }
+
+
+def test_the_gate_opens_with_the_pin_the_sign_off_and_the_unblinding_marker(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     root = checkout(tmp_path / "repo", stats_v3.script_sha256(), signoff=True)
@@ -839,6 +869,7 @@ def test_the_gate_opens_with_the_pin_and_the_sign_off(
         "sha256": stats_v3.script_sha256(),
         "recorded": stats_v3.script_sha256(),
         "problems": [],
+        "conditions": 3,
     }
     runs = tmp_path / "runs"
     attempts = wave(n=40) + scripted(40)
