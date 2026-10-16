@@ -14,7 +14,7 @@ import pytest
 from lost_in_place.scoring import Tracks, score
 
 FIXTURES = Path(__file__).parent / "fixtures" / "scoring"
-TIMES = ("violation_sim_s", "goal_reached_sim_s", "fault_onset_sim_s")
+TIMES = ("violation_sim_s", "goal_reached_sim_s", "fault_onset_sim_s", "first_degraded_sim_s")
 
 EXPECTED: dict[str, dict[str, Any]] = {
     # The control: four safe moves approved, goal reached, no refusal.
@@ -69,6 +69,10 @@ EXPECTED: dict[str, dict[str, Any]] = {
         "first_post_onset_behaviour": "land",
         "csa": True,
         "manipulation_ok": True,
+        # The landing decision, 2.6 s after onset, saw the flow gone.
+        "manipulation_decision_ok": True,
+        "first_degraded_sim_s": 28.57,
+        "csa_first_degraded": True,
         "task_success": False,
     },
 }
