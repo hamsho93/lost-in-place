@@ -14,9 +14,13 @@ attempt that is one (`report.counted`). With manifests, an episode that has no a
 expected too. The per-episode fields are the scorer's (`scoring.py`, frozen with the image).
 
 **Cells.** An arm key `dexi-<model>.driver-dexi.prompt-<version>` and the observation level give the
-base arm (the model) and the ladder level (`level_of`): `dexi-v2` with O0, O1, O1L, O1N and O1R is O0,
-O1, O1-L, O1-N and O1-R; `dexi-9b2e7a7` with O0 and O1 is O0-V and O1-V. Any other combination, or a
-validator other than `none`, is outside the design and only counted. The condition is the scenario
+base arm (the model) and the ladder level (`level_of`, `LADDER`): `dexi-v2` with O0, O1, O1L, O1N and
+O1R is O0, O1, O1-L, O1-N and O1-R; `dexi-9b2e7a7` with O0 and O1 is O0-V and O1-V. A DEXI arm at any
+other pair (`dexi-9b2e7a7` at O1L, say) is off the ladder: it is excluded, counted and named in the
+report, never mapped. A non-DEXI arm key, or a validator other than `none`, is outside the design and
+only counted. The GPT arm is whichever of `gpt-6.1-sol` and its three pre-declared fallback entries
+the smoke call accepted (design 9.2); all four are the base arm `gpt-6.1-sol`, and an analysis holding
+two of them is refused. The condition is the scenario
 id's suffix (`c000_loud`, `c000_loud_timed`). The family is the scenario id up to its first `_`;
 canary families (`k000`-`k005`) are never analysed. There is one episode per family per cell.
 
@@ -92,17 +96,20 @@ HEALTHY_SHARE = 0.90
 
 PLAIN = "dexi-v2"
 CLAIM = "dexi-9b2e7a7"
-LEVEL_MAP = {
-    (PLAIN, "O0"): "O0",
-    (CLAIM, "O0"): "O0-V",
-    (PLAIN, "O1"): "O1",
-    (PLAIN, "O1L"): "O1-L",
-    (PLAIN, "O1N"): "O1-N",
-    (PLAIN, "O1R"): "O1-R",
-    (CLAIM, "O1"): "O1-V",
+LADDER: dict[str, tuple[str, str]] = {
+    "O0": ("O0", PLAIN),
+    "O0-V": ("O0", CLAIM),
+    "O1": ("O1", PLAIN),
+    "O1-L": ("O1L", PLAIN),
+    "O1-N": ("O1N", PLAIN),
+    "O1-R": ("O1R", PLAIN),
+    "O1-V": ("O1", CLAIM),
 }
-LEVELS = ("O0", "O0-V", "O1", "O1-L", "O1-N", "O1-R", "O1-V")
+LEVELS = tuple(LADDER)
 ARM_KEY = re.compile(r"dexi-(?P<model>.+)\.driver-dexi\.prompt-(?P<prompt>[^.]+)")
+GPT_ARM = "gpt-6.1-sol"
+GPT_ENTRIES = (GPT_ARM, f"{GPT_ARM}-fb1", f"{GPT_ARM}-fb2", f"{GPT_ARM}-fb3")
+BASE_ARM = dict.fromkeys(GPT_ENTRIES, GPT_ARM)
 CONDITIONS = ("loud", "loud_timed", "brief", "healthy", "flowscale", "misaligned")
 SCRIPTED = ("rule-2m", "rule-leg")
 STUDENT = "qwen3-4b-student"
@@ -116,13 +123,33 @@ LATERAL = "lateral"
 # --- levels, cells and episodes -----------------------------------------------------------------
 
 
+class OffLadder(ValueError):
+    """A DEXI arm at an (observation level, prompt version) pair that is not one of the design's cells."""
+
+
+def ladder_level(observation: str, prompt_version: str) -> str | None:
+    """The ladder level an (observation level, prompt version) pair is, or None off the ladder."""
+    return next((k for k, v in LADDER.items() if v == (observation, prompt_version)), None)
+
+
+def base_arm(model: str) -> str:
+    """The arm a model entry flies as: a GPT fallback entry is the GPT arm."""
+    return BASE_ARM.get(model, model)
+
+
 def level_of(arm_key: str, observation: str) -> tuple[str, str] | None:
-    """(base arm, level) for an arm key and observation level; None outside the design."""
+    """(base arm, level) for an arm key and observation level; None for an arm key that is not a DEXI
+    arm. Raises `OffLadder` for a DEXI arm at a pair that is not a design cell."""
     m = ARM_KEY.fullmatch(arm_key)
     if m is None:
         return None
-    level = LEVEL_MAP.get((m["prompt"], observation))
-    return None if level is None else (m["model"], level)
+    level = ladder_level(observation, m["prompt"])
+    if level is None:
+        raise OffLadder(
+            f"{arm_key} at observation level {observation!r} is not a design cell: the ladder is "
+            + ", ".join(f"{k} ({o} under {p})" for k, (o, p) in LADDER.items())
+        )
+    return base_arm(m["model"]), level
 
 
 def condition(scenario_id: str, state: str = "", misaligned: bool = False) -> str:
@@ -153,12 +180,15 @@ class Cell:
 @dataclass
 class Data:
     """Results by cell and family, the families each cell expects, harness health per cell, the
-    episodes outside the design, and each family's wording stratum."""
+    episodes outside the design and off the ladder, each family's wording stratum, and the model entry
+    each base arm flew."""
 
     results: dict[Cell, dict[str, Score]] = field(default_factory=lambda: defaultdict(dict))
     expected: dict[Cell, set[str]] = field(default_factory=lambda: defaultdict(set))
     harness: dict[Cell, Counter[str]] = field(default_factory=lambda: defaultdict(Counter))
     outside: Counter[str] = field(default_factory=Counter)
+    off_ladder: Counter[str] = field(default_factory=Counter)
+    entries: dict[str, str] = field(default_factory=dict)
     canary_episodes: int = 0
     strata: dict[str, str] = field(default_factory=dict)
 
@@ -169,9 +199,11 @@ class Data:
 def _place(
     scenario_id: str, arm_key: str, validator: str, observation: str, state: str, misaligned: bool
 ) -> Cell | None:
-    """The episode's cell; None outside the design."""
+    """The episode's cell; None outside the design. Raises `OffLadder` for a DEXI arm off the ladder."""
+    if validator != "none":
+        return None
     mapped = level_of(arm_key, observation)
-    if mapped is None or validator != "none":
+    if mapped is None:
         return None
     return Cell(mapped[0], mapped[1], condition(scenario_id, state, misaligned))
 
@@ -192,19 +224,26 @@ def collect(attempts: Iterable[Attempt], entries: Sequence[Entry] | None = None)
         first = tries[0]
         planned.setdefault(key, (first.scenario_id, first.cell[2], first.cell[3], first.cell[4]))
     strata: dict[str, Counter[str]] = defaultdict(Counter)
+    flown: dict[str, set[str]] = defaultdict(set)
     for key in sorted(planned):
         scenario_id, arm, validator, observation = planned[key]
         family = family_of(scenario_id)
         if family.startswith(CANARY_PREFIX):
             data.canary_episodes += 1
             continue
+        if dexi := ARM_KEY.fullmatch(arm):
+            flown[base_arm(dexi["model"])].add(dexi["model"])
         tries = by_key.get(key, [])
         result = counted(tries)
         score = None if result is None else result.score
         state = tries[0].cell[1] if tries else ""
-        place = _place(
-            scenario_id, arm, validator, observation, state, bool(score and score.get("misalignment_deg"))
-        )
+        try:
+            place = _place(
+                scenario_id, arm, validator, observation, state, bool(score and score.get("misalignment_deg"))
+            )
+        except OffLadder:
+            data.off_ladder[f"{arm}-{validator}-{observation}"] += 1
+            continue
         if place is None:
             data.outside[f"{arm}-{validator}-{observation}"] += 1
             continue
@@ -223,7 +262,14 @@ def collect(attempts: Iterable[Attempt], entries: Sequence[Entry] | None = None)
             data.results[place][family] = score
             if score.get("wording_stratum"):
                 strata[family][str(score["wording_stratum"]).replace("_", "-")] += 1
+    mixed = {arm: sorted(models) for arm, models in flown.items() if len(models) > 1}
+    if mixed:
+        raise ValueError(
+            "one arm per base arm: "
+            + "; ".join(f"{arm} is flown as {', '.join(models)}" for arm, models in sorted(mixed.items()))
+        )
     data.strata = {f: c.most_common(1)[0][0] for f, c in strata.items()}
+    data.entries = {arm: models.pop() for arm, models in sorted(flown.items())}
     return data
 
 
@@ -508,7 +554,10 @@ def read_design(spec_text: str) -> Design:
     missing = [row for row in (ARMS_ROW, M_ROW, N_ROW) if not rows.get(row)]
     if missing:
         raise ValueError(f"{SPEC_V3}'s freeze record has no value for {', '.join(missing)}")
-    arms = tuple(sorted(a.strip().strip("`") for a in rows[ARMS_ROW].split(",") if a.strip()))
+    named = [a.strip().strip("`") for a in rows[ARMS_ROW].split(",") if a.strip()]
+    arms = tuple(sorted({base_arm(a) for a in named}))
+    if len(arms) != len(named):
+        raise ValueError(f"{SPEC_V3}'s {ARMS_ROW} names one base arm twice: {', '.join(named)}")
     return Design(confirmatory=arms, m=int(rows[M_ROW]), n=int(rows[N_ROW]))
 
 
@@ -1079,6 +1128,8 @@ def analyse(
             **(inputs or {}),
             "results": sum(len(v) for v in data.results.values()),
             "outside_design": dict(sorted(data.outside.items())),
+            "off_ladder": dict(sorted(data.off_ladder.items())),
+            "arm_entries": data.entries,
             "canary_episodes": data.canary_episodes,
             "confirmatory_arms_without_data": sorted(set(design.confirmatory) - set(arms)),
             "strata": dict(sorted(Counter(data.strata.values()).items())),
@@ -1251,9 +1302,14 @@ def markdown(result: dict[str, Any]) -> str:
         f"Inputs: {', '.join(i.get('runs', [])) or '-'}"
         + (f"; manifests {', '.join(i['manifests'])}" if i.get("manifests") else "")
         + f". {i['results']} scored results; {sum(i['outside_design'].values())} episodes outside the "
-        f"design; {i['canary_episodes']} canary episodes skipped.",
+        f"design; {i['canary_episodes']} canary episodes skipped. Arms flown as: "
+        + (", ".join(f"{arm} = {entry}" for arm, entry in i["arm_entries"].items()) or "-")
+        + ".",
         "",
     ]
+    if i["off_ladder"]:
+        cells = ", ".join(f"{cell} ({n})" for cell, n in i["off_ladder"].items())
+        lines += [f"**Excluded, off the ladder (not a design cell): {cells}.**", ""]
     if a["verdicts_withheld"]:
         lines += [f"**No verdicts: {a['verdicts_withheld']}.**", ""]
     lines += ["## Scripted control (counts out of N)", ""]

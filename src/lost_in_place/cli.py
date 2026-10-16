@@ -309,7 +309,13 @@ def _cmd_stats_v3(args: argparse.Namespace) -> int:
     except ValueError as exc:
         print(exc, file=sys.stderr)
         return 1
-    data, inputs = stats_v3.load(args.runs, args.manifest)
+    try:
+        data, inputs = stats_v3.load(args.runs, args.manifest)
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    for cell, count in sorted(data.off_ladder.items()):
+        print(f"excluded {count} episodes off the ladder: {cell}", file=sys.stderr)
     result = stats_v3.analyse(
         data,
         design,

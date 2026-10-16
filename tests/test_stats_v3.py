@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from collections.abc import Callable
 from functools import cache
 from pathlib import Path
@@ -335,16 +336,107 @@ def test_arm_keys_and_observations_map_to_levels() -> None:
     for (key, obs), mapped in expect.items():
         assert stats_v3.level_of(key, obs) == mapped
     for key, obs in (
-        ("dexi-claude-sonnet-4-6.driver-dexi.prompt-dexi-9b2e7a7", "O1L"),  # rungs are dexi-v2 only
         ("dexi-claude-sonnet-4-6.driver-freeze-v2.prompt-dexi-v2", "O1"),
         ("dexi-qwen3-4b-student", "O1"),  # freeze-v2's arm key
         ("claude-sonnet-4-6", "O1"),
-        ("dexi-claude-sonnet-4-6.driver-dexi.prompt-dexi-v3", "O1"),
     ):
         assert stats_v3.level_of(key, obs) is None
     assert stats_v3.condition("c007_loud_timed") == "loud_timed"
     assert stats_v3.condition("c007_misaligned") == "misaligned"
     assert stats_v3.condition("x", "degraded_safe") == "brief"
+
+
+@pytest.mark.parametrize(
+    ("prompt", "obs"),
+    [
+        (stats_v3.CLAIM, "O1L"),  # flyable, but the rungs' design cells are dexi-v2 only
+        (stats_v3.CLAIM, "O1N"),
+        (stats_v3.CLAIM, "O1R"),
+        (stats_v3.PLAIN, "O2"),
+        ("dexi-v3", "O1"),
+    ],
+)
+def test_a_dexi_arm_off_the_ladder_is_never_mapped(prompt: str, obs: str) -> None:
+    key = f"dexi-{ARM}.driver-dexi.prompt-{prompt}"
+    assert stats_v3.ladder_level(obs, prompt) is None
+    with pytest.raises(stats_v3.OffLadder, match="not a design cell"):
+        stats_v3.level_of(key, obs)
+    off = attempt(0, "loud", ARM, "O1", score(0, "loud"))
+    off.cell = (*off.cell[:2], key, "none", obs)
+    data = stats_v3.collect([off, attempt(1, "loud", ARM, "O1", score(1, "loud"))])
+    assert data.off_ladder == {f"{key}-none-{obs}": 1} and not data.outside
+    assert data.results == {Cell(ARM, "O1", "loud"): {"c001": score(1, "loud")}}
+    result = stats_v3.analyse(data, DESIGN, resamples=10)
+    assert result["inputs"]["off_ladder"] == {f"{key}-none-{obs}": 1}
+    assert f"**Excluded, off the ladder (not a design cell): {key}-none-{obs} (1).**" in stats_v3.markdown(
+        result
+    )
+
+
+def test_the_ladder_is_the_seven_design_cells() -> None:
+    assert stats_v3.LEVELS == ("O0", "O0-V", "O1", "O1-L", "O1-N", "O1-R", "O1-V")
+    for level, (obs, prompt) in stats_v3.LADDER.items():
+        assert stats_v3.ladder_level(obs, prompt) == level
+        assert stats_v3.level_of(f"dexi-{ARM}.driver-dexi.prompt-{prompt}", obs) == (ARM, level)
+
+
+def test_the_ladder_agrees_with_dexi_when_dexi_has_one() -> None:
+    from lost_in_place.llm import dexi
+    from lost_in_place.planning import OBSERVATION_LEVELS
+
+    assert (stats_v3.PLAIN, stats_v3.CLAIM) == (dexi.PROMPT_V2, dexi.PROMPT_VERSION)
+    if not hasattr(dexi, "LADDER"):
+        pytest.skip("this build's llm.dexi has no LADDER yet")
+    assert dexi.LADDER == stats_v3.LADDER
+    for obs in (*OBSERVATION_LEVELS, "O2"):
+        for prompt in (*dexi.PROMPT_VERSIONS, "dexi-v3"):
+            assert dexi.ladder_level(obs, prompt) == stats_v3.ladder_level(obs, prompt)
+
+
+def test_gpt_fallback_entries_are_the_gpt_arm() -> None:
+    for entry in stats_v3.GPT_ENTRIES:
+        assert stats_v3.level_of(f"dexi-{entry}.driver-dexi.prompt-{stats_v3.PLAIN}", "O1R") == (
+            "gpt-6.1-sol",
+            "O1-R",
+        )
+    fb2 = [
+        attempt(i, "loud", "gpt-6.1-sol-fb2", level, score(i, "loud"))
+        for i in range(3)
+        for level in stats_v3.LEVELS
+    ]
+    data = stats_v3.collect(fb2)
+    assert {c.arm for c in data.results} == {"gpt-6.1-sol"}
+    assert data.entries == {"gpt-6.1-sol": "gpt-6.1-sol-fb2"}
+    assert len(data.results[Cell("gpt-6.1-sol", "O1", "loud")]) == 3
+    spec = record("a" * 64, arms="gpt-6.1-sol-fb2, claude-sonnet-4-6", m=8)
+    assert stats_v3.read_design(spec).confirmatory == ("claude-sonnet-4-6", "gpt-6.1-sol")
+    with pytest.raises(ValueError, match="names one base arm twice"):
+        stats_v3.read_design(record("a" * 64, arms="gpt-6.1-sol, gpt-6.1-sol-fb1", m=8))
+
+
+def test_an_analysis_mixing_two_gpt_entries_is_refused() -> None:
+    mixed = [
+        attempt(0, "loud", "gpt-6.1-sol", "O1", score(0, "loud")),
+        attempt(1, "loud", "gpt-6.1-sol-fb1", "O1-V", score(1, "loud")),
+    ]
+    with pytest.raises(ValueError, match=re.escape("gpt-6.1-sol is flown as gpt-6.1-sol, gpt-6.1-sol-fb1")):
+        stats_v3.collect(mixed)
+    off = attempt(2, "loud", "gpt-6.1-sol-fb3", "O1", score(2, "loud"))
+    off.cell = (*off.cell[:2], f"dexi-gpt-6.1-sol-fb3.driver-dexi.prompt-{stats_v3.CLAIM}", "none", "O1L")
+    with pytest.raises(ValueError, match=re.escape("flown as gpt-6.1-sol, gpt-6.1-sol-fb3")):
+        stats_v3.collect([mixed[0], off])
+    canary = attempt(0, "loud", "gpt-6.1-sol-fb1", "O1", score(0, "loud"))
+    canary.scenario_id, canary.key = "k000_loud", canary.key.replace("c000", "k000")
+    assert stats_v3.collect([mixed[0], canary]).entries == {"gpt-6.1-sol": "gpt-6.1-sol"}
+
+
+def test_gpt_entries_agree_with_the_registry_when_it_has_the_gpt_arm() -> None:
+    from lost_in_place.llm.registry import load_models
+
+    models = load_models()
+    if "gpt-6.1-sol" not in models:
+        pytest.skip("this build's models.yaml has no gpt-6.1-sol yet")
+    assert {m for m in models if m.startswith("gpt-6.1-sol")} == set(stats_v3.GPT_ENTRIES)
 
 
 def test_collect_counts_what_is_outside_the_design_and_skips_canaries() -> None:
@@ -698,7 +790,7 @@ def write_runs(root: Path, attempts: list[Attempt]) -> None:
         planner = {
             "planner": "dexi",
             "planner_options": {
-                "model": stats_v3.level_of(a.cell[2], a.cell[4])[0],  # type: ignore[index]
+                "model": stats_v3.ARM_KEY.fullmatch(a.cell[2])["model"],  # type: ignore[index]
                 "driver": "dexi",
                 "prompt": a.cell[2].rsplit("prompt-", 1)[1],
             },
@@ -762,6 +854,28 @@ def test_the_gate_opens_with_the_pin_and_the_sign_off(
     capsys.readouterr()
     assert cli.main([*args, "--json"]) == 0
     assert json.loads(capsys.readouterr().out) == result
+
+
+def test_the_cli_refuses_mixed_gpt_entries_and_names_off_ladder_cells(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = checkout(tmp_path / "repo", stats_v3.script_sha256(), signoff=True)
+    off = attempt(1, "loud", ARM, "O1", score(1, "loud"))
+    off_key = f"dexi-{ARM}.driver-dexi.prompt-{stats_v3.CLAIM}"
+    off.key, off.cell = f"c001_loud/{off_key}-none-O1R/r000-s1", (*off.cell[:2], off_key, "none", "O1R")
+    write_runs(tmp_path / "runs", [attempt(0, "loud", ARM, "O1", score(0, "loud")), off])
+    args = ["stats", str(tmp_path / "runs"), "--design", "v3", "--root", str(root), "--resamples", "10"]
+    assert cli.main([*args, "--json"]) == 0
+    captured = capsys.readouterr()
+    assert f"excluded 1 episodes off the ladder: {off_key}-none-O1R" in captured.err
+    assert json.loads(captured.out)["inputs"]["off_ladder"] == {f"{off_key}-none-O1R": 1}
+    write_runs(
+        tmp_path / "mixed",
+        [attempt(i, "loud", f"gpt-6.1-sol{fb}", "O1", score(i, "loud")) for i, fb in enumerate(("", "-fb1"))],
+    )
+    assert cli.main(["stats", str(tmp_path / "mixed"), "--design", "v3", "--root", str(root)]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == "" and "gpt-6.1-sol is flown as gpt-6.1-sol, gpt-6.1-sol-fb1" in captured.err
 
 
 def test_lip_stats_without_design_is_freeze_v2s(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
