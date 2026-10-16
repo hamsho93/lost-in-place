@@ -1,0 +1,12 @@
+# NON-CONFIRMATORY AUDIT: positive control for CSA. Not part of any pre-registered experiment, not
+# in the Holm set, and never pooled with E1, E2 or E4. scripted-cautious (lands as soon as O1 shows
+# xy_valid false, flow quality < 50, eph > 1 m or a failing innovation check) on 6 E2 families x
+# 5 states x 1 seed (E2's rep-0 seeds) at O1, validator none, on the freeze-v2 image.
+name: audit-positive-control
+scenarios: ['scenarios/e2/b[0-5]0_*.yaml']
+reps: 1
+planners: [scripted-cautious]
+validators: [none]
+observations: [O1]
+latency_s: 2.0
+shuffle_seed: 0
