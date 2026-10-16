@@ -53,7 +53,7 @@ from lost_in_place.planning import (
     Planner,
     PrimitivePlanner,
     Verdict,
-    check_observation_level,
+    check_planner_level,
     load_planner,
     shows_health,
 )
@@ -91,7 +91,7 @@ class AgentConfig:
     epoch_s: float = 1.5
 
     def __post_init__(self) -> None:
-        check_observation_level(self.observation)
+        check_planner_level(self.planner, self.observation, self.planner_options, self.validator)
 
 
 def make_planner(config: AgentConfig, scenario: Scenario) -> Planner:
@@ -101,6 +101,7 @@ def make_planner(config: AgentConfig, scenario: Scenario) -> Planner:
     elif config.planner == DEXI_PLANNER:
         options["scenario"] = scenario
         options["validator"] = config.validator
+        options["observation"] = config.observation
     return load_planner(config.planner, **options)
 
 
