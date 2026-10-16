@@ -3,6 +3,7 @@
 # provider   which client calls it (see lost_in_place/llm/clients.py: CLIENTS)
 # model_id   the provider's identifier; for Bedrock, a system inference profile such as us.anthropic.*
 # Optional:  region, max_tokens, temperature (omit to use the provider default), tool_choice (any|auto)
+# bedrock only: additional_request_fields, sent as Converse's additionalModelRequestFields
 # openai_compatible only: base_url, api_key_env, extra_body (see docs/planners.md)
 # bedrock_imported only: chat_template; model_id is the imported model's name (see docs/planners.md)
 #
@@ -15,6 +16,20 @@ claude-sonnet-4-6:
   notes: >-
     Frontier arm, added 2026-10-12. The newest Claude model this account can use on Bedrock;
     the 5.x models need an agreement through AWS Sales.
+
+rule-2m:
+  provider: scripted
+  model_id: scripted-rule-dexi-2m
+  notes: >-
+    Not a model: freeze-v3's scripted DEXI-cadence control (design 6), added 2026-10-16. Run as
+    dexi/rule-2m. It reads the rendered prompt, flies each leg in 2.0 m moves, holds 2 s on bad
+    health and lands if it is still bad (lost_in_place/llm/scripted_dexi.py). No model call.
+
+rule-leg:
+  provider: scripted
+  model_id: scripted-rule-dexi-leg
+  notes: >-
+    As rule-2m, at whole-leg cadence: one move per leg, as DEXI's student flies them.
 
 qwen3-4b-zero-shot:
   provider: bedrock_imported
@@ -41,3 +56,46 @@ qwen3-4b-student:
     cdbee75f17c01a7cc42f958dc650907174af0554: they encode identically, but the student's own
     tokenizer.json marks <tool_call> as a special token, which a server may strip from replies.
     c6bc0a6 is the start of the first weight shard's CRC64NVME checksum in S3.
+
+gpt-6.1-sol:
+  provider: bedrock
+  model_id: us.openai.gpt-6.1-sol
+  max_tokens: 4096
+  temperature: 0
+  tool_choice: any
+  additional_request_fields: {reasoning_effort: low}
+  notes: >-
+    E5 frontier arm, added 2026-10-16 with the settings freeze-v3 states before its first call
+    (design 9.2). Effort low for cost and the tokens-per-day quota; the 4096-token cap leaves room
+    for reasoning. If the smoke call's request is rejected, the entries below are tried in order,
+    each one change further, and the arm flies the first one accepted.
+
+gpt-6.1-sol-fb1:
+  provider: bedrock
+  model_id: us.openai.gpt-6.1-sol
+  max_tokens: 4096
+  temperature: 0
+  tool_choice: auto
+  additional_request_fields: {reasoning_effort: low}
+  notes: >-
+    Fallback 1 of gpt-6.1-sol (design 9.2): tool_choice auto. A reply without a tool call is
+    invalid, as under any.
+
+gpt-6.1-sol-fb2:
+  provider: bedrock
+  model_id: us.openai.gpt-6.1-sol
+  max_tokens: 4096
+  tool_choice: auto
+  additional_request_fields: {reasoning_effort: low}
+  notes: >-
+    Fallback 2 of gpt-6.1-sol (design 9.2): fallback 1 without temperature, so the arm is
+    stochastic and its test-retest is checked (design 9.3, check 5).
+
+gpt-6.1-sol-fb3:
+  provider: bedrock
+  model_id: us.openai.gpt-6.1-sol
+  max_tokens: 4096
+  tool_choice: auto
+  notes: >-
+    Fallback 3 of gpt-6.1-sol (design 9.2): fallback 2 without the reasoning-effort field, so the
+    provider's default effort applies.

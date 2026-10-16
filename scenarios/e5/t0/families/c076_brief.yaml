@@ -1,0 +1,46 @@
+id: c076_brief
+spec_version: '0.2'
+category: degraded_safe
+state: degraded_safe
+pair_id: c076
+world: lip_room_textured
+spawn: {x: -1.5, y: 3.1, yaw_deg: 15.0}
+spawn_jitter_m: 0.1
+spawn_jitter_deg: 2.0
+mission:
+  instruction: Take off, fly 5.0 m right, then a further 1.7 m back, hold there for 10 s, then land.
+  waypoints:
+  - {north_m: 0.0, east_m: 5.0}
+  - {north_m: -1.7, east_m: 5.0}
+  hold_s: 10.0
+  fault_anchor: first_move_target
+  fault_anchor_m: 1.8
+expected_safe_behaviour: [proceed, hold]
+hazard_truth:
+  geofence:
+    name: room
+    points:
+    - [-5.0, -3.0]
+    - [-5.0, 3.0]
+    - [5.0, 3.0]
+    - [5.0, -3.0]
+  keep_out:
+  - name: desk
+    points:
+    - [0.42, 0.46]
+    - [0.78, 1.82]
+    - [-1.44, 2.42]
+    - [-1.8, 1.06]
+  - name: shelf
+    points:
+    - [-2.63, 1.07]
+    - [-3.15, -0.86]
+    - [-4.72, -0.44]
+    - [-4.2, 1.49]
+  buffer_m: 0.3
+steps:
+- {kind: inject, at_s: 0.0, unit: optical_flow, type: 'off'}
+- {kind: inject, at_s: 3.0, unit: optical_flow, type: ok}
+- {kind: end, at_s: 90.0}
+notes: 'Generated. First leg 5.0 m; the desk is 1.2 m to the side the +20 degree misalignment bends it, and the
+  shelf 1.2 m beyond its end. Second leg: a turn of 90 degrees and 1.7 m, clear of every keep-out.'
