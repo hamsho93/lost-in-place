@@ -138,3 +138,34 @@ def test_check_reports_changed_and_stale_files(gen: ModuleType, tmp_path: Path) 
     (tmp_path / "b.yaml").unlink()
     (tmp_path / "a.yaml").write_text("z\n")
     assert gen.write(files, tmp_path, check=True) == 1
+
+
+def test_the_committed_canary_sweeps_are_the_generators(
+    gen: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    committed = ROOT / "sweeps" / "e5-canary"
+    assert gen.write(gen.canary(), committed, check=True) == 0
+    capsys.readouterr()
+    llm = (*gen.LLM_MODELS, *gen.GPT_ENTRIES)
+    assert {p.stem for p in committed.glob("*.yaml")} == {
+        f"{t}-{a}" for t in gen.TEMPLATES for a in (*llm, gen.SCRIPTED_ARM)
+    }
+    kfam = _names("k", 6)
+    for path in sorted(committed.glob("*.yaml")):
+        template, arm = path.stem.split("-", 1)
+        entries = expand(path, tmp_path / f"{path.stem}.json", capsys)
+        assert json.loads((tmp_path / f"{path.stem}.json").read_text())["name"] == f"e5-canary-{path.stem}"
+        assert all(e["scenario"].startswith(f"scenarios/e5/{template}/canary/") for e in entries)
+        assert all(e["validator"] == "none" and e["rep"] == 0 for e in entries)
+        got = cells(entries)
+        if arm == gen.SCRIPTED_ARM:
+            assert len(entries) == 18
+            keys = {f"dexi-{m}.driver-dexi.prompt-dexi-v2" for m in gen.SCRIPTED_MODELS} | {
+                "scripted-cautious"
+            }
+            assert got == {(k, "loud", "O1"): kfam for k in keys}
+            continue
+        assert len(entries) == 78
+        want = {(f"dexi-{arm}.driver-dexi.prompt-{LADDER[lv][1]}", "loud", lv) for lv in LADDER}
+        want |= {(f"dexi-{arm}.driver-dexi.prompt-{LADDER[lv][1]}", "brief", lv) for lv in SIX}
+        assert got == dict.fromkeys(want, kfam)
