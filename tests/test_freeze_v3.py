@@ -4,15 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from lost_in_place import cli, freeze
+from lost_in_place import cli, freeze, prompt_grid
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC_V3_TEXT = (ROOT / freeze.SPEC_V3).read_text()
-ARMS = (
-    "dexi-qwen3-4b-zero-shot.driver-dexi.prompt-dexi-v2",
-    "dexi-claude-sonnet-4-6.driver-dexi.prompt-dexi-v2",
-    "dexi-qwen3-4b-student.driver-dexi.prompt-dexi-v2",
-)
+ARMS = ("qwen3-4b-zero-shot", "claude-sonnet-4-6", "qwen3-4b-student")
+FIVE = (*ARMS, "gpt-6.1-sol-fb2", "claude-sonnet-5-5-fb1")
 ADAPTATION = freeze.Adaptation("t1", 120, ARMS)
 DIGEST = "sha256:" + "0" * 64
 VALUES = {row: f"{i:064x}" for i, row in enumerate(freeze.V3_ROWS)} | ADAPTATION.values()
@@ -49,7 +46,8 @@ def _git(root: Path, *args: str) -> None:
 
 @pytest.fixture
 def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A checkout with every artifact the v3 record hashes, and a probe text read from a script."""
+    """A checkout with every artifact the v3 record hashes, and a probe text read from a script. The
+    render grid needs the committed E5 families, so it is stubbed here; `test_prompt_grid` covers it."""
     root = tmp_path / "repo"
     files = {
         freeze.DESIGN_V3: "design\n",
@@ -69,6 +67,7 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         (root / path).write_text(text)
     shutil.copy(ROOT / freeze.SPEC_V3, root / freeze.SPEC_V3)
     monkeypatch.setattr(freeze, "PROBE_TEXTS", {"wording-check": "scripts/probe_text.py:TEXT"})
+    monkeypatch.setattr(prompt_grid, "render_grid", lambda root: {"sha256": "grid"})
     _git(root, "init", "-q")
     _git(root, "add", ".")
     _git(root, "commit", "-q", "-m", "pre")
@@ -112,6 +111,21 @@ def test_the_record_parses_the_same_in_stats_v3() -> None:
     design = stats_v3.read_design(written)
     assert (design.confirmatory, design.m, design.n) == (tuple(sorted(ARMS)), 12, 120)
     assert stats_v3.record_rows(written)[freeze.ANALYSIS_ROW_V3] == VALUES[freeze.ANALYSIS_ROW_V3]
+    assert design.dropped == () and VALUES[freeze.DROPPED_ROW] == "none"
+
+
+def test_a_five_arm_record_with_fallbacks_and_a_dropped_arm_reads_the_same_in_stats_v3() -> None:
+    stats_v3 = pytest.importorskip("lost_in_place.stats_v3")
+    assert (stats_v3.DROPPED_ROW, stats_v3.NO_ARMS) == (freeze.DROPPED_ROW, freeze.NO_ARMS)
+    assert stats_v3.PRIMARIES_PER_ARM == freeze.PRIMARIES_PER_ARM
+    for entry in (*stats_v3.GPT_ENTRIES, *stats_v3.SONNET_ENTRIES, *ARMS):
+        assert freeze.base_arm(entry) == stats_v3.base_arm(entry)
+    assert set(stats_v3.SMOKE_ONLY) <= set(freeze.SMOKE_ONLY)
+    assert {*stats_v3.SCRIPTED, stats_v3.CAUTIOUS} <= set(freeze.SCRIPTED_ARMS)
+    adaptation = freeze.Adaptation("t0", 160, FIVE).drop(("claude-sonnet-5-5",))
+    design = stats_v3.read_design(freeze.write_record_v3(SPEC_V3_TEXT, VALUES | adaptation.values()))
+    assert (design.m, design.n, design.dropped) == (20, 160, ("claude-sonnet-5-5",))
+    assert design.confirmatory == tuple(sorted({*ARMS, "gpt-6.1-sol", "claude-sonnet-5-5"}))
 
 
 def test_writing_the_v3_record_does_not_change_its_hash() -> None:
@@ -135,21 +149,49 @@ def test_a_record_table_without_a_v3_row_is_refused() -> None:
 
 def test_an_adaptation_fixes_m_and_rejects_values_outside_the_rules() -> None:
     assert ADAPTATION.m == 12 and freeze.Adaptation("t0", 160, ARMS[:1]).m == 4
+    assert freeze.Adaptation("t0", 160, FIVE).m == 20
     assert ADAPTATION.values()[freeze.ARMS_ROW] == ", ".join(sorted(ARMS))
-    for template, n, arms in [
-        ("t2", 120, ARMS),
-        ("t0", 140, ARMS),
-        ("t0", 120, ()),
-        ("t0", 120, ARMS[:1] * 2),
+    for template, n, arms, match in [
+        ("t2", 120, ARMS, "template"),
+        ("t0", 140, ARMS, "N must be"),
+        ("t0", 120, (), "1 to 5"),
+        ("t0", 120, (*FIVE, "other-model"), "1 to 5 confirmatory arms, got 6"),
+        ("t0", 120, ARMS[:1] * 2, "named twice"),
+        ("t0", 120, ("claude-sonnet-5-5", "claude-sonnet-5-5-fb2"), "named twice: claude-sonnet-5-5"),
+        ("t0", 120, ("gpt-6.1-sol-fb1", "gpt-6.1-sol-fb3"), "named twice: gpt-6.1-sol"),
+        ("t0", 120, ("dexi-claude-sonnet-5-5.driver-dexi.prompt-dexi-v2",), "not an arm key"),
+        ("t0", 120, ("claude-haiku-5-5",), "smoke-only"),
+        ("t0", 120, ("rule-2m",), "scripted control"),
+        ("t0", 120, ("Claude Sonnet",), "not a registry model name"),
     ]:
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match=match):
             freeze.Adaptation(template, n, arms)
-    assert freeze.parse_arms("b, `a`,, c") == ("a", "b", "c")
+    assert freeze.parse_arms("b, `a`,, c") == ("a", "b", "c") and freeze.parse_arms("`none`") == ()
+    assert (
+        freeze.base_arm("claude-sonnet-5-5-fb2")
+        == "claude-sonnet-5-5"
+        == freeze.base_arm("claude-sonnet-5-5")
+    )
+
+
+def test_a_dropped_arm_stays_in_m_and_must_be_a_confirmatory_arm() -> None:
+    five = freeze.Adaptation("t1", 120, FIVE)
+    dropped = five.drop(("gpt-6.1-sol",)).drop(("claude-sonnet-5-5-fb1",))
+    assert dropped.m == 20 and dropped.dropped == ("claude-sonnet-5-5-fb1", "gpt-6.1-sol")
+    assert dropped.values()[freeze.DROPPED_ROW] == "claude-sonnet-5-5-fb1, gpt-6.1-sol"
+    assert five.values()[freeze.DROPPED_ROW] == "none"
+    for arms in [("qwen3-4b-teacher",), ("gpt-6.1-sol", "gpt-6.1-sol-fb2")]:
+        with pytest.raises(ValueError, match="dropped arms must be confirmatory arms, once each"):
+            five.drop(arms)
 
 
 def test_the_adaptation_is_read_back_from_the_record() -> None:
     written = freeze.write_record_v3(SPEC_V3_TEXT, VALUES)
     assert freeze.adaptation_from_record(written) == freeze.Adaptation("t1", 120, tuple(sorted(ARMS)))
+    dropped = freeze.Adaptation("t1", 120, FIVE).drop(("gpt-6.1-sol",))
+    assert freeze.adaptation_from_record(freeze.write_record_v3(SPEC_V3_TEXT, VALUES | dropped.values())) == (
+        freeze.Adaptation("t1", 120, tuple(sorted(FIVE)), ("gpt-6.1-sol",))
+    )
     with pytest.raises(ValueError, match="no value for"):
         freeze.adaptation_from_record(SPEC_V3_TEXT)
     with pytest.raises(ValueError, match="4 x 3"):
@@ -282,3 +324,42 @@ def test_freeze_record_defaults_to_v2_and_refuses_v3_only_flags(capsys: pytest.C
     assert cli.main(["freeze-record", "--root", str(ROOT), "--template", "t1"]) == 2
     assert cli.main(["freeze-record", "--root", str(ROOT), "--freeze", "v3", "--analysis"]) == 2
     assert "only with --freeze v3" in capsys.readouterr().err
+
+
+FIFTH_ARM_ENTRIES = {
+    "gpt-6.1-sol-fb2": "  provider: bedrock\n  model_id: openai.gpt-6.1-sol\n",
+    "claude-sonnet-5-5-fb1": (
+        "  provider: bedrock\n  model_id: us.anthropic.claude-sonnet-5-5\n  region: us-east-2\n"
+    ),
+}
+
+
+def test_cli_records_five_arms_then_drops_one(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    args = ["freeze-record", "--freeze", "v3", "--root", str(repo)]
+    write = [*args, "--template", "t0", "--n", "160", "--arms", ",".join(FIVE), "--image-digest", DIGEST]
+    unknown = [*args, "--template", "t0", "--n", "160", "--arms", ",".join((*ARMS, "claude-sonnet-9"))]
+    assert cli.main([*unknown, "--image-digest", DIGEST, "--write"]) == 1
+    assert "not in src/lost_in_place/llm/models.yaml: claude-sonnet-9" in capsys.readouterr().err
+    registry = repo / freeze.MODEL_REGISTRY
+    text = registry.read_text()
+    registry.write_text(
+        text + "".join(f"{k}:\n{v}" for k, v in FIFTH_ARM_ENTRIES.items() if f"\n{k}:" not in text)
+    )
+    _git(repo, "commit", "-qam", "fifth arm", "--allow-empty")
+    assert cli.main([*write, "--write"]) == 0
+    capsys.readouterr()
+    written = freeze.recorded_v3((repo / freeze.SPEC_V3).read_text())
+    assert (written[freeze.M_ROW], written[freeze.DROPPED_ROW]) == ("20", "none")
+    before = (repo / freeze.SPEC_V3).read_text()
+    assert cli.main([*args, "--drop", "claude-sonnet-5-5"]) == 0
+    assert "Dropped arms: claude-sonnet-5-5; Wave-wide m stays 20" in capsys.readouterr().err
+    after = (repo / freeze.SPEC_V3).read_text()
+    assert [line for line in after.split("\n") if line not in before.split("\n")] == [
+        "| Dropped arms | `claude-sonnet-5-5` |"
+    ]
+    assert cli.main([*args, "--image-digest", DIGEST, "--check"]) == 0
+    assert cli.main([*args, "--drop", "claude-sonnet-4-5"]) == 1
+    assert "dropped arms must be confirmatory arms" in capsys.readouterr().err
+    assert cli.main([*args, "--drop", "gpt-6.1-sol", "--arms", "x"]) == 2
+    assert (repo / freeze.SPEC_V3).read_text() == after
+    assert cli.main(["freeze-record", "--root", str(ROOT), "--drop", "gpt-6.1-sol"]) == 2
