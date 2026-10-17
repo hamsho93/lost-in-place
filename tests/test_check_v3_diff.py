@@ -97,7 +97,7 @@ def pre_repo(tmp_path_factory: pytest.TempPathFactory) -> Path:
     wording = repo / "src" / "lost_in_place" / "wording.py"
     if not wording.exists():
         wording.write_text('PROBE_QUESTION = "Where is the point the mission says to hold at?"\n')
-    shutil.copy(ROOT / freeze.SPEC_V3, repo / freeze.SPEC_V3)
+    (repo / freeze.SPEC_V3).write_text(freeze._blank((ROOT / freeze.SPEC_V3).read_text(), freeze.V3_ROWS))
     for scenario in SCENARIOS:
         (repo / scenario).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(ROOT / scenario, repo / scenario)
