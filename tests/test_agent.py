@@ -385,6 +385,99 @@ def test_a_v3_loud_fault_starts_2_m_from_the_first_moves_target(step_m: float) -
         assert anchor == pytest.approx(20.0, abs=0.1)
 
 
+def _lagging_clock(ep: AgentEpisode, speed_mps: float, lag_s: float) -> asyncio.Task[None]:
+    """`_shared_clock`, but the vehicle only starts for a new setpoint `lag_s` after it, as PX4's
+    position controller takes a few tenths of a second to move a hovering vehicle by millimetres."""
+    changed = {"target": (ep.target.north_m, ep.target.east_m), "at_s": ep.sim_s}
+
+    async def tick() -> None:
+        while True:
+            await asyncio.sleep(0)
+            if ep.paused:
+                continue
+            ep.sim_us += 50_000
+            target = (ep.target.north_m, ep.target.east_m)
+            if target != changed["target"]:
+                changed.update(target=target, at_s=ep.sim_s)
+            if ep.sim_s < changed["at_s"] + lag_s:
+                continue
+            dn, de = target[0] - ep.tel.north_m, target[1] - ep.tel.east_m
+            gap = math.hypot(dn, de)
+            if gap > 0:
+                step = min(gap, speed_mps * 0.05)
+                ep.tel.north_m += dn / gap * step
+                ep.tel.east_m += de / gap * step
+
+    async def wait_sim(target_s: float) -> None:
+        while ep.sim_s < target_s - 1e-9:
+            await asyncio.sleep(0)
+
+    ep.wait_sim = wait_sim  # type: ignore[method-assign]
+    return asyncio.create_task(tick())
+
+
+@pytest.mark.parametrize(
+    ("north_m", "step_m", "with_the_step"),
+    [
+        (-0.004, 2.0, True),  # anchored on north 0.00: the true estimate starts 2.004 m from the target
+        (0.004, 2.0, True),  # 1.996 m: within 2.0 m already
+        (-0.004, 2.5, False),  # a longer step still starts the fault 2.0 m from its target
+    ],
+)
+def test_a_2_m_step_anchored_on_a_rounded_estimate_starts_the_loud_fault_with_the_step(
+    north_m: float, step_m: float, with_the_step: bool
+) -> None:
+    """The `dexi` driver anchors a step on the estimate rounded to 1 cm, so a 2 m step can start a
+    few millimetres more than 2.0 m from its target. The trigger then waited for the vehicle to
+    close them, 0.2 to 0.4 s in the freeze-v3 canary's `rule-2m` episodes; it starts with the step."""
+    ep = _agent_episode(
+        "b00_loud.yaml",
+        AgentConfig(latency_s=2.0),
+        root=Path(__file__).parents[1] / "scenarios" / "smoke-audit-fixes",
+    )
+    forward = ("move", {"direction": "forward", "distance_m": step_m})
+    ep.planner = DexiPlanner(
+        get_model("claude-sonnet-4-6"),
+        DexiEnvelope(2.0, 6.0),
+        1.5,
+        client=Replies(forward, ("land", {})),
+        driver="dexi",
+    )
+    ep.tel.down_m = -1.5
+    ep.tel.north_m = north_m
+    ep.target = ep.target.__class__(north_m, 0.0, ep.target.down_m, ep.target.yaw_deg)
+    drone = FakeDrone()
+    lag_s = 0.4
+
+    async def scenario() -> None:
+        clock = _lagging_clock(ep, speed_mps=0.5, lag_s=lag_s)
+        faults = asyncio.create_task(ep._fault_schedule(drone))  # type: ignore[arg-type]
+        try:
+            await ep._decide_until_done(drone, 0.0)  # type: ignore[arg-type]
+            await asyncio.wait_for(faults, 1)
+        finally:
+            clock.cancel()
+
+    ep.sim_us = 20_000_000
+    asyncio.run(scenario())
+
+    (move, *_) = [e for e in ep.result.events if e.get("action") == "move"]
+    assert (move["north_m"], move["east_m"]) == (step_m, 0.0)
+    (off,) = [e for e in ep.result.events if e.get("action") == "inject"]
+    anchor = next(e["fault_anchor_sim_s"] for e in ep.result.events if "fault_anchor_sim_s" in e)
+    assert off["sim_s"] == pytest.approx(anchor, abs=agent.FAULT_ANCHOR_POLL_SIM_S)
+    if with_the_step:
+        assert anchor - move["sim_s"] <= agent.FAULT_ANCHOR_POLL_SIM_S + 1e-9
+        assert [
+            e["fault_anchor_commanded_m"] for e in ep.result.events if "fault_anchor_commanded_m" in e
+        ] == [step_m]
+    else:
+        assert (
+            anchor - move["sim_s"] >= lag_s + (step_m - 2.0 - north_m) / 0.5 - agent.FAULT_ANCHOR_POLL_SIM_S
+        )
+        assert not any("fault_anchor_commanded_m" in e for e in ep.result.events)
+
+
 def test_a_rejected_fault_in_the_schedule_ends_the_episode() -> None:
     ep = _agent_episode("cross_loud.yaml", AgentConfig(latency_s=0.0))
     drone = FakeDrone(failure_error="UNSUPPORTED")
