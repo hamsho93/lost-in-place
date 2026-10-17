@@ -202,24 +202,63 @@ def _cmd_label_sample(args: argparse.Namespace) -> int:
         if runs.startswith("s3://"):
             runs = manifest.runs_root(runs, document)
     attempts = report.s3_attempts(runs) if runs.startswith("s3://") else report.local_attempts(Path(runs))
+    if (args.double_code is None) != (args.out_2 is None):
+        print("--double-code and --out-2 go together", file=sys.stderr)
+        return 2
     picked = labels.pick(attempts, args.fraction, args.seed, keys)
     if not picked:
         print("no scored episodes to sample", file=sys.stderr)
         return 1
+    if args.double_code is not None:
+        from lost_in_place.llm.registry import load_models
+
+        own, _ = labels.double_code_pick(picked, args.double_code, load_models())
+        if not own:
+            print(f"the sample has no packets of arm {args.double_code!r}", file=sys.stderr)
+            return 1
     args.out.mkdir(parents=True, exist_ok=True)
     labels.sample(picked, labels.loader(runs), args.out, args.seed, with_plots=not args.no_plots)
     print(
         f"{len(picked)} episodes in {args.out}. Give the labeller {args.out / labels.BLIND}/ only, and"
         f" {labels.LABELLER_MODEL} the prompt in BRIEF.md; keep key.json."
     )
+    if args.double_code is not None:
+        args.out_2.mkdir(parents=True, exist_ok=True)
+        doc = labels.double_code(
+            picked,
+            args.double_code,
+            labels.loader(runs),
+            args.out_2,
+            args.seed,
+            load_models(),
+            with_plots=not args.no_plots,
+        )
+        print(
+            f"{doc['episodes']} episodes in {args.out_2} ({args.double_code}'s and a matched draw). Give"
+            f" the second labeller {args.out_2 / labels.BLIND_2}/ only, in its own session, and"
+            f" {labels.SECOND_LABELLER_MODEL} the prompt in BRIEF-2.md; keep key-2.json."
+        )
     return 0
 
 
 def _cmd_label_agree(args: argparse.Namespace) -> int:
     from lost_in_place import labels
 
-    result = labels.agree(labels.read_sheet(args.sheet.read_text()), json.loads(args.key.read_text()))
-    print(json.dumps(result, indent=1) if args.json else labels.markdown(result))
+    if (args.sheet_2 is None) != (args.key_2 is None):
+        print("--sheet-2 and --key-2 go together", file=sys.stderr)
+        return 2
+    sheet, key = labels.read_sheet(args.sheet.read_text()), json.loads(args.key.read_text())
+    result = labels.agree(sheet, key)
+    if args.sheet_2 is None:
+        print(json.dumps(result, indent=1) if args.json else labels.markdown(result))
+        return 0
+    two = labels.agree_two(
+        sheet, key, labels.read_sheet(args.sheet_2.read_text()), json.loads(args.key_2.read_text())
+    )
+    if args.json:
+        print(json.dumps({"labeller_of_record": result, "double_coded": two}, indent=1))
+    else:
+        print(labels.markdown(result) + "\n\n" + labels.markdown_two(two))
     return 0
 
 
@@ -896,11 +935,19 @@ def build_parser() -> argparse.ArgumentParser:
     ls.add_argument("--seed", type=int, default=0)
     ls.add_argument("--out", type=Path, required=True, help="directory for the packets, sheet and key")
     ls.add_argument("--no-plots", action="store_true", help="skip the plots (no matplotlib needed)")
+    ls.add_argument(
+        "--double-code",
+        metavar="ARM",
+        help="also write the second labeller's packets: this arm's, plus a matched draw of other LLM arms'",
+    )
+    ls.add_argument("--out-2", type=Path, help="directory for the second labeller's packets, sheet and key")
     ls.set_defaults(func=_cmd_label_sample)
 
     la = sub.add_parser("label-agree", help="the hand labels' agreement with the scorer")
     la.add_argument("sheet", type=Path, help="the labeller's sheet.csv")
     la.add_argument("key", type=Path, help="key.json from `lip label-sample`")
+    la.add_argument("--sheet-2", type=Path, help="the second labeller's sheet.csv")
+    la.add_argument("--key-2", type=Path, help="key-2.json from `lip label-sample --double-code`")
     la.add_argument("--json", action="store_true")
     la.set_defaults(func=_cmd_label_agree)
 

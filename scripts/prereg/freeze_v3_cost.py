@@ -16,6 +16,10 @@ call, Claude Sonnet 5.5 about 1,460 and 290 in its own tokenizer, reasoning incl
 brief are unmeasured, so the output tokens keep a wide spread and the calls per episode stay at 5-8
 and 5-7 (the smoke's O1 mixes averaged 4.7 and 4.3).
 
+The second labeller (decided 2026-10-17) double-codes GPT-5.6 Sol's 10% sample plus an equal matched
+draw, at the labeller of record's $0.02-0.03 a packet. It goes with the GPT arm, in its month, and is in
+GPT's month-fit sum; it costs nothing when GPT is not admitted.
+
 Phase 0 uses `scripts/e5_phase0.py estimate`'s figures at those token counts, scaled by each draw's
 output tokens. Both base entries have no temperature, so each sends its action calls twice.
 
@@ -45,10 +49,12 @@ PHASE0_GPT = 9.80  # 2,220 calls, the action calls twice
 PHASE0_SONNET5 = 12.60  # 2,220 calls, the action calls twice
 WORDING_SONNET5 = 2.90  # A-1 probe: 792 calls
 SMOKE_USD = 12.3  # the frontier smokes of Oct 16-17 (Sonnet 5.5 and GPT-5.6 Sol), as metered
+SAMPLE = 0.1  # the blind-label share of each cell
 
 rng = random.Random(0)
 rng5 = random.Random(1)
 rngp = random.Random(2)
+rngl = random.Random(3)
 
 
 def ln(r: random.Random, med: float, sigma: float) -> float:
@@ -154,7 +160,20 @@ def draw(
 
     spent = sum(w.values()) + (sum(d.pre.values()) if pre_in_nov else 0.0)
     gpt_probe = probe_calls * (1600 * GPT_IN_USD + r * GPT_OUT_USD)
-    place("gpt", d, e * rate + gpt_probe, FIT * (e * canary + gpt_probe), canary <= ADMIT, spent, False)
+    labeller2 = 2 * SAMPLE * e * rngl.uniform(0.02, 0.03)
+    place(
+        "gpt",
+        d,
+        e * rate + gpt_probe,
+        FIT * (e * canary + gpt_probe + labeller2),
+        canary <= ADMIT,
+        spent,
+        False,
+    )
+    if d.status["gpt"] == "november":
+        d.nov["labeller_2"] = labeller2
+    elif d.status["gpt"] == "december":
+        d.dec["labeller_2"] = labeller2
     probe5 = probe_calls * sonnet5_probe_call(r5)
     place(
         "sonnet5",
@@ -162,7 +181,7 @@ def draw(
         e * rate5 + probe5,
         FIT * (e * canary5 + probe5),
         canary5 <= ADMIT,
-        spent + d.nov.get("gpt", 0.0),
+        spent + d.nov.get("gpt", 0.0) + d.nov.get("labeller_2", 0.0),
         d.status["gpt"] == "december",
     )
     return d
@@ -188,7 +207,7 @@ def summarise(
     for k in ("scripted", "student", "zero_shot", "claude", "probe", "labeller", "other_aws"):
         a = [d.nov[k] for d in runs]
         print(f"  {k:12} median {q(a, 0.5):6.1f}  p90 {q(a, 0.9):6.1f}")
-    for k in ("gpt", "sonnet5"):
+    for k in ("gpt", "labeller_2", "sonnet5"):
         a = [{**d.nov, **d.dec}[k] for d in runs if k in d.nov or k in d.dec]
         print(f"  {k} (when run, either month) median {q(a, 0.5):6.1f}  p90 {q(a, 0.9):6.1f}")
     a = [d.rate["sonnet5"] for d in runs]

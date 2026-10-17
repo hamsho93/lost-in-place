@@ -36,6 +36,7 @@ def test_the_e5_wave_loads_with_the_planned_caps_and_order() -> None:
     assert {a.name for a in wave.outside_month_fit()} == {a.name for a in wave.arms} - {
         "gpt-5.6-sol",
         "probe-gpt",
+        "labeller-2",
         "claude-sonnet-5-5",
         "probe-sonnet-5-5",
     }
@@ -52,9 +53,11 @@ def test_the_e5_wave_loads_with_the_planned_caps_and_order() -> None:
     assert december.stop_usd is None and set(december.arms or ()) == {
         "gpt-5.6-sol",
         "probe-gpt",
+        "labeller-2",
         "claude-sonnet-5-5",
         "probe-sonnet-5-5",
     }
+    assert gpt.probe_usd == wave.arm("probe-gpt").estimate_usd + wave.arm("labeller-2").estimate_usd
     assert all(a.needs_gate for a in wave.arms if a.kind == "batch" and not a.name.startswith("scripted"))
 
 

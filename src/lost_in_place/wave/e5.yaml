@@ -19,9 +19,10 @@ months:
   "2026-10": {stop_usd: 420, budget_actual: true, job_p90_check: true}
   "2026-11": {stop_usd: 400}
   # Section 10.4: a month-fit arm that doesn't fit November moves here. Mahmood sets stop_usd (up to
-  # about $375: GPT-5.6 Sol and Claude Sonnet 5.5 at most about $190 each); until then nothing is
-  # submitted in December, and with none set by the deadline the deferred arms are dropped.
-  "2026-12": {arms: [gpt-5.6-sol, probe-gpt, claude-sonnet-5-5, probe-sonnet-5-5]}
+  # about $390: GPT-5.6 Sol at most about $205 with the second labeller, Claude Sonnet 5.5 about
+  # $185); until then nothing is submitted in December, and with none set by the deadline the
+  # deferred arms are dropped.
+  "2026-12": {arms: [gpt-5.6-sol, probe-gpt, labeller-2, claude-sonnet-5-5, probe-sonnet-5-5]}
 deferral_deadline: "2026-11-20"
 
 preflight_commands:
@@ -123,7 +124,8 @@ arms:
     # From the frontier smoke's default-effort tokens (design section 10.1), as in freeze_v3_cost.py.
     estimate_usd: 73
     p90_usd: 104
-    probe_usd: 7.7
+    # Its probe (7.7) and the second labeller (10.2), which are counted in its projection.
+    probe_usd: 17.9
     # Measured by its canary (A-3) and filled in by the adaptation PR; GPT never starts without it.
     canary_usd_per_episode: null
     model: gpt-5.6-sol
@@ -144,6 +146,16 @@ arms:
     model: gpt-5.6-sol
     estimate_usd: 7.7
     p90_usd: 10.4
+
+  # The second labeller double-codes GPT-5.6 Sol's sampled packets plus a matched draw of other LLM
+  # arms' (SPEC-v3 departure 15), outside AWS, in GPT's month; its spend is recorded when its window
+  # closes. About 410 packets at $0.02-0.03 each, as in freeze_v3_cost.py.
+  - name: labeller-2
+    kind: external
+    counted_in: gpt-5.6-sol
+    cap_usd: 14
+    estimate_usd: 10.2
+    p90_usd: 11.8
 
   # Mirrors GPT-5.6 Sol (fifth-arm spec): admission A-3b with the same $0.060/episode canary limit,
   # summed after GPT in section 10.4. Called through the stack's tagged profile in us-east-2, so its

@@ -17,7 +17,7 @@
 3. `freeze-v3` may differ from `freeze-v3-pre` only by applying the adaptation rules in §2.3, and a script checks the diff.
 4. Mahmood signs off on the `freeze-v3` tag, and only then does the wave run.
 
-**Budget:** $450 a month in October and November. The pre-freeze work has a median of $79 (P90 $98), which brings October close to its $420 stop; the November wave a median of $335, under a metered hard stop at $400. GPT-5.6 Sol and then Claude Sonnet 5.5 run last, each in November only if a month-fit check passes; otherwise in December, on up to about $375 of December budget (§10).
+**Budget:** $450 a month in October and November. The pre-freeze work has a median of $79 (P90 $98), which brings October close to its $420 stop; the November wave a median of $339, under a metered hard stop at $400. GPT-5.6 Sol and then Claude Sonnet 5.5 run last, each in November only if a month-fit check passes; otherwise in December, on up to about $390 of December budget (§10).
 
 ## 1. Why a new freeze, and what happens to freeze-v2
 
@@ -660,16 +660,19 @@ The figures below come from a Monte Carlo cost model (20,000 draws), `scripts/pr
 | Zero-shot (2,040) | Nov | $77 | $92 |
 | Claude Sonnet 4.6 (2,040) | Nov | $79 | $90 |
 | GPT-5.6 Sol (2,040) plus its probe, when it runs | Nov | $81 | $113 |
-| Claude Sonnet 5.5 (2,040) plus its probe, when it runs (in November in 18% of draws) | Nov or Dec | $89 | $119 |
+| Second labeller: GPT-5.6 Sol's sampled packets plus a matched draw (about 410), with GPT, in its month | Nov or Dec | $10 | $12 |
+| Claude Sonnet 5.5 (2,040) plus its probe, when it runs (in November in 14% of draws) | Nov or Dec | $89 | $119 |
 | Comprehension probes, Claude and Qwen | Nov | $12 | $14 |
 | Blind-labeller check (10% per cell) | Nov | $26 | $31 |
 | Retries and other tagged AWS spend | Nov | $10 | $12 |
-| **November total** | **Nov** | **$335** | **$374** (P99 $394) |
+| **November total** | **Nov** | **$339** | **$373** (P99 $394) |
+
+The second labeller (decided Oct 17, SPEC-v3 departure 15) is costed at the labeller of record's $0.02–0.03 a packet, unmeasured for its model; it is in GPT-5.6 Sol's month-fit sum (§10.4).
 
 **Other scenarios:**
-- **Warm-copy waste as in E2:** $347 median, $377 P90.
-- **If pre-freeze work slips into November:** $340 median, $383 P90, because GPT-5.6 Sol then moves to December in 68% of draws and Claude Sonnet 5.5 in almost every draw in which it is admitted.
-- **At N = 160:** November is $318 median and $377 P90. GPT-5.6 Sol moves to December in 72% of draws (it fits in November in 17%), and Claude Sonnet 5.5 almost always does.
+- **Warm-copy waste as in E2:** $350 median, $378 P90.
+- **If pre-freeze work slips into November:** $335 median, $377 P90, because GPT-5.6 Sol then moves to December in 78% of draws and Claude Sonnet 5.5 in almost every draw in which it is admitted.
+- **At N = 160:** November is $313 median and $351 P90. GPT-5.6 Sol moves to December in 81% of draws (it fits in November in 7%), and Claude Sonnet 5.5 almost always does.
 
 ### 10.3 The two months
 
@@ -686,12 +689,12 @@ The figures below come from a Monte Carlo cost model (20,000 draws), `scripts/pr
 
 > November metered spend so far + the remaining fixed items (labeller, outstanding probes, retries) + 1.15 × (this arm's episodes × its canary $/episode + its probe)
 
-Claude Sonnet 5.5's check is made after GPT-5.6 Sol has settled, so GPT's metered cost is already in "November metered spend so far".
+Claude Sonnet 5.5's check is made after GPT-5.6 Sol has settled, so GPT's metered cost is already in "November metered spend so far". GPT-5.6 Sol's probe term also holds the second labeller (about $10), which double-codes its packets in its month.
 
 **What happens next, for each late arm:**
 - If that sum is **≤ $400**, the arm runs in November.
 - Otherwise it runs **in December**, from Dec 1, on the same tag, image and families. A deferred GPT-5.6 Sol therefore defers Claude Sonnet 5.5 too, so the order holds.
-  - Each deferred arm needs up to about **$190** of December budget: 2,560 × $0.060 plus its probe (about $10 for GPT-5.6 Sol, $8 for Claude Sonnet 5.5), × 1.15. With both deferred, that is up to about **$375**.
+  - A deferred arm needs up to 1.15 × (2,560 × $0.060 plus its probe) of December budget: about **$205** for GPT-5.6 Sol, whose probe term is about $10 plus the second labeller's $15, and about **$185** for Claude Sonnet 5.5 (probe $8). With both deferred, that is up to about **$390**.
   - Blinding holds until every deferred arm settles (§2.5), and the analysis runs after them.
   - If a December budget hasn't been approved by **Nov 20**, the December arm or arms are dropped from E5, and the analysis runs then. A later arm addendum would be descriptive. m stays as tagged.
 
@@ -699,12 +702,12 @@ Claude Sonnet 5.5's check is made after GPT-5.6 Sol has settled, so GPT's metere
 
 | Case | GPT: Nov | GPT: Dec | GPT: not admitted | Sonnet 5.5: Nov | Sonnet 5.5: Dec | Sonnet 5.5: not admitted | December need, 1.15 × projection (median, P90, max) |
 |---|---|---|---|---|---|---|---|
-| N = 120 | 85% | 2% | 12% | 18% | 58% | 24% | $108, $142, $295 |
-| N = 160 | 17% | 72% | 12% | 1% | 75% | 24% | $218, $296, $383 |
+| N = 120 | 82% | 6% | 12% | 14% | 62% | 24% | $108, $148, $306 |
+| N = 160 | 7% | 81% | 12% | 1% | 75% | 24% | $238, $310, $398 |
 
-**The cap counts compute** (decided on Oct 17, as the admission script and the meter are built): A-3 check 4, A-3b and this sum all use the canary's metered spend per episode, job time included, for both late arms. The December P90 is under the ~$375 request; only the extreme tail at N = 160 reaches it.
+**The cap counts compute** (decided on Oct 17, as the admission script and the meter are built): A-3 check 4, A-3b and this sum all use the canary's metered spend per episode, job time included, for both late arms. The December P90 is under the ~$390 request; only the extreme tail at N = 160 reaches it.
 
-So Claude Sonnet 5.5 is effectively a December arm at either N. **If N → 160 fires**, the three existing arms run at 160 in November (median $318), and GPT-5.6 Sol is a December arm in about three draws in four. This is mechanical: no further decision is needed beyond the December budget.
+So Claude Sonnet 5.5 is effectively a December arm at either N. **If N → 160 fires**, the three existing arms run at 160 in November (median $313), and GPT-5.6 Sol is a December arm in about four draws in five. This is mechanical: no further decision is needed beyond the December budget.
 
 ### 10.5 Stop rules
 
@@ -719,7 +722,7 @@ All stop rules are harness or cost signals; none reads an outcome column.
 | S-4 | Throttles > 1% of calls over 15 min | Cut that arm's in-flight cap by 5 |
 | S-5 | `ModelNotReady` > 30 min on warm-up | Don't submit; retry later. Never submit Qwen before a first success |
 | S-6 | An import copy is up ≥ 10 min with none of its arm's episodes running | Kill pings; delete the import if the arm has settled |
-| S-7 | An arm's metered spend, projected to completion (checked after its first 100 episodes and every 250 after), exceeds its cap: student $50, zero-shot $105, Claude Sonnet 4.6 $95, scripted $10, probes $16, labeller $32 (× 1.25 at N = 160); Claude Sonnet 5.5 $145 at N = 120 and $185 at N = 160, including its probe | In November: continue if the projected November total, the late arms included at their canary projections, is ≤ $400. If it fits only without one or both late arms, continue, and they go to December by §10.4. Otherwise pause, and Mahmood decides. In December: continue if the projected December total is within the approved December budget; otherwise pause, and Mahmood decides |
+| S-7 | An arm's metered spend, projected to completion (checked after its first 100 episodes and every 250 after), exceeds its cap: student $50, zero-shot $105, Claude Sonnet 4.6 $95, scripted $10, probes $16, labeller $32, second labeller $14 (× 1.25 at N = 160); Claude Sonnet 5.5 $145 at N = 120 and $185 at N = 160, including its probe | In November: continue if the projected November total, the late arms included at their canary projections, is ≤ $400. If it fits only without one or both late arms, continue, and they go to December by §10.4. Otherwise pause, and Mahmood decides. In December: continue if the projected December total is within the approved December budget; otherwise pause, and Mahmood decides |
 | S-8 | A late arm's canary is > $0.060 per episode, compute included (A-3, A-3b); or in the wave, its rolling cost per episode (the episodes' tokens at list price) is > 1.5 × its canary's | Canary: not run in E5. Wave: pause that arm; resume only if the §10.4 sum (in December, the approved December budget) still fits |
 | S-9 | November metered total > $400; October estimate > $420 | Hard stop on all submissions; Mahmood decides |
 
@@ -772,8 +775,8 @@ The admission script, `scripts/e5_admission.py`, computes A-2 to A-5 (A-3b inclu
      4. The month-fit check (§10.4), then GPT-5.6 Sol.
      5. The month-fit check, then Claude Sonnet 5.5.
      6. The comprehension probes.
-     7. The blind-labeller check.
-     8. In December, any deferred arms, if a December budget was approved by Nov 20.
+     7. The blind-labeller check, and the second labeller's double-coding of GPT-5.6 Sol's packets (SPEC-v3 departure 15).
+     8. In December, any deferred arms, if a December budget was approved by Nov 20, and the double-coding with a deferred GPT-5.6 Sol.
    - **Unblinding.** After the last arm settles or the deferred arms are dropped, Mahmood commits `docs/prereg/freeze-v3-unblind.md` (§2.5).
    - **Analysis:** one pinned `lip stats --design v3` run, after the last arm settles or the deferred arms are dropped.
 
@@ -787,7 +790,7 @@ The admission script, `scripts/e5_admission.py`, computes A-2 to A-5 (A-3b inclu
 | Nov 6–8 | The wave (day 3 is slack and the labeller) |
 | From Dec 1 | Deferred arms, then the analysis |
 
-**If `freeze-v3-pre` is not tagged by Oct 29,** the pre-freeze runs move to Nov 6 and the wave starts about Nov 9. The month-fit rule then moves GPT-5.6 Sol to December in about 68% of draws, and Claude Sonnet 5.5 in almost every draw in which it is admitted.
+**If `freeze-v3-pre` is not tagged by Oct 29,** the pre-freeze runs move to Nov 6 and the wave starts about Nov 9. The month-fit rule then moves GPT-5.6 Sol to December in about 78% of draws, and Claude Sonnet 5.5 in almost every draw in which it is admitted.
 
 ## 13. Known limits
 
@@ -799,7 +802,8 @@ The admission script, `scripts/e5_admission.py`, computes A-2 to A-5 (A-3b inclu
   - **It rejects temperature,** so it is stochastic, and test-retest (A-3, check 5) applies.
   - **`tool_choice: any` was never tested,** because the temperature rejection came first. If the base entry is rejected, `-fb1` uses `auto`. Under `auto`, a reply with no tool call is invalid, and check 2 catches a model that does this often.
   - **Region.** It is called in us-east-2, through its own profile, permissions (including the region's `project/default`) and meter. If that path isn't deployed, its smoke call fails and it is not run (A-3, check 1).
-  - **N → 160** moves it to December in about three draws in four.
+  - **N → 160** moves it to December in about four draws in five.
+  - **Its model is the labeller of record's.** The blind labeller, `gpt-5.6-sol-high` (SPEC 0.1 §6), judges this arm's episodes. It is kept, and the packets carry no reasons or prompts, but a packet's action style may still suggest GPT, and a shared misreading could inflate agreement on its episodes. A second labeller from a third family, `gemini-4-argon-high`, double-codes every sampled GPT packet plus an equal matched draw of the other LLM arms' packets, blind to which are which. Agreement is reported per labeller, and the overlap is flagged as material if the labeller of record beats the second labeller by more than 5 points on GPT packets while the two are within 5 points on the matched ones (SPEC-v3 departure 15). This is descriptive; it changes no score and no hypothesis.
 - **Claude Sonnet 5.5 is unmeasured on DEXI.**
   - **`tool_choice` is `auto`,** so the model may answer in text. A reply with no tool call is invalid, and A-3b check 2 (≤ 2% invalid) catches a model that does this often.
   - **Thinking and temperature.** It thinks adaptively by default at effort high, which the entry keeps. It rejects any non-default temperature, so the entry sends none, and the test-retest check applies. About a quarter of cost-model draws fail admission.
