@@ -163,7 +163,10 @@ def test_the_committed_canary_sweeps_are_the_generators(
     assert gen.write(gen.canary(), committed, check=True) == 0
     capsys.readouterr()
     llm = (*gen.LLM_MODELS, *gen.GPT_ENTRIES, *gen.SONNET55_ENTRIES)
-    assert (gen.GPT_ENTRIES, gen.SONNET55_ENTRIES) == (("gpt-5.6-sol", "gpt-5.6-sol-fb1"), ("claude-sonnet-5-5",))
+    assert (gen.GPT_ENTRIES, gen.SONNET55_ENTRIES) == (
+        ("gpt-5.6-sol", "gpt-5.6-sol-fb1"),
+        ("claude-sonnet-5-5",),
+    )
     assert not list(committed.glob("*haiku*"))
     assert {p.stem for p in committed.glob("*.yaml")} == {
         f"{t}-{a}" for t in gen.TEMPLATES for a in (*llm, gen.SCRIPTED_ARM)
@@ -193,9 +196,7 @@ def test_the_cli_passes_both_smoked_entries(gen: ModuleType, tmp_path: Path) -> 
     out = tmp_path / "e5"
     argv = ["wave", "--template", "t1", "--n", "120", "--arms", "gpt-5.6-sol", "claude-sonnet-5-5"]
     assert (
-        gen.main(
-            [*argv, "--gpt", "gpt-5.6-sol-fb1", "--sonnet55", "claude-sonnet-5-5", "--out", str(out)]
-        )
+        gen.main([*argv, "--gpt", "gpt-5.6-sol-fb1", "--sonnet55", "claude-sonnet-5-5", "--out", str(out)])
         == 0
     )
     assert sorted(p.name for p in out.iterdir()) == ["claude-sonnet-5-5.yaml", "gpt-5.6-sol.yaml"]

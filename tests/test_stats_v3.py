@@ -440,7 +440,10 @@ def test_sonnet_5_5_is_one_arm_apart_from_gpts() -> None:
         attempt(0, "loud", "claude-sonnet-5-5", "O1", score(0, "loud")),
         attempt(2, "loud", "gpt-5.6-sol-fb1", "O1", score(2, "loud")),
     ]
-    assert stats_v3.collect(both).entries == {"claude-sonnet-5-5": "claude-sonnet-5-5", "gpt-5.6-sol": "gpt-5.6-sol-fb1"}
+    assert stats_v3.collect(both).entries == {
+        "claude-sonnet-5-5": "claude-sonnet-5-5",
+        "gpt-5.6-sol": "gpt-5.6-sol-fb1",
+    }
 
 
 def test_fifth_arm_entries_agree_with_the_registry_when_it_has_them() -> None:

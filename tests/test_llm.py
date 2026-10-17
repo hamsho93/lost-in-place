@@ -280,7 +280,11 @@ def test_sonnet_5_5_entry_is_the_one_the_fifth_arm_spec_states() -> None:
 
 def test_haiku_5_5_smoke_entry_kept_effort_low() -> None:
     haiku = get_model("claude-haiku-5-5")
-    assert (haiku.model_id, haiku.temperature, haiku.tool_choice) == ("us.anthropic.claude-haiku-5-5", None, "auto")
+    assert (haiku.model_id, haiku.temperature, haiku.tool_choice) == (
+        "us.anthropic.claude-haiku-5-5",
+        None,
+        "auto",
+    )
     assert haiku.additional_request_fields == {"output_config": {"effort": "low"}}
 
 
