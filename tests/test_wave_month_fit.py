@@ -1,4 +1,4 @@
-"""Section 10.4 as the submitter applies it to two month-fit arms (GPT-6.1 Sol, then Claude Sonnet
+"""Section 10.4 as the submitter applies it to two month-fit arms (GPT-5.6 Sol, then Claude Sonnet
 5.5), and the us-east-2 arm's metering, throttles and S-0 region check."""
 
 from __future__ import annotations

@@ -231,6 +231,9 @@ class SimStack(Stack):
         # copy are not granted, so untagged (unbudgeted) model spend isn't possible from these roles.
         bedrock_profiles: dict[str, str] = {}
         foundation_models: list[str] = []
+        # OpenAI models on bedrock-runtime also need InvokeModel on the account's default project
+        # in the region they're called in (Bedrock's GPT-5.6 Sol model card).
+        openai_regions: set[str] = set()
         other_regions = {
             model: region
             for model in settings.bedrock_models
@@ -264,6 +267,8 @@ class SimStack(Stack):
                 foundation_models.append(
                     f"arn:{self.partition}:bedrock:*::foundation-model/{foundation_model}*"
                 )
+                if foundation_model.startswith("openai."):
+                    openai_regions.add(region)
                 continue
             profile = bedrock.CfnApplicationInferenceProfile(
                 self,
@@ -276,6 +281,8 @@ class SimStack(Stack):
             )
             bedrock_profiles[model] = profile.attr_inference_profile_arn
             foundation_models.append(f"arn:{self.partition}:bedrock:*::foundation-model/{foundation_model}")
+            if foundation_model.startswith("openai."):
+                openai_regions.add(self.region)
         bedrock_invoke = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
 
         def grant_bedrock(role: iam.Role) -> None:
@@ -302,6 +309,16 @@ class SimStack(Stack):
                     conditions={"StringEquals": {"bedrock:InferenceProfileArn": profiles}},
                 )
             )
+            if openai_regions:
+                role.add_to_policy(
+                    iam.PolicyStatement(
+                        actions=["bedrock:InvokeModel"],
+                        resources=[
+                            f"arn:{self.partition}:bedrock:{region}:{self.account}:project/default"
+                            for region in sorted(openai_regions)
+                        ],
+                    )
+                )
 
         grant_bedrock(job_role)
 

@@ -215,11 +215,11 @@ def test_decide_outputs_a1s_inputs_and_result(prompts: list[wording.ProbePrompt]
     )
     assert result["probes"]["claude-sonnet-4-6"]["t0"]["misread"] == 12
     assert result["probes"]["claude-sonnet-4-6"]["t1"]["misread"] == 0
-    gpt = _probe_doc("gpt-6.1-sol", prompts, {("b42", "t1")})
-    both = script.decide(doc, [claude, gpt], ["claude-sonnet-4-6", "gpt-6.1-sol"], prompts)
+    gpt = _probe_doc("gpt-5.6-sol", prompts, {("b42", "t1")})
+    both = script.decide(doc, [claude, gpt], ["claude-sonnet-4-6", "gpt-5.6-sol"], prompts)
     assert both["template"] == "t0" and both["probe_conditions"] == {
         "claude-sonnet-4-6": True,
-        "gpt-6.1-sol": False,
+        "gpt-5.6-sol": False,
     }
 
 
@@ -228,7 +228,7 @@ def test_decide_refuses_mismatched_or_stale_inputs(prompts: list[wording.ProbePr
     doc = _dryrun_doc({"t0": set(), "t1": set()})
     claude = _probe_doc("claude-sonnet-4-6", prompts, set())
     with pytest.raises(wording.IncompleteInput, match="--models"):
-        script.decide(doc, [claude], ["claude-sonnet-4-6", "gpt-6.1-sol"], prompts)
+        script.decide(doc, [claude], ["claude-sonnet-4-6", "gpt-5.6-sol"], prompts)
     with pytest.raises(wording.IncompleteInput, match="--models"):
         script.decide(doc, [claude, claude], ["claude-sonnet-4-6"], prompts)
     stale = {**claude, "replies": [{**r, "prompt_sha256": "0" * 64} for r in claude["replies"]]}
@@ -250,14 +250,15 @@ def test_script_plans_and_estimates_without_calling_a_model(
     monkeypatch.setattr(clients, "make_client", lambda spec: pytest.fail("called the model"))
     script = _script()
     out = tmp_path / "probe.json"
-    assert script.main(["--scenarios", str(SCENARIOS), "probe", "gpt-6.1-sol", "--out", str(out)]) == 0
+    assert script.main(["--scenarios", str(SCENARIOS), "probe", "gpt-5.6-sol", "--out", str(out)]) == 0
     assert "792 calls" in capsys.readouterr().out and not out.exists()
     assert script.main(["--scenarios", str(SCENARIOS), "estimate"]) == 0
     est = json.loads(capsys.readouterr().out)
     assert est["dryrun"]["episodes"] == 132 and [p["calls"] for p in est["probes"]] == [792, 792, 792]
     assert all(p["usd"] is not None and p["usd"] < 10 for p in est["probes"])
     gpt, sonnet55 = est["probes"][1], est["probes"][2]
-    assert sonnet55["input_tokens"] > gpt["input_tokens"] and sonnet55["usd"] > gpt["usd"]
+    # Sonnet 5.5 counts more tokens for the same text; GPT-5.6 Sol costs twice as much per token.
+    assert sonnet55["input_tokens"] > gpt["input_tokens"] and gpt["usd"] > sonnet55["usd"]
     fb1 = wording.probe_cost("claude-sonnet-5-5-fb1", script._prompts(SCENARIOS))
     assert fb1 == {**sonnet55, "model": "claude-sonnet-5-5-fb1"}
     assert script.main(["--scenarios", str(SCENARIOS), "prompts", "--out", str(tmp_path / "p.json")]) == 0

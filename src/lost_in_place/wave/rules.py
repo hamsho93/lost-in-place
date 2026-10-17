@@ -223,7 +223,7 @@ def month_fit_sequence(
     next_month_budget: float | None,
     deadline_passed: bool,
 ) -> dict[str, MonthFitResult]:
-    """Section 10.4 for the month-fit arms in run order (GPT-6.1 Sol, then Claude Sonnet 5.5).
+    """Section 10.4 for the month-fit arms in run order (GPT-5.6 Sol, then Claude Sonnet 5.5).
 
     `committed` is the month's metered spend plus its remaining fixed items. An arm runs this month if
     `committed` + the projections of the earlier arms that run this month + its own is at most the

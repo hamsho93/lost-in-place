@@ -956,7 +956,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--arms",
         help="the 1 to 5 confirmatory arms (A-3, A-4), comma-separated registry model names: the base"
         " entry or the one fallback entry it flies, e.g. claude-sonnet-4-6,qwen3-4b-student,"
-        "qwen3-4b-zero-shot,gpt-6.1-sol,claude-sonnet-5-5; m = 4 x their number (up to 20)",
+        "qwen3-4b-zero-shot,gpt-5.6-sol,claude-sonnet-5-5; m = 4 x their number (up to 20)",
     )
     fr.set_defaults(func=_cmd_freeze_record)
 

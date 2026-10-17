@@ -66,8 +66,8 @@ def test_family_globs_match_exactly_the_first_n_names(gen: ModuleType, n: int) -
 @pytest.mark.parametrize(
     ("template", "n", "gpt", "sonnet55"),
     [
-        ("t0", 120, "gpt-6.1-sol", "claude-sonnet-5-5-fb1"),
-        ("t1", 160, "gpt-6.1-sol-fb2", "claude-sonnet-5-5"),
+        ("t0", 120, "gpt-5.6-sol", "claude-sonnet-5-5-fb1"),
+        ("t1", 160, "gpt-5.6-sol-fb2", "claude-sonnet-5-5"),
     ],
 )
 def test_wave_sweeps_have_the_designs_cells(
@@ -126,24 +126,24 @@ def test_wave_sweeps_have_the_designs_cells(
 
 
 def test_the_arm_set_and_parameters_are_checked(gen: ModuleType) -> None:
-    files = gen.wave("t1", 120, ("claude-sonnet-4-6", "scripted"), "gpt-6.1-sol")
+    files = gen.wave("t1", 120, ("claude-sonnet-4-6", "scripted"), "gpt-5.6-sol")
     assert set(files) == {"claude-sonnet-4-6.yaml", "scripted.yaml"}
     with pytest.raises(ValueError, match="N 140"):
-        gen.wave("t0", 140, gen.ARMS, "gpt-6.1-sol")
+        gen.wave("t0", 140, gen.ARMS, "gpt-5.6-sol")
     with pytest.raises(ValueError, match="entry"):
-        gen.wave("t0", 120, gen.ARMS, "gpt-6.1-sol-fb4")
+        gen.wave("t0", 120, gen.ARMS, "gpt-5.6-sol-fb4")
     with pytest.raises(ValueError, match="claude-sonnet-5-5 entry 'claude-haiku-5-5'"):
         gen.wave("t0", 120, gen.ARMS, sonnet55="claude-haiku-5-5")
     with pytest.raises(SystemExit):
         gen.main(["wave", "--template", "t0", "--n", "120", "--sonnet55", "claude-haiku-5-5", "--check"])
     with pytest.raises(ValueError, match="arms"):
-        gen.wave("t0", 120, ("qwen3-4b",), "gpt-6.1-sol")
+        gen.wave("t0", 120, ("qwen3-4b",), "gpt-5.6-sol")
 
 
 def test_a_wrong_count_stops_the_generator(gen: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(gen.EXPECTED, 120, {"llm": 2039, "scripted": 1440})
     with pytest.raises(AssertionError, match="2040 episodes"):
-        gen.wave("t0", 120, ("claude-sonnet-4-6",), "gpt-6.1-sol")
+        gen.wave("t0", 120, ("claude-sonnet-4-6",), "gpt-5.6-sol")
 
 
 def test_check_reports_changed_and_stale_files(gen: ModuleType, tmp_path: Path) -> None:
@@ -191,13 +191,13 @@ def test_the_committed_canary_sweeps_are_the_generators(
 
 def test_the_cli_passes_both_smoked_entries(gen: ModuleType, tmp_path: Path) -> None:
     out = tmp_path / "e5"
-    argv = ["wave", "--template", "t1", "--n", "120", "--arms", "gpt-6.1-sol", "claude-sonnet-5-5"]
+    argv = ["wave", "--template", "t1", "--n", "120", "--arms", "gpt-5.6-sol", "claude-sonnet-5-5"]
     assert (
         gen.main(
-            [*argv, "--gpt", "gpt-6.1-sol-fb3", "--sonnet55", "claude-sonnet-5-5-fb2", "--out", str(out)]
+            [*argv, "--gpt", "gpt-5.6-sol-fb3", "--sonnet55", "claude-sonnet-5-5-fb2", "--out", str(out)]
         )
         == 0
     )
-    assert sorted(p.name for p in out.iterdir()) == ["claude-sonnet-5-5.yaml", "gpt-6.1-sol.yaml"]
+    assert sorted(p.name for p in out.iterdir()) == ["claude-sonnet-5-5.yaml", "gpt-5.6-sol.yaml"]
     assert "dexi/claude-sonnet-5-5-fb2" in (out / "claude-sonnet-5-5.yaml").read_text()
-    assert "dexi/gpt-6.1-sol-fb3" in (out / "gpt-6.1-sol.yaml").read_text()
+    assert "dexi/gpt-5.6-sol-fb3" in (out / "gpt-5.6-sol.yaml").read_text()

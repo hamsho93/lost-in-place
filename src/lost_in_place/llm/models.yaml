@@ -66,7 +66,7 @@ gpt-5.6-sol:
   tool_choice: any
   additional_request_fields: {reasoning: {effort: low}}
   notes: >-
-    E5 frontier arm, added 2026-10-16 in place of GPT-6.1 Sol, which the account can't use yet, with
+    E5 frontier arm, added 2026-10-16 in place of GPT-5.6 Sol, which the account can't use yet, with
     the settings freeze-v3 states before its first call (design 9.2). Served from us-east-2, the only
     region with GPT-5.6 Sol quota. Converse takes the effort nested, as `reasoning.effort`; a flat
     `reasoning_effort` is rejected. Effort low (the model's default is medium) for cost; the

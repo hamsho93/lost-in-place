@@ -330,7 +330,7 @@ def test_budget_stop_blocks_model_calls_from_both_roles(bedrock_template: Templa
     assert len(props["Definition"]["IamActionDefinition"]["Roles"]) == 2
 
 
-GPT = "us.openai.gpt-6.1-sol"
+GPT = "us.openai.gpt-5.6-sol"
 
 
 @pytest.fixture(scope="module")
@@ -357,9 +357,9 @@ def bedrock_statements(template: Template) -> list[dict[str, object]]:
 def test_openai_model_gets_its_own_tagged_profile(two_model_template: Template) -> None:
     profiles = two_model_template.find_resources("AWS::Bedrock::ApplicationInferenceProfile")
     # Adding a model must not rename (and so replace) the profile an existing arm already runs on.
-    assert sorted(profiles) == ["Bedrockanthropicclaudesonnet46", "Bedrockopenaigpt61sol"]
-    props = profiles["Bedrockopenaigpt61sol"]["Properties"]
-    assert props["InferenceProfileName"] == "WithGpt-openai-gpt-6-1-sol"
+    assert sorted(profiles) == ["Bedrockanthropicclaudesonnet46", "Bedrockopenaigpt56sol"]
+    props = profiles["Bedrockopenaigpt56sol"]["Properties"]
+    assert props["InferenceProfileName"] == "WithGpt-openai-gpt-5-6-sol"
     assert json.dumps(props["ModelSource"]["CopyFrom"]).endswith(f':inference-profile/{GPT}"]]}}')
     assert {"Key": "project", "Value": "lost-in-place"} in props["Tags"]
 
@@ -367,7 +367,9 @@ def test_openai_model_gets_its_own_tagged_profile(two_model_template: Template) 
 def test_openai_foundation_model_is_granted_only_through_the_tagged_profiles(
     two_model_template: Template,
 ) -> None:
-    statements = bedrock_statements(two_model_template)
+    statements = [
+        s for s in bedrock_statements(two_model_template) if "project/" not in json.dumps(s["Resource"])
+    ]
     assert len(statements) == 4  # job and operator role: profiles, then foundation models
     policies = json.dumps(statements)
     assert f"inference-profile/{GPT}" not in policies
@@ -375,12 +377,25 @@ def test_openai_foundation_model_is_granted_only_through_the_tagged_profiles(
     for statement in statements:
         resources = json.dumps(statement["Resource"])
         if "foundation-model/" in resources:
-            assert "foundation-model/openai.gpt-6.1-sol" in resources
+            assert "foundation-model/openai.gpt-5.6-sol" in resources
             assert "foundation-model/anthropic.claude-sonnet-4-6" in resources
             condition = statement["Condition"]["StringEquals"]["bedrock:InferenceProfileArn"]
-            assert {"Fn::GetAtt": ["Bedrockopenaigpt61sol", "InferenceProfileArn"]} in condition
+            assert {"Fn::GetAtt": ["Bedrockopenaigpt56sol", "InferenceProfileArn"]} in condition
         else:
-            assert {"Fn::GetAtt": ["Bedrockopenaigpt61sol", "InferenceProfileArn"]} in statement["Resource"]
+            assert {"Fn::GetAtt": ["Bedrockopenaigpt56sol", "InferenceProfileArn"]} in statement["Resource"]
+
+
+def test_openai_model_gets_the_default_project_of_its_region(two_model_template: Template) -> None:
+    for role in ("JobRole", "OperatorRole"):
+        [statement] = [
+            s
+            for s in granting(role_statements(two_model_template, role), "bedrock:InvokeModel")
+            if "project/" in json.dumps(s["Resource"])
+        ]
+        assert statement["Action"] == "bedrock:InvokeModel"
+        assert json.dumps(statement["Resource"]).endswith(
+            ':bedrock:us-east-1:123456789012:project/default"]]}'
+        )
 
 
 def test_no_marketplace_permissions_for_the_stack_roles(two_model_template: Template) -> None:
@@ -396,7 +411,7 @@ def test_jobs_map_the_openai_profile_too(two_model_template: Template) -> None:
         mapping = json.dumps(env["Value"])
         assert env["Name"] == "LIP_BEDROCK_PROFILES"
         assert f'\\"{GPT}\\":\\"' in mapping
-        assert "Bedrockopenaigpt61sol" in mapping
+        assert "Bedrockopenaigpt56sol" in mapping
 
 
 def test_budget_stop_covers_the_openai_profile(two_model_template: Template) -> None:
@@ -532,6 +547,35 @@ def test_external_profile_for_an_in_region_model_is_rejected() -> None:
     arn = "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/s46profile01"
     with pytest.raises(ValueError, match="not registered in another region"):
         east_2_stack("StrayArn", external_profiles={**EAST_2_PROFILES, SONNET: arn})
+
+
+def test_us_east_2_openai_entry_is_granted_its_profile_and_that_regions_default_project() -> None:
+    gpt_arn = "arn:aws:bedrock:us-east-2:123456789012:application-inference-profile/gpt56profile1"
+    template = Template.from_stack(
+        east_2_stack(
+            "WithEast2Gpt",
+            bedrock_models=(HAIKU_5_5, SONNET, SONNET_5_5, GPT),
+            bedrock_regions={
+                SONNET: "us-east-1",
+                SONNET_5_5: "us-east-2",
+                HAIKU_5_5: "us-east-2",
+                GPT: "us-east-2",
+            },
+            external_profiles={**EAST_2_PROFILES, GPT: gpt_arn},
+        )
+    )
+    assert sorted(template.find_resources("AWS::Bedrock::ApplicationInferenceProfile")) == [
+        "Bedrockanthropicclaudesonnet46"
+    ]
+    for role in ("JobRole", "OperatorRole"):
+        statements = granting(role_statements(template, role), "bedrock:InvokeModel")
+        [_profile] = [s for s in statements if "Condition" not in s and gpt_arn in s["Resource"]]
+        [models] = [s for s in statements if "foundation-model/" in json.dumps(s["Resource"])]
+        assert "bedrock:*::foundation-model/openai.gpt-5.6-sol*" in json.dumps(models["Resource"])
+        assert gpt_arn in models["Condition"]["StringEquals"]["bedrock:InferenceProfileArn"]
+        [project] = [s for s in statements if "project/" in json.dumps(s["Resource"])]
+        assert json.dumps(project["Resource"]).endswith(':bedrock:us-east-2:123456789012:project/default"]]}')
+    assert "us-east-1:123456789012:project/" not in json.dumps(template.to_json())
 
 
 def test_registry_regions_default_to_us_east_1_and_are_one_per_model(tmp_path: Path) -> None:

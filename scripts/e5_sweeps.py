@@ -19,12 +19,12 @@ The scripted control (`dexi/rule-2m`, `dexi/rule-leg`) flies section 6's cells o
 loud O1 and O0, timed loud O1 (`timed/`), brief O1, healthy O1 and flowscale O1.
 
 Canary sweeps, committed for both templates before the pre tag: each LLM entry on k000-k005 at the 7
-loud and 6 brief levels (78 episodes), one file per GPT-6.1 Sol and Claude Sonnet 5.5 entry so
+loud and 6 brief levels (78 episodes), one file per GPT-5.6 Sol and Claude Sonnet 5.5 entry so
 whichever the smoke call accepts is already there (never the smoke-only `claude-haiku-5-5`); and the
 scripted canary, the G-S cell (loud O1) at both cadences plus `scripted-cautious` at loud O1 (18
 episodes).
 
-    uv run python scripts/e5_sweeps.py wave --template t1 --n 120 [--arms ...] [--gpt gpt-6.1-sol-fb1] \\
+    uv run python scripts/e5_sweeps.py wave --template t1 --n 120 [--arms ...] [--gpt gpt-5.6-sol-fb1] \\
         [--sonnet55 claude-sonnet-5-5-fb1]
     uv run python scripts/e5_sweeps.py canary [--check]
 """
@@ -52,7 +52,7 @@ HEALTHY_FAMILIES = 60
 SILENT_FAMILIES = 30
 CANARY_FAMILIES = 6
 LLM_MODELS = ("qwen3-4b-student", "qwen3-4b-zero-shot", "claude-sonnet-4-6")
-GPT_ARM = "gpt-6.1-sol"
+GPT_ARM = "gpt-5.6-sol"
 GPT_ENTRIES = (GPT_ARM, f"{GPT_ARM}-fb1", f"{GPT_ARM}-fb2", f"{GPT_ARM}-fb3")
 SONNET55_ARM = "claude-sonnet-5-5"
 SONNET55_ENTRIES = (SONNET55_ARM, f"{SONNET55_ARM}-fb1", f"{SONNET55_ARM}-fb2")
