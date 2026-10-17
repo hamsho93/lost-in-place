@@ -13,9 +13,9 @@ The rules, in the order the design applies them:
 - A-3 (GPT-5.6 Sol) and A-3b (Claude Sonnet 5.5), the same checks and thresholds: (1) a smoke call
   accepted in the arm's fallback order; (2) invalid planner calls at most 2% in its Phase 0 action
   calls and in its canary; (3) canary loud `manipulation_decision_ok` in at least 40 of 42 episodes
-  and brief `manipulation_ok` in at least 35 of 36; (4) canary cost at most $0.060 per episode, compute included; (5) if
-  its entry has no temperature, refute power at 98.75% under a null with r = r_tr, at the wave's N, at
-  least 60%. Confirmatory if all hold; not run if 1 or 4 fails; otherwise descriptive. Both come
+  and brief `manipulation_ok` in at least 35 of 36; (4) canary cost at most $0.060 per episode,
+  compute included; (5) if its entry has no temperature, refute power at 98.75% under a null with
+  r = r_tr, at the wave's N, at least 60%. Confirmatory if all hold; not run if 1 or 4 fails; otherwise descriptive. Both come
   before A-2, so check 5 is taken at the N that A-2 gives from Claude Sonnet 4.6 alone; admitting an
   arm can only raise N, and refute power rises with N.
 - A-2, N: 160 if, for Claude Sonnet 4.6 or a confirmatory smoked arm, any rung (O1-L, O1-N, O1-R, O1-V)
