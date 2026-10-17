@@ -126,8 +126,8 @@ arms:
     p90_usd: 104
     # Its probe (7.7) and the second labeller (10.2), which are counted in its projection.
     probe_usd: 17.9
-    # Measured by its canary (A-3): $2.11 metered over 78 episodes, job time included.
-    canary_usd_per_episode: 0.0271
+    # Measured by its canary (A-3): $2.10 metered over 78 episodes, job time included.
+    canary_usd_per_episode: 0.0269
     model: gpt-5.6-sol
     pinned_model:
       provider: bedrock
@@ -183,8 +183,8 @@ arms:
     estimate_usd: 83
     p90_usd: 112
     probe_usd: 6.2
-    # Measured by its canary (A-3b): $2.23 metered over 78 episodes, job time included.
-    canary_usd_per_episode: 0.0286
+    # Measured by its canary (A-3b): $2.33 metered over 78 episodes, job time included.
+    canary_usd_per_episode: 0.0299
     model: claude-sonnet-5-5
     pinned_model:
       provider: bedrock

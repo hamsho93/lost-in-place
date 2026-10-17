@@ -42,8 +42,8 @@ def test_the_e5_wave_loads_with_the_planned_caps_and_order() -> None:
     }
     assert [a.name for a in wave.month_fit_arms()] == ["gpt-5.6-sol", "claude-sonnet-5-5"]
     gpt, sonnet = wave.arm("gpt-5.6-sol"), wave.arm("claude-sonnet-5-5")
-    assert gpt.month_fit and gpt.canary_usd_per_episode == 0.0271
-    assert sonnet.canary_usd_per_episode == 0.0286 and {c.arm for c in sonnet.start_after} >= {"gpt-5.6-sol"}
+    assert gpt.month_fit and gpt.canary_usd_per_episode == 0.0269
+    assert sonnet.canary_usd_per_episode == 0.0299 and {c.arm for c in sonnet.start_after} >= {"gpt-5.6-sol"}
     assert sonnet.price is not None and (sonnet.price.input_per_mtok, sonnet.price.output_per_mtok) == (
         2.2,
         11,
