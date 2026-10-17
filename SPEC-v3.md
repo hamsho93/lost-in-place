@@ -130,6 +130,7 @@ SPEC 0.1 §6's metrics apply unchanged. The scorer adds these fields (design §5
 | 13 | Claude Sonnet 4.6 with `tool_choice` any | Claude Sonnet 5.5 with `tool_choice` auto; a reply with no tool call is an invalid proposal | Sonnet 5.5's client tool calling supports only `auto` and `none`; A-3b's invalid-call check bounds it (design §9.4) |
 | 14 | One model region, us-east-1 | GPT-5.6 Sol and Claude Sonnet 5.5 are called in us-east-2 from Batch in us-east-1, each through its own tagged profile, IAM grant and meter | Where the model is available; the planner's latency is charged at a fixed 2.0 s, so the hop doesn't change an episode |
 | 15 | One model labeller of record (`gpt-5.6-sol-high`) for the blind sample | The same labeller of record, plus a second labeller from a third family (`gemini-4-argon-high`) that double-codes the GPT-5.6 Sol arm's sampled packets and a matched draw, reported per labeller with a pre-stated 5-point flag | The labeller of record is the same model as the GPT-5.6 Sol arm. It is kept, as the frozen labeller whose packets carry no reasons or prompts, and the overlap is declared and measured |
+| 16 | The `freeze-v2` tag on `main` | Annotated tags `freeze-v3-pre` and `freeze-v3` on `main` carrying the hashes, with no external archive: no Zenodo DOI, OSF registration or GitHub release. The timestamp rests on the git tag and history | Decided Oct 17, 2026, departing from the draft design's Zenodo timestamp with an OSF fallback. The tags and history are held by the project, so the timestamp is not independent of it (design §2.2) |
 
 ## Open before the freeze
 
@@ -146,7 +147,7 @@ Filled in at the freeze by `lip freeze-record --freeze v3 --write` (`src/lost_in
 
 The freeze, in order:
 
-1. Tag `freeze-v3-pre` on `main`. Its message is the output of `lip freeze-record --freeze v3 --image-digest <digest> --tag-message` (the hashes listed in design §2.1), and it is released (design §2.2).
+1. Tag `freeze-v3-pre` on `main`. Its message is the output of `lip freeze-record --freeze v3 --image-digest <digest> --tag-message` (the hashes listed in design §2.1). It is pushed; there is no release or external archive (design §2.2).
 2. Run the pre-freeze work (design §11).
 3. In the adaptation pull request, on a clean checkout, run `lip freeze-record --freeze v3 --template <t> --n <N> --arms <models, comma-separated> --image-digest <digest> --write`. `scripts/check_v3_diff.py freeze-v3-pre HEAD`, run from the `freeze-v3-pre` copy of the script, must pass.
 4. Commit this file alone as the freeze commit, and tag it `freeze-v3`.

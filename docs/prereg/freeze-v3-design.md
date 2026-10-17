@@ -1,6 +1,6 @@
 # Lost in Place: experiment design, freeze-v3 (E5, the O-ladder wave)
 
-**Status: pre-registration.** This document is hashed in the annotated tag `freeze-v3-pre`, which is pushed and externally timestamped before any outcome-bearing model call of E5 (§2.1, §2.2). Between that tag and the `freeze-v3` tag it may change only inside the three blocks marked `<!-- filled at freeze -->` (§2.6, §2.7, §2.8), and only by the adaptation rules in §2.3; `scripts/check_v3_diff.py` enforces this (§2.4). After `freeze-v3` it changes only by a dated entry in the [amendment log](#amendment-log). The measurement contract that goes with it is [`SPEC-v3.md`](../../SPEC-v3.md) (SPEC 0.2). The freeze-v2 design (A1–A11, [archived here](README.md)) and [`SPEC.md`](../../SPEC.md) are closed and unchanged.
+**Status: pre-registration.** This document is hashed in the annotated tag `freeze-v3-pre`, which is pushed to `main` before any outcome-bearing model call of E5 (§2.1). There is no external archive: the timestamp rests on the tag and the git history (§2.2). Between that tag and the `freeze-v3` tag it may change only inside the three blocks marked `<!-- filled at freeze -->` (§2.6, §2.7, §2.8), and only by the adaptation rules in §2.3; `scripts/check_v3_diff.py` enforces this (§2.4). After `freeze-v3` it changes only by a dated entry in the [amendment log](#amendment-log). The measurement contract that goes with it is [`SPEC-v3.md`](../../SPEC-v3.md) (SPEC 0.2). The freeze-v2 design (A1–A11, [archived here](README.md)) and [`SPEC.md`](../../SPEC.md) are closed and unchanged.
 
 ## Summary
 
@@ -12,7 +12,7 @@
 - **Rule:** a Tango paired score interval with δ = 10 points. Four primaries per arm at 98.75%: H1a′, H4a, H4b and H4d(i) (§3, §7).
 
 **How it is pre-registered.**
-1. The annotated, hashed tag `freeze-v3-pre` is pushed and timestamped on Zenodo **before any outcome-bearing call**.
+1. The annotated, hashed tag `freeze-v3-pre` is pushed **before any outcome-bearing call**. Its timestamp is the tag and the git history; there is no external archive (§2.2).
 2. Then the GPT-5.6 Sol and Claude Sonnet 5.5 smoke calls, Phase 0, the wording check and the canaries run (§11).
 3. `freeze-v3` may differ from `freeze-v3-pre` only by applying the adaptation rules in §2.3, and a script checks the diff.
 4. Mahmood signs off on the `freeze-v3` tag, and only then does the wave run.
@@ -61,11 +61,11 @@ and the image digest. It is printed by `lip freeze-record --freeze v3 --image-di
 
 No family c000–c159 is flown, or sent to a model, before the `freeze-v3` tag.
 
-### 2.2 External timestamp
+### 2.2 Timestamp: no external archive
 
-- On the tag, a GitHub release is published. Zenodo's GitHub integration archives it and mints a DOI. The release notes repeat the hashes.
-- `freeze-v3` gets a second release, which becomes a new version under the same Zenodo concept DOI.
-- **Fallback.** If Zenodo isn't linked when the tag is pushed, an OSF Registries open-ended registration carries the same hashes and this document.
+- **No external archive** (decided on Oct 17, 2026). Neither tag is deposited with Zenodo, OSF or any other registry, and no GitHub release is published.
+- **The timestamp rests on the git tag and history.** `freeze-v3-pre` and `freeze-v3` are annotated tags on `main`, pushed to GitHub. Each tag's message carries the hashes (§2.1, §2.8), and the commits before and after it show what changed when. `main`'s history is never rewritten.
+- **What this does not give.** The tags and the history are held by the project, so the timestamp is not independent of it: a reader has to trust that the tags were not moved and the history was not rewritten. This is a departure from the draft design, which had a Zenodo DOI with an OSF fallback, and is disclosed as SPEC-v3 departure 16.
 
 ### 2.3 Adaptation rules: the only things that may change between the two tags
 
@@ -130,7 +130,7 @@ The exceptions are the Phase 0 discordance and test-retest columns (A-2, A-3) an
 ### 2.6 Pre-freeze reviews
 
 <!-- filled at freeze -->
-Four internal reviews of the draft design were made on 2026-10-16, before the build: methodology, construct validity, build readiness, and cost and operations. Each was read-only, made separately from the others and from the design's author, against `main` at `f6595b8`, with no model calls and no spend. A combined verdict followed. They are internal to the project and are disclosed as such. **No outside review or public comment is claimed for freeze-v3**; the hashed, externally timestamped `freeze-v3-pre` tag (§2.1, §2.2) takes the place of a public-comment period.
+Four internal reviews of the draft design were made on 2026-10-16, before the build: methodology, construct validity, build readiness, and cost and operations. Each was read-only, made separately from the others and from the design's author, against `main` at `f6595b8`, with no model calls and no spend. A combined verdict followed. They are internal to the project and are disclosed as such. **No outside review or public comment is claimed for freeze-v3**; the hashed `freeze-v3-pre` tag (§2.1), with no external archive (§2.2), takes the place of a public-comment period.
 
 | Review | Verdict | Main findings | Resolved in |
 |---|---|---|---|
@@ -140,7 +140,7 @@ Four internal reviews of the draft design were made on 2026-10-16, before the bu
 | Cost and operations | The budget held as a ceiling (median about $350) but had to rise before Oct 23 | October's actual spend lags the dashboard; the budget action would deny the job role mid-run and persist into November; the GPT arm (then GPT-6.1 Sol) carries the cost tail; the Qwen price was out of date | §10 |
 
 **Combined verdict:** do not tag the freeze as first drafted; build once the blocking fixes are applied. The blocking fixes and where each is resolved:
-1. **Pre-registration timing.** A hashed tag before Phase 0, with mechanical rules for every later adaptation, externally timestamped: §2.
+1. **Pre-registration timing.** A hashed tag before Phase 0, with mechanical rules for every later adaptation: §2. (The external timestamp the reviews asked for was dropped on Oct 17, 2026; §2.2.)
 2. **The loud anchor is 2.0 m, not 1.8 m.** The scripted-control timing is re-derived from 2.0 m: §5, §6.
 3. **The near-edge lint is replaced** by wording strata: §5.3.
 4. **Fresh families,** deduplicated, with a new prefix and seed, and without the "then turn and fly" template: §5.1.
@@ -170,7 +170,7 @@ The should-fix items were applied in the same revision: every level is canaried 
 ### 2.8 Freeze record
 
 <!-- filled at freeze -->
-*Filled by the adaptation pull request.* The `freeze-v3-pre` tag, its commit, its GitHub release and its Zenodo DOI (or OSF registration); the values of the `freeze-v3` record in `SPEC-v3.md`, except this document's own hash and the git SHA, which this document can't carry; the chosen template, N and confirmatory arms. The `freeze-v3` tag, its commit and its DOI come after this text is fixed, so they are recorded in the tag message, the release notes and `docs/prereg/freeze-v3-signoff.md`.
+*Filled by the adaptation pull request.* The `freeze-v3-pre` tag and its commit (there is no release or external archive, §2.2); the values of the `freeze-v3` record in `SPEC-v3.md`, except this document's own hash and the git SHA, which this document can't carry; the chosen template, N and confirmatory arms. The `freeze-v3` tag and its commit come after this text is fixed, so they are recorded in the tag message and `docs/prereg/freeze-v3-signoff.md`.
 <!-- end filled at freeze -->
 
 ## 3. Hypotheses
@@ -755,7 +755,7 @@ The admission script, `scripts/e5_admission.py`, computes A-2 to A-5 (A-3b inclu
 
 ## 12. From the pre tag to the analysis
 
-1. **The code is on `main` and the wave's image is deployed.** `freeze-v3-pre` is tagged on `main` and released, and the Zenodo DOI (or OSF registration) is recorded.
+1. **The code is on `main` and the wave's image is deployed.** `freeze-v3-pre` is tagged on `main` and pushed. There is no release or external archive (§2.2).
 2. **The pre-freeze runs** (§11).
 3. **The adaptation pull request:**
    - apply A-1 to A-7;
@@ -765,7 +765,7 @@ The admission script, `scripts/e5_admission.py`, computes A-2 to A-5 (A-3b inclu
    - fill the marked blocks.
 
    The diff check (§2.4) must pass, and so must `lip freeze-record --freeze v3 --image-digest sha256:<digest> --check`.
-4. **Mahmood merges it,** commits `SPEC-v3.md` alone as the freeze commit, tags `freeze-v3`, and adds `docs/prereg/freeze-v3-signoff.md`; the second Zenodo version is released.
+4. **Mahmood merges it,** commits `SPEC-v3.md` alone as the freeze commit, tags `freeze-v3`, and adds `docs/prereg/freeze-v3-signoff.md`, and pushes the tag.
 5. **The wave.**
    - **Pre-flight:** `lip freeze-record --freeze v3 --check` and S-0 pass before each arm.
    - **Order:**
@@ -784,7 +784,7 @@ The admission script, `scripts/e5_admission.py`, computes A-2 to A-5 (A-3b inclu
 
 | When | What |
 |---|---|
-| by Oct 27 | `freeze-v3-pre` tagged and released |
+| by Oct 27 | `freeze-v3-pre` tagged and pushed |
 | Oct 27–29 | Pre-freeze runs |
 | Oct 30–Nov 5 | No runs. The adaptation pull request, sign-off and `freeze-v3` tag |
 | Nov 6–8 | The wave (day 3 is slack and the labeller) |
