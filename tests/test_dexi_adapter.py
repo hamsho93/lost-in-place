@@ -342,6 +342,26 @@ def test_the_dexi_driver_anchors_relative_primitives_when_they_execute() -> None
     assert p.at_execution(move, at()) is move
 
 
+def test_only_a_horizontal_move_anchored_at_execution_has_a_commanded_distance() -> None:
+    p = v2(
+        ("move", {"direction": "forward", "distance_m": 2.0}),
+        ("move", {"direction": "up", "distance_m": 0.3}),
+        driver="dexi",
+    )
+    move = propose(p, at(north=0.0, east=0.0, heading=0.0))
+    assert p.commanded_m(move) is None  # not yet anchored at execution
+    flown = p.at_execution(move, at(north=-0.004, east=0.0, heading=0.0))
+    # Anchored on north 0.00, so the true estimate starts 2.004 m from the target.
+    assert flown == Action("move", {"north_m": 2.0, "east_m": 0.0}) and p.commanded_m(flown) == 2.0
+    done(p, flown)
+    climb = p.at_execution(propose(p, at(altitude=1.4)), at(altitude=1.5))
+    assert climb.name == "take_off" and p.commanded_m(climb) is None
+    # The freeze-v2 driver flies the decision-time target, from wherever the vehicle is by then.
+    old = v2(("move", {"direction": "forward", "distance_m": 2.0}))
+    move = propose(old, at(north=0.0, east=0.0, heading=0.0))
+    assert old.commanded_m(old.at_execution(move, at(north=-0.004, east=0.0, heading=0.0))) is None
+
+
 def test_dexi_options_are_checked_before_a_sweep_flies_them() -> None:
     check_options({"model": "claude-sonnet-4-6", "prompt": "dexi-v2", "driver": "dexi"})
     check_options({})

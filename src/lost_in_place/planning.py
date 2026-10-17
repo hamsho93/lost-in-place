@@ -154,11 +154,14 @@ class ExecutionTimePlanner(PrimitivePlanner, Protocol):
     charged latency, as DEXI's driver anchors them, rather than when the planner was asked.
     `at_execution` gets the observation at that moment and returns the action to fly; the
     decision keeps the action the planner proposed and the validator checked. `arrival` is the
-    planner's driver's arrival rule."""
+    planner's driver's arrival rule. `commanded_m` is the horizontal distance a move `at_execution`
+    anchored on that observation was commanded to fly (None for anything else)."""
 
     arrival: Arrival
 
     def at_execution(self, action: Action, observation: Observation) -> Action: ...
+
+    def commanded_m(self, action: Action) -> float | None: ...
 
 
 @runtime_checkable
