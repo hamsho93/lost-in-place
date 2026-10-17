@@ -235,8 +235,9 @@ TOKEN_PRICES = {
     "gpt-5.6-sol": (4.40, 22.0),
     "claude-sonnet-5-5": (2.20, 11.0),
 }
-# Reasoning tokens a call adds, unmeasured (§10.1 assumes a median of 200 at effort low).
-REASONING_TOKENS = {"gpt-5.6-sol": 200, "claude-sonnet-5-5": 200}
+# Reasoning tokens a call adds at provider-default effort: the frontier smoke's output per action call
+# less its visible reply (design §10.1). Probe replies may reason differently.
+REASONING_TOKENS = {"gpt-5.6-sol": 75, "claude-sonnet-5-5": 210}
 # Claude 4.7 and later tokenize the same text into about 30% more tokens.
 TOKENIZER_FACTOR = {"claude-sonnet-5-5": 1.3}
 CMU_USD_PER_MIN = 0.05718

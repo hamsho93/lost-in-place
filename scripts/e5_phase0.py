@@ -8,8 +8,8 @@ ladder's O1 rungs, which decides A-2 and part of A-3. It generalises the b42 pro
   re-rendered at all 7 levels.
 - Calls: one action call (DEXI's tools) per prompt, plus the comprehension probe (no tools). Claude
   Sonnet 4.6 gets every prompt; GPT-5.6 Sol and Claude Sonnet 5.5 one prompt per family and state
-  (rep 0), each action call sent twice when the entry has no temperature (Sonnet 5.5's expected
-  entry, -fb1). Each first-step prompt gets one action call per model.
+  (rep 0), each action call sent twice when the entry has no temperature (both late arms' base
+  entries). Each first-step prompt gets one action call per model.
 - Output (`summarise`): per model, the discordance of each rung against O1 by state, test-retest
   r_tr, the invalid-reply rates and the first move's length per level. Nothing else: these are the
   only behaviour columns the design lets a decider see before the analysis (section 2.5), on retired
@@ -52,27 +52,31 @@ STATES = {"loud": "loud", "brief": "brief"}
 REPLAY_LEVELS = ("O1", "O1-L", "O1-N", "O1-R", "O1-V")
 RUNGS = ("O1-L", "O1-N", "O1-R", "O1-V")
 FIRST_STEP_LEVELS = tuple(dexi.LADDER)
-GPT_ENTRIES = ("gpt-5.6-sol", "gpt-5.6-sol-fb1", "gpt-5.6-sol-fb2", "gpt-5.6-sol-fb3")
-SONNET55_ENTRIES = ("claude-sonnet-5-5", "claude-sonnet-5-5-fb1", "claude-sonnet-5-5-fb2")
+GPT_ENTRIES = ("gpt-5.6-sol", "gpt-5.6-sol-fb1")
+SONNET55_ENTRIES = ("claude-sonnet-5-5",)
 SHORT_STEP_M = 0.9
 LATERAL = ("forward", "back", "left", "right")
 # Rough per-call token counts for `estimate`, from E4's recorded Claude calls on DEXI's prompt.
 TOKENS = {"action": (1500, 60), "probe": (400, 15)}
-# GPT-5.6 Sol's action calls as measured in its frontier smoke at effort low: about 590 input and 80
-# output tokens, of which these 24 are the visible reply and the rest is reasoning.
-TOKENS_BY_PRICE = {"gpt": {"action": (590, 24), "probe": (400, 15)}}
-# $/Mtok in and out, reasoning tokens per call at low effort, and token inflation (Claude 5.x's
-# tokenizer counts about 30% more for the same text), as in the frontier cost model.
+# The late arms' action calls as measured in the frontier smoke at default effort (O1, Oct 16-17):
+# GPT-5.6 Sol about 593 input and 97 output tokens, of which these 24 are the visible reply and the
+# rest is reasoning; Claude Sonnet 5.5 about 1,463 and 290 in its own tokenizer, the visible reply
+# taken as E4's 60 times 1.3. Their probes are E4's, the Claude 5.x ones scaled by 1.3.
+TOKENS_BY_PRICE = {
+    "gpt": {"action": (593, 24), "probe": (400, 15)},
+    "claude5": {"action": (1463, 78), "probe": (520, 20)},
+}
+# $/Mtok in and out, reasoning tokens per call at default effort, and token inflation (applied to
+# TOKENS; the measured counts above already include it).
 PRICES = {
     "claude": (3.30, 16.50, 0, 1.0),
-    "gpt": (4.40, 22.00, 56, 1.0),
-    "claude5": (2.20, 11.00, 200, 1.3),
+    "gpt": (4.40, 22.00, 73, 1.0),
+    "claude5": (2.20, 11.00, 212, 1.0),
 }
 ESTIMATED = (
     ("claude-sonnet-4-6", "claude", 1),
-    ("gpt-5.6-sol", "gpt", 1),
-    ("gpt-5.6-sol-fb2", "gpt", 2),
-    ("claude-sonnet-5-5-fb1", "claude5", 2),
+    ("gpt-5.6-sol", "gpt", 2),
+    ("claude-sonnet-5-5", "claude5", 2),
 )
 
 

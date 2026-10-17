@@ -48,8 +48,8 @@ from lost_in_place.llm.registry import get_model
 CLAUDE = "claude-sonnet-4-6"
 EXISTING_ARMS = ("qwen3-4b-student", "qwen3-4b-zero-shot", CLAUDE)
 GPT_ARM, SONNET55_ARM = "gpt-5.6-sol", "claude-sonnet-5-5"
-GPT_ENTRIES = (GPT_ARM, f"{GPT_ARM}-fb1", f"{GPT_ARM}-fb2", f"{GPT_ARM}-fb3")
-SONNET55_ENTRIES = (SONNET55_ARM, f"{SONNET55_ARM}-fb1", f"{SONNET55_ARM}-fb2")
+GPT_ENTRIES = (GPT_ARM, f"{GPT_ARM}-fb1")
+SONNET55_ENTRIES = (SONNET55_ARM,)
 # Each smoked arm, its fallback order, and the rule that admits it.
 SMOKED = {GPT_ARM: GPT_ENTRIES, SONNET55_ARM: SONNET55_ENTRIES}
 RULES = {GPT_ARM: "A-3", SONNET55_ARM: "A-3b"}
