@@ -211,6 +211,9 @@ def test_record_v3_hashes_the_chosen_templates_directories(repo: Path) -> None:
         freeze._canonical({"wording-check": "Where is the point?"})
     )
     assert values[freeze.LABELLING_ROW] == freeze.labelling_hash()
+    assert (
+        values[freeze.SECOND_LABELLING_ROW] == freeze.second_labelling_hash() != values[freeze.LABELLING_ROW]
+    )
     assert values[freeze.IMAGE_ROW] == DIGEST and len(values[freeze.GIT_ROW]) == 40
     assert values[freeze.ROWS[0]] == freeze.spec_hash_v3(SPEC_V3_TEXT)
     assert [values[row] for row in (freeze.TEMPLATE_ROW, freeze.N_ROW, freeze.M_ROW)] == ["t1", "120", "12"]
@@ -221,6 +224,27 @@ def test_record_v3_hashes_the_chosen_templates_directories(repo: Path) -> None:
     }
     bare, _ = freeze.record_v3(repo, None, None)
     assert all(bare[row] == "" for row in (*freeze.SCENARIO_ROWS_V3.values(), freeze.IMAGE_ROW, freeze.M_ROW))
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("SECOND_LABELLER_MODEL", "other-model"),
+        ("DOUBLE_CODED_ARM", "claude-sonnet-5-5"),
+        ("MATCHED_SEED", 2),
+        ("FLAG_POINTS", 0.1),
+        ("BRIEF", "x"),
+    ],
+)
+def test_the_second_labelling_hash_follows_its_bundle_and_leaves_freeze_v2s_alone(
+    monkeypatch: pytest.MonkeyPatch, name: str, value: object
+) -> None:
+    from lost_in_place import labels
+
+    second, first = freeze.second_labelling_hash(), freeze.labelling_hash()
+    monkeypatch.setattr(labels, name, value)
+    assert freeze.second_labelling_hash() != second
+    assert (freeze.labelling_hash() == first) is (name != "BRIEF")
 
 
 def test_record_v3_names_what_is_missing(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:

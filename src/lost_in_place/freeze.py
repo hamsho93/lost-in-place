@@ -27,7 +27,9 @@ holds four adaptation outcomes, which are values: the wording template (A-1), N 
 confirmatory arms (A-3, A-4) and the wave-wide m (A-5, 4 times the arms). The scenario rows hash the
 chosen template's directories. The probe-prompt row hashes the frozen texts that probes send
 outside an arm's prompt (`PROBE_TEXTS`), apart from the v3 prompt bundle, so the bundle doesn't
-depend on the probe modules. `tag_hashes()` is the hash list of the `freeze-v3-pre` tag message.
+depend on the probe modules. Its labelling row is freeze-v2's bundle; a second row hashes the second
+labeller's (`labels.second_labelling_bundle()`), which double-codes the GPT-5.6 Sol arm. `tag_hashes()`
+is the hash list of the `freeze-v3-pre` tag message.
 """
 
 from __future__ import annotations
@@ -262,6 +264,12 @@ def labelling_hash() -> str:
     return sha256(_canonical(labelling_bundle()))
 
 
+def second_labelling_hash() -> str:
+    from lost_in_place.labels import second_labelling_bundle
+
+    return sha256(_canonical(second_labelling_bundle()))
+
+
 def git_sha(root: Path) -> str:
     """HEAD, with `-dirty` if tracked files have uncommitted changes."""
     sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True)
@@ -393,6 +401,7 @@ SCENARIO_ROWS_V3 = {s: f"`{E5_SCENARIOS}/<t>/{s}/*.yaml` (sorted, concatenated)"
 PROMPT_ROW_V3 = "Prompt bundle v3 (`freeze.prompt_bundle_v3()`)"
 PROBE_ROW_V3 = "Probe prompts v3 (`freeze.probe_bundle_v3()`)"
 LABELLING_ROW = ROWS[5]
+SECOND_LABELLING_ROW = "Second labeller (`labels.second_labelling_bundle()`)"
 MODELS_ROW = f"Model registry (`{MODEL_REGISTRY}`)"
 SWEEPS_ROW = f"`{E5_SWEEPS}/*.yaml` (sorted, concatenated)"
 IMAGE_ROW = ROWS[6]
@@ -418,6 +427,7 @@ V3_ROWS = (
     PROMPT_ROW_V3,
     PROBE_ROW_V3,
     LABELLING_ROW,
+    SECOND_LABELLING_ROW,
     MODELS_ROW,
     SWEEPS_ROW,
     IMAGE_ROW,
@@ -635,6 +645,7 @@ def record_v3(
         PROMPT_ROW_V3: functools.partial(prompt_hash_v3, root),
         PROBE_ROW_V3: functools.partial(probe_hash_v3, root),
         LABELLING_ROW: labelling_hash,
+        SECOND_LABELLING_ROW: second_labelling_hash,
         MODELS_ROW: functools.partial(_file_hash, root / MODEL_REGISTRY),
         SWEEPS_ROW: functools.partial(_set_hash, root / E5_SWEEPS),
         IMAGE_ROW: functools.partial(str, image_digest or ""),

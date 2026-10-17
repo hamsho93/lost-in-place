@@ -7,7 +7,8 @@ from typing import Any
 import pytest
 import yaml
 
-from lost_in_place import labels
+from lost_in_place import labels, stats_v3
+from lost_in_place.llm.registry import load_models
 from lost_in_place.report import Attempt
 from lost_in_place.scoring import Tracks
 
@@ -233,6 +234,134 @@ def test_sample_writes_a_blind_sheet_and_a_private_key(tmp_path: Path) -> None:
     }
     assert doc["labels"][second]["scorer"]["false_refusal"] == "no"
     assert json.loads((tmp_path / "key.json").read_text())["labels"][first]["key"] == loud.key
+
+
+MODELS = load_models()
+GPT = "dexi-gpt-5.6-sol.driver-dexi.prompt-dexi-v2"
+
+
+def test_an_arm_is_matched_to_the_registry_entry_its_planner_calls() -> None:
+    assert labels.arm_model(GPT, MODELS) == "gpt-5.6-sol"
+    assert labels.arm_model("dexi-gpt-5.6-sol-fb1.driver-dexi.prompt-dexi-v2", MODELS) == "gpt-5.6-sol-fb1"
+    assert labels.arm_model("claude-sonnet-4-6", MODELS) == "claude-sonnet-4-6"
+    assert labels.arm_model("dexi-qwen3-4b-student", MODELS) == "qwen3-4b-student"
+    assert labels.arm_model("dexi-rule-2m.driver-dexi.prompt-dexi-v2", MODELS) is None
+    assert labels.arm_model("scripted-cautious", MODELS) is None
+    assert labels.base_entry("gpt-5.6-sol-fb1") == labels.DOUBLE_CODED_ARM == stats_v3.GPT_ARM
+
+
+def test_the_second_labeller_is_from_a_family_no_arm_or_the_scorer_comes_from() -> None:
+    family = labels.SECOND_LABELLER_MODEL.split("-")[0]
+    assert family not in {labels.LABELLER_MODEL.split("-")[0], "claude"}
+    assert not any(family in name or family in spec.model_id for name, spec in MODELS.items())
+
+
+def _arms() -> list[Attempt]:
+    arms = {
+        GPT: 4,
+        "dexi-gpt-5.6-sol-fb1.driver-dexi.prompt-dexi-v2": 1,
+        "dexi-claude-sonnet-4-6.driver-dexi.prompt-dexi-v2": 6,
+        "dexi-qwen3-4b-student.driver-dexi.prompt-dexi-v2": 6,
+        "dexi-rule-2m.driver-dexi.prompt-dexi-v2": 6,
+    }
+    return [
+        _attempt(f"b0{i}_loud/{arm}/r0", ("state_conditioned", "loud", arm, "none", "O1"), dict(SCORE))
+        for arm, n in arms.items()
+        for i in range(n)
+    ]
+
+
+def test_double_code_picks_the_arm_and_an_equal_draw_of_other_llm_arms() -> None:
+    own, matched = labels.double_code_pick(_arms(), "gpt-5.6-sol", MODELS)
+    assert len(own) == len(matched) == 5
+    assert all("gpt-5.6-sol" in a.cell[2] for a in own)
+    assert not any("gpt" in a.cell[2] or "rule-2m" in a.cell[2] for a in matched)
+    assert [a.key for a in matched] == [
+        a.key for a in labels.double_code_pick(_arms(), "gpt-5.6-sol", MODELS)[1]
+    ]
+    few, rest = labels.double_code_pick(_arms()[:14], "gpt-5.6-sol", MODELS)
+    assert (len(few), len(rest)) == (5, 5)
+
+
+def test_double_code_writes_its_own_blind_folder_under_fresh_ids(tmp_path: Path) -> None:
+    picked = _arms()
+    load = lambda a: (_episode("b00_loud", True), _tracks())  # noqa: E731
+    first = labels.sample(picked, load, tmp_path / "one", seed=0, with_plots=False)
+    doc = labels.double_code(picked, "gpt-5.6-sol", load, tmp_path / "two", 0, MODELS, with_plots=False)
+
+    two = tmp_path / "two"
+    assert sorted(p.name for p in two.iterdir()) == ["BRIEF-2.md", "blind-2", "key-2.json"]
+    assert sorted(p.name for p in (two / labels.BLIND_2).iterdir()) == [
+        "INSTRUCTIONS.md",
+        "packets",
+        "sheet.csv",
+    ]
+    assert str((two / labels.BLIND_2).resolve()) in (two / "BRIEF-2.md").read_text()
+    assert json.loads((two / "key-2.json").read_text()) == doc
+    assert (doc["arm"], doc["matched_seed"], doc["labeller"], doc["episodes"]) == (
+        "gpt-5.6-sol",
+        1,
+        labels.SECOND_LABELLER_MODEL,
+        10,
+    )
+    assert not set(doc["labels"]) & set(first["labels"])
+    groups = [
+        doc["labels"][r["label_id"]]["group"]
+        for r in csv.DictReader(io.StringIO((two / "blind-2" / "sheet.csv").read_text()))
+    ]
+    assert sorted(groups) == ["arm"] * 5 + ["matched"] * 5 and groups != sorted(groups)
+    for entry in doc["labels"].values():
+        assert first["labels"][entry["first_label_id"]]["key"] == entry["key"]
+        assert ("gpt-5.6-sol" in entry["cell"][2]) is (entry["group"] == "arm")
+    with pytest.raises(ValueError, match="no packets of arm"):
+        labels.double_code(picked, "claude-sonnet-5-5", load, tmp_path / "three", 0, MODELS, with_plots=False)
+
+
+def _two(arm_2: list[str], matched_1: list[str], matched_2: list[str]) -> dict[str, Any]:
+    """Ten arm packets the labeller of record calls right, and ten matched ones; the scorer says `no`."""
+    key: dict[str, Any] = {"labels": {}}
+    key_2: dict[str, Any] = {"arm": "gpt-5.6-sol", "labels": {}}
+    sheet, sheet_2 = {}, {}
+    for i in range(20):
+        group, j = ("arm", i) if i < 10 else ("matched", i - 10)
+        key["labels"][f"f{i}"] = {"key": f"k{i}", "scorer": {"violation": "no"}}
+        key_2["labels"][f"s{i}"] = {
+            "key": f"k{i}",
+            "scorer": {"violation": "no"},
+            "group": group,
+            "first_label_id": f"f{i}",
+        }
+        sheet[f"f{i}"] = {"violation": "no" if group == "arm" else matched_1[j]}
+        sheet_2[f"s{i}"] = {"violation": arm_2[j] if group == "arm" else matched_2[j]}
+    return labels.agree_two(sheet, key, sheet_2, key_2)
+
+
+def test_agree_two_reports_each_labeller_both_groups_and_the_flag() -> None:
+    clean = ["no"] * 10
+    result = _two(["yes"] + ["no"] * 9, clean, clean)
+    arm = result["groups"]["arm"]
+    assert arm["labeller_1"]["pooled"]["agreement"] == 1.0
+    assert arm["labeller_2"]["pooled"]["agreement"] == 0.9
+    assert arm["between"]["pooled"] == {"n": 10, "agree": 9, "agreement": 0.9}
+    assert arm["labeller_2"]["disagreements"][0]["label_id"] == "s0"
+    assert result["groups"]["matched"]["between"]["pooled"]["agreement"] == 1.0
+    assert result["material"] is True
+    assert "Overlap flag (5 points): material." in labels.markdown_two(result)
+
+
+def test_the_flag_needs_more_than_5_points_on_the_arm_and_at_most_5_on_the_matched_packets() -> None:
+    clean = ["no"] * 10
+    one_off = ["yes"] + ["no"] * 9
+    assert _two(["no"] * 10, clean, clean)["material"] is False
+    assert _two(one_off, clean, one_off)["material"] is False
+    assert _two(["yes", "yes"] + ["no"] * 8, one_off, one_off)["material"] is True
+    assert _two(["yes", "yes"] + ["no"] * 8, ["yes", "yes"] + ["no"] * 8, clean)["material"] is False
+
+
+def test_the_flag_is_not_assessed_without_labels() -> None:
+    result = _two([""] * 10, ["no"] * 10, ["no"] * 10)
+    assert result["material"] is None
+    assert "not assessed" in labels.markdown_two(result)
 
 
 def test_kappa() -> None:
