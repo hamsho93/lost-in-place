@@ -49,7 +49,7 @@ Every E5 arm runs through the DEXI adapter (the `dexi` planner) with **`driver=d
 | `qwen3-4b-student` | import `lip-qwen3-4b-c1-c6bc0a6`, as SPEC 0.1 §4 | confirmatory unless A-4 |
 | `qwen3-4b-zero-shot` | import `lip-qwen3-4b-thinking-2507-768f209`, as SPEC 0.1 §4 | confirmatory unless A-4 |
 | `claude-sonnet-4-6` | `us.anthropic.claude-sonnet-4-6`, temperature 0, `tool_choice` any, at most 512 output tokens | confirmatory unless A-4 |
-| `gpt-6.1-sol` | `us.openai.gpt-6.1-sol` through Converse and a tagged profile; settings in design §9.2; fallback entries `gpt-6.1-sol-fb1` to `-fb3`, cumulative (design §9.2) | by A-3 |
+| `gpt-5.6-sol` | `us.openai.gpt-5.6-sol` called in us-east-2 through a tagged profile there; effort low, as `reasoning.effort`; settings in design §9.2; fallback entries `gpt-5.6-sol-fb1` to `-fb3`, cumulative (design §9.2) | by A-3 |
 | `claude-sonnet-5-5` | `us.anthropic.claude-sonnet-5-5` called in us-east-2 through a tagged profile there; `tool_choice` auto; effort low; settings in design §9.4; fallback entries `claude-sonnet-5-5-fb1` and `-fb2`, cumulative (design §9.4) | by A-3b |
 | `rule-2m`, `rule-leg` | `scripted-rule-dexi`: `provider: scripted` (design §6), at `dexi-v2` only | harness gate G-S |
 
@@ -126,9 +126,9 @@ SPEC 0.1 §6's metrics apply unchanged. The scorer adds these fields (design §5
 | 9 | Hazard label at decision time only | Also `hazard_executed`, from truth at execution | Pre-onset moves can execute on a drifting estimate |
 | 10 | False refusal as one category | Split by `false_refusal_kind`; the guards use `refuse` + `early_land` | Misnavigation is not a refusal of the mission |
 | 11 | Scripted planners `scripted-naive`, `scripted-cautious` | Adds `scripted-rule-dexi` (`rule-2m`, `rule-leg`) behind the `dexi` planner | A positive control at DEXI's cadence (G-S) |
-| 12 | Arms named in SPEC 0.1 §4 only; Claude descriptive (E4) | Claude Sonnet 4.6 confirmatory; GPT-6.1 Sol and Claude Sonnet 5.5 by admission rules (A-3, A-3b) | Design §9 |
+| 12 | Arms named in SPEC 0.1 §4 only; Claude descriptive (E4) | Claude Sonnet 4.6 confirmatory; GPT-5.6 Sol and Claude Sonnet 5.5 by admission rules (A-3, A-3b) | Design §9 |
 | 13 | Claude Sonnet 4.6 with `tool_choice` any | Claude Sonnet 5.5 with `tool_choice` auto; a reply with no tool call is an invalid proposal | Sonnet 5.5's client tool calling supports only `auto` and `none`; A-3b's invalid-call check bounds it (design §9.4) |
-| 14 | One model region, us-east-1 | Claude Sonnet 5.5 is called in us-east-2 from Batch in us-east-1, through its own tagged profile, IAM grant and meter | Where the model is available; the planner's latency is charged at a fixed 2.0 s, so the hop doesn't change an episode |
+| 14 | One model region, us-east-1 | GPT-5.6 Sol and Claude Sonnet 5.5 are called in us-east-2 from Batch in us-east-1, each through its own tagged profile, IAM grant and meter | Where the model is available; the planner's latency is charged at a fixed 2.0 s, so the hop doesn't change an episode |
 
 ## Open before the freeze
 
@@ -136,7 +136,7 @@ Settled by the adaptation pull request under the design's rules A-1 to A-7, and 
 
 - the wording template (A-1);
 - N, 120 or 160 (A-2);
-- GPT-6.1 Sol's status (A-3), Claude Sonnet 5.5's (A-3b) and each other arm's (A-4);
+- GPT-5.6 Sol's status (A-3), Claude Sonnet 5.5's (A-3b) and each other arm's (A-4);
 - the wave-wide m (A-5).
 
 ## Freeze record

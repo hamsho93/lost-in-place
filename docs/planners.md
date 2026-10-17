@@ -206,13 +206,13 @@ uv run lip run scenarios/e5/t0/canary/k000_loud.yaml --planner dexi \
   --planner-opt model=rule-2m --planner-opt driver=dexi --planner-opt prompt=dexi-v2 --obs O1
 ```
 
-**The late arms, GPT-6.1 Sol and Claude Sonnet 5.5,** use a `ModelSpec` field, `additional_request_fields`, that the Bedrock client passes to Converse as `additionalModelRequestFields`; their entries set the reasoning effort to low (design §9.2, §9.4). The replies' `reasoningContent` is kept in the traces. Each has pre-declared fallback entries, tried in order only when Bedrock rejects the smoke call's request (`lip propose <entry> --planner dexi`). Each entry adds one change to the one before:
+**The late arms, GPT-5.6 Sol and Claude Sonnet 5.5,** use a `ModelSpec` field, `additional_request_fields`, that the Bedrock client passes to Converse as `additionalModelRequestFields`; their entries set the reasoning effort to low (design §9.2, §9.4). GPT-5.6 Sol takes it nested, as `{reasoning: {effort: low}}`, and rejects `temperature`, so its smoke call is expected to settle on `-fb2`. The replies' `reasoningContent` is kept in the traces. Each has pre-declared fallback entries, tried in order only when Bedrock rejects the smoke call's request (`lip propose <entry> --planner dexi`). Each entry adds one change to the one before:
 
 | Entry | Change |
 | --- | --- |
-| `gpt-6.1-sol-fb1` | `tool_choice: auto` |
-| `gpt-6.1-sol-fb2` | and no `temperature` |
-| `gpt-6.1-sol-fb3` | and no `additional_request_fields` |
+| `gpt-5.6-sol-fb1` | `tool_choice: auto` |
+| `gpt-5.6-sol-fb2` | and no `temperature` |
+| `gpt-5.6-sol-fb3` | and no `additional_request_fields` |
 | `claude-sonnet-5-5-fb1` | no `temperature` (the base entry already uses `tool_choice: auto`) |
 | `claude-sonnet-5-5-fb2` | and no `additional_request_fields` |
 

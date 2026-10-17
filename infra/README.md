@@ -123,12 +123,13 @@ The smoke test of Oct 13, 2026 ran DEXI's C0 missions through this path: 8 of 20
 
 ## Models in another region
 
-Claude Sonnet 5.5 and Haiku 5.5 have quota only in us-east-2 (6M and 10M tokens per minute; 0 in us-east-1), so their registry entries say `region: us-east-2` and the client calls the us-east-2 endpoint. A profile has to live in the region it's called in, and CloudFormation creates resources only in its stack's region. So the stack makes no profile for such an entry. Copying from the us-east-1 system profile would be the wrong one, with no quota.
+GPT-5.6 Sol, Claude Sonnet 5.5 and Haiku 5.5 have quota only in us-east-2 (10M, 6M and 10M tokens per minute for their `us.` profiles; 0 in us-east-1), so their registry entries say `region: us-east-2` and the client calls the us-east-2 endpoint. A profile has to live in the region it's called in, and CloudFormation creates resources only in its stack's region. So the stack makes no profile for such an entry. Copying from the us-east-1 system profile would be the wrong one, with no quota.
 
 Instead, each of these profiles is created once, by CLI, in its region and with the project tag. Its ARN is then passed as `-c useast2Profiles='{"<model id>": "<ARN>", ...}'`. With the ARN, the stack:
 
 - lets both roles invoke the profile;
 - lets both roles invoke `foundation-model/<model>*` (any region) only under `bedrock:InferenceProfileArn` equal to one of the project's profiles;
+- for an OpenAI model, lets both roles invoke the account's `project/default` in that region, which Bedrock also requires for GPT-5.6 Sol on bedrock-runtime;
 - adds the ARN to `LIP_BEDROCK_PROFILES` and `BedrockProfiles`.
 
 Synth fails unless the ARN is an `application-inference-profile` of this account in the entry's region, so a system profile can't slip in. An entry without an ARN gets a synth warning and no grant: the roles can't call it at all.
@@ -145,24 +146,32 @@ for m in claude-sonnet-5-5 claude-haiku-5-5; do
     --tags key=project,value=lost-in-place \
     --query '[inferenceProfileArn,status]' --output text | sed "s/$acc/<account>/g"
 done
+aws bedrock create-inference-profile --region us-east-2 \
+  --inference-profile-name LostInPlaceSim-openai-gpt-5-6-sol \
+  --description "lost-in-place planner calls to us.openai.gpt-5.6-sol" \
+  --model-source copyFrom="arn:aws:bedrock:us-east-2:$acc:inference-profile/us.openai.gpt-5.6-sol" \
+  --tags key=project,value=lost-in-place \
+  --query '[inferenceProfileArn,status]' --output text | sed "s/$acc/<account>/g"
 ```
+
+All three exist (Oct 16): Sonnet 5.5 `adjhqtlbtyxw`, Haiku 5.5 `ay8horiiyywr`, GPT-5.6 Sol `1v6bj762kok7`.
 
 **Read them back** wherever the ARNs are needed. This uses `bedrock:ListInferenceProfiles`, `GetInferenceProfile` and `ListTagsForResource` in us-east-2:
 
 ```bash
 east2_arn() { aws bedrock list-inference-profiles --region us-east-2 --type-equals APPLICATION \
-  --query "inferenceProfileSummaries[?inferenceProfileName=='LostInPlaceSim-anthropic-$1'].inferenceProfileArn" \
+  --query "inferenceProfileSummaries[?inferenceProfileName=='LostInPlaceSim-$1'].inferenceProfileArn" \
   --output text; }
-east2=$(printf '{"us.anthropic.claude-sonnet-5-5":"%s","us.anthropic.claude-haiku-5-5":"%s"}' \
-  "$(east2_arn claude-sonnet-5-5)" "$(east2_arn claude-haiku-5-5)")
-for arn in $(east2_arn claude-sonnet-5-5) $(east2_arn claude-haiku-5-5); do
+east2=$(printf '{"us.anthropic.claude-sonnet-5-5":"%s","us.anthropic.claude-haiku-5-5":"%s","us.openai.gpt-5.6-sol":"%s"}' \
+  "$(east2_arn anthropic-claude-sonnet-5-5)" "$(east2_arn anthropic-claude-haiku-5-5)" "$(east2_arn openai-gpt-5-6-sol)")
+for arn in $(east2_arn anthropic-claude-sonnet-5-5) $(east2_arn anthropic-claude-haiku-5-5) $(east2_arn openai-gpt-5-6-sol); do
   aws bedrock get-inference-profile --region us-east-2 --inference-profile-identifier "$arn" \
     --query '[status,models[].modelArn]' --output text
   aws bedrock list-tags-for-resource --region us-east-2 --resource-arn "$arn" --query tags --output text
 done
 ```
 
-Each one should be `ACTIVE`, list only its own 5.5 foundation model (once per `us.` region), and carry `project lost-in-place`.
+Each one should be `ACTIVE`, list only its own foundation model (once per `us.` region), and carry `project lost-in-place`.
 
 **The budget covers them.** Budgets and cost allocation tags are account-wide, not regional, so the tag filter counts the us-east-2 profiles' spend as it does us-east-1's. Check Cost Explorer, filtered by `project=lost-in-place` and region us-east-2, the day after the first call. `BudgetStop` denies `bedrock:InvokeModel*` on `*` with no condition, and IAM is global, so once attached it blocks the us-east-2 endpoint too. The wave submitter's CloudWatch reads are on `*`, so it can meter `AWS/Bedrock` in us-east-2 as well.
 
@@ -179,10 +188,12 @@ The ARNs would still have to reach this stack by context: a cross-region referen
 
 One deploy, from `main`, before the `freeze-v3-pre` tag (WP17 in the freeze-v3 plan). After it, the stack and the compute environment's AMI stay as they are until the wave ends. The one exception is an A-6 harness fix, which repeats steps 3 to 7 with the new image.
 
+The Oct 16 early deploy ran these steps with the freeze-v2 image and GPT-6.1 Sol in us-east-1. The GPT-5.6 Sol change replaces that arm, so the deploy is repeated once from `main` after it merges, and before the tag: steps 3 to 8, with GPT-5.6 Sol's ARN in `$east2`. The list below is what the deploy changes against the stack as it was before Oct 16. Against the live stack, the repeat changes only the GPT items, the `project/default` grant, the profile map and the image digest.
+
 **Steps that need Mahmood's OK, in this order.** The rest are read-only.
 
-1. Enable GPT-6.1 Sol in the Bedrock console playground (below).
-2. Step 2: create the two us-east-2 profiles.
+1. GPT-5.6 Sol is already subscribed (below); nothing to enable.
+2. Step 2: the three us-east-2 profiles exist; create any that is missing.
 3. Step 3: build and push the image.
 4. Step 4: tag the freeze-v3 and freeze-v2 images `freeze-*`.
 5. Step 6: deploy `LostInPlaceSim`.
@@ -192,10 +203,10 @@ None of them needs `cdk bootstrap`, in us-east-2 or anywhere else.
 
 **What it changes, and nothing else:**
 
-- **A tagged application inference profile** `LostInPlaceSim-openai-gpt-6-1-sol`, copied from `us.openai.gpt-6.1-sol`. It comes from WP6's `gpt-6.1-sol` entry in `models.yaml`; the stack needs no code for it.
-- **Both roles' grants.** The job and operator roles may invoke that profile, and may invoke `foundation-model/openai.gpt-6.1-sol` (any region, since `us.` routes to us-east-1, us-east-2 and us-west-2) only under `bedrock:InferenceProfileArn` equal to one of the stack's profiles. Nothing is granted on the system profile.
+- **GPT-5.6 Sol from us-east-2,** in place of GPT-6.1 Sol (Oct 16: the account has no GPT-6 access yet). Its entries say `region: us-east-2`, so the stack makes no profile for it; its ARN comes in `useast2Profiles` with the 5.5 models'. The Oct 16 deploy's us-east-1 profile `LostInPlaceSim-openai-gpt-6-1-sol` is **deleted**, since its entry is gone from `models.yaml`.
+- **Both roles' grants.** The job and operator roles may invoke the GPT-5.6 Sol profile, and may invoke `foundation-model/openai.gpt-5.6-sol*` (any region, since `us.` routes to us-east-1, us-east-2 and us-west-2) only under `bedrock:InferenceProfileArn` equal to one of the project's profiles. They may also invoke us-east-2's `project/default`, which Bedrock requires for GPT-5.6 Sol. Nothing is granted on the system profile.
 - **The same grants for Sonnet 5.5 and Haiku 5.5,** on their us-east-2 profiles from step 2 (WP6's `claude-sonnet-5-5`, `-fb1`, `-fb2` and smoke-only `claude-haiku-5-5` entries). The foundation-model grants are `foundation-model/anthropic.claude-sonnet-5-5*` and `anthropic.claude-haiku-5-5*`, under the same condition. The stack creates no profile for them.
-- **`LIP_BEDROCK_PROFILES`** in both job definitions, and the `BedrockProfiles` output, gain the GPT, Sonnet 5.5 and Haiku 5.5 mappings.
+- **`LIP_BEDROCK_PROFILES`** in both job definitions, and the `BedrockProfiles` output, map GPT-5.6 Sol, Sonnet 5.5 and Haiku 5.5 to their us-east-2 profiles, and drop GPT-6.1 Sol.
 - **Both job definitions move to the freeze-v3 image digest.** That is the whole of the v3 job definition: the command, resources, retries, timeout and roles stay the same. CloudFormation registers a new revision and deregisters the freeze-v2 one (`SweepEpisode…:19`, image `e879c1ef`). Re-running a freeze-v2 sweep afterwards therefore needs a redeploy with that digest.
 - **The ECR lifecycle rule** that keeps `freeze-*` images.
 - **Read-only grants on the operator role** for the wave submitter (`lost_in_place.wave`):
@@ -210,17 +221,17 @@ None of them needs `cdk bootstrap`, in us-east-2 or anywhere else.
 
 `budgetUsd` stays at 450, which is already live (Oct 16). The compute environment isn't touched: its AMI shows `UPDATE_AVAILABLE` and stays as it is.
 
-**GPT-6.1 Sol access.** It is sold through AWS Marketplace (product `prod-qco655ut2vn54`). The first call in the account subscribes it, and that call must come from a principal with `aws-marketplace:Subscribe`, `Unsubscribe` and `ViewSubscriptions`. The stack's roles have none of these, and shouldn't. So the account owner sends one message to GPT-6.1 Sol in the Bedrock console playground before the deploy. After that, the roles call it without Marketplace rights. To check it, run `aws bedrock get-foundation-model-availability --model-id openai.gpt-6.1-sol`. It should show `agreementAvailability` `AVAILABLE` and `authorizationStatus` `AUTHORIZED`; the `drone` user can't read this.
+**GPT-5.6 Sol access.** It is sold through AWS Marketplace (product `prod-k5bywj2464j7c`). The first call in the account subscribes it, and that call must come from a principal with `aws-marketplace:Subscribe`, `Unsubscribe` and `ViewSubscriptions`; the stack's roles have none of these, and shouldn't. The account owner made that call through the us-east-2 profile on Oct 16, and it returned without an access or Marketplace error, so the roles can call it now. Its effort goes in `additionalModelRequestFields` as `{"reasoning": {"effort": "low"}}`; a flat `reasoning_effort` is rejected.
 
 ### 0. Before starting
 
 - **The image's inputs are merged:** WP1, WP3, WP4, WP5, WP6, WP10 and WP12. The image bakes in `src/` and `scenarios/`, so it needs:
   - their code;
-  - the `gpt-6.1-sol`, `claude-sonnet-5-5` (with fallbacks), `claude-haiku-5-5` and scripted `rule-*` entries in `models.yaml`;
+  - the `gpt-5.6-sol` and `claude-sonnet-5-5` (each with fallbacks), `claude-haiku-5-5` and scripted `rule-*` entries in `models.yaml`;
   - both E5 template trees under `scenarios/e5/`.
 
   The stack reads the same `models.yaml` at synth, so deploy from the commit the image was built from.
-- **GPT-6.1 Sol is enabled,** as above.
+- **GPT-5.6 Sol is subscribed,** as above.
 - **Credentials can assume `cdk-hnb659fds-deploy-role`** and are an administrator in us-east-2 (for step 2). Use the same ones as the Oct 16 budget deploy; `drone` can't.
 - **Nothing is in flight** on the job queue, so no sweep mixes images.
 
@@ -310,7 +321,8 @@ npx -y aws-cdk@2 diff LostInPlaceSim --no-change-set "${flags[@]}" 2>&1 | mask
 
 - the changes listed above;
 - `Image` on `Episode` and `SweepEpisode`, from `@sha256:e879c1ef…` to `@$digest`;
-- one new resource, the GPT profile. No profile for a 5.5 model: their ARNs appear only in the grants, the job definitions' environment and the output.
+- one removed resource, the GPT-6.1 Sol profile, and no new one. No profile for a us-east-2 model: their ARNs appear only in the grants, the job definitions' environment and the output;
+- a new `project/default` statement (us-east-2) on both roles.
 
 Stop if anything else appears: the budget, the SNS subscription, the compute environment, the VPC, or a replaced profile. Stop also on a `No profile ARN for …` warning. `--no-change-set` keeps the diff read-only. Pass every flag every time: `cdk.json` says `imageTag: latest`, a deploy without `-c alertEmail` deletes the alert subscription, and one without `-c useast2Profiles` drops the 5.5 grants.
 
@@ -338,11 +350,11 @@ aws budgets describe-budget-actions-for-budget "${b[@]}" --query 'Actions[].Stat
 
 - `UPDATE_COMPLETE`;
 - one active revision of the sweep job definition, on `$digest`. Record it as `<SweepJobDefinition>:<revision>`;
-- four profiles in the output: Sonnet 4.6 and GPT-6.1 Sol in us-east-1, and Sonnet 5.5 and Haiku 5.5 in us-east-2, matching `$east2`;
+- four profiles in the output: Sonnet 4.6 in us-east-1, and GPT-5.6 Sol, Sonnet 5.5 and Haiku 5.5 in us-east-2, matching `$east2`;
 - the `freeze-v3-pre` tag resolves to `$digest`;
 - the action is still `STANDBY`.
 
-The first GPT-6.1 Sol and Sonnet 5.5 calls by the stack's roles are M2's smoke calls (`lip propose gpt-6.1-sol` or `claude-sonnet-5-5` as `OperatorRole`, with `LIP_BEDROCK_PROFILES` from the output). They are paid, and they aren't part of this deploy.
+The first GPT-5.6 Sol and Sonnet 5.5 calls by the stack's roles are M2's smoke calls (`lip propose gpt-5.6-sol` or `claude-sonnet-5-5` as `OperatorRole`, with `LIP_BEDROCK_PROFILES` from the output). They are paid, and they aren't part of this deploy.
 
 ### 8. Point the smoke stack at the new image
 
@@ -375,8 +387,8 @@ The change set should show one `Modify` of `SmokeJobDefinition` with `Replacemen
 
 - **A failed deploy rolls itself back** (`UPDATE_ROLLBACK_COMPLETE`). Diff again before retrying.
 - **To undo the image only,** redeploy `main` with `-c imageTag=sha256:e879c1ef…`.
-- **To undo the GPT profile and grants as well,** deploy the same flags from a worktree of `main` with the `gpt-6.1-sol` entry removed from `models.yaml`.
-- **To undo the 5.5 grants only,** deploy the same flags without `-c useast2Profiles`. The us-east-2 profiles stay, unused and free, until deleted by hand.
+- **To undo the GPT-5.6 Sol grants,** deploy the same flags with its entry removed from `useast2Profiles`.
+- **To undo the us-east-2 grants,** deploy the same flags without `-c useast2Profiles`. The us-east-2 profiles stay, unused and free, until deleted by hand.
 - **The smoke stack** goes back the same way, with `smoke.json` as the template.
 - **Either way,** CloudFormation registers a new job definition revision; old revisions can't be reactivated.
 - **Never delete** the repository, the bucket or the `freeze-` tags.

@@ -4,15 +4,19 @@ prices.
     uv run python scripts/prereg/freeze_v3_cost.py
 
 Per LLM arm, 2,040 episodes at N = 120 and 2,560 at N = 160. The pre-freeze work (the frontier smoke,
-Phase 0, the wording check and all-level canaries) is October's; the wave is November's. GPT-6.1 Sol runs
+Phase 0, the wording check and all-level canaries) is October's; the wave is November's. GPT-5.6 Sol runs
 after the three existing arms, and Claude Sonnet 5.5 runs last. Each goes to December when the §10.4
 month-fit sum fails. Sonnet 5.5's sum is taken after GPT has settled, so it holds GPT's metered cost, and a
 deferred GPT defers Sonnet 5.5 too. Either arm is not run when its canary $/episode, compute included,
 exceeds the A-3 / A-3b cap.
 
+GPT-5.6 Sol's tokens are the frontier smoke's (Oct 16-17, O1, `-fb2` at effort `low`): about 590 input
+and 80 output tokens per call, reasoning included. Its rungs and brief are unmeasured, so the output
+tokens keep a wide spread and the calls per episode stay at 5-8 (the smoke's O1 mix averaged 4.6).
+
 Phase 0 uses `scripts/e5_phase0.py estimate`'s figures at the median token assumptions, scaled by each
-draw's reasoning tokens: Sonnet 5.5 is costed as its `-fb1` entry (action calls twice), and GPT's
-temperature is dropped in half the draws.
+draw's output tokens: Sonnet 5.5 is costed as its `-fb1` entry (action calls twice), and GPT as `-fb2`
+(action calls twice), because the smoke found that it rejects temperature.
 
 The `wp8` Sonnet 5.5 variant reproduces the WP8 submitter's check (a lognormal $/episode with median
 $0.045 and P90 $0.065, and a canary test without compute), so the two estimates can be compared.
@@ -28,15 +32,18 @@ CMU_MIN = 0.05718 * 2  # $ per copy-minute: 2 CMUs per copy, us-east-1 list pric
 ADMIT = 0.060  # A-3 / A-3b: the canary's cost per episode must not exceed this
 S9 = 400.0  # metered November hard stop; the AWS budget action fires at 450 actual
 FIT = 1.15
-IN_USD, OUT_USD = 2.2e-6, 11e-6  # GPT-6.1 Sol and Claude Sonnet 5.5 list prices per token
+IN_USD, OUT_USD = 2.2e-6, 11e-6  # Claude Sonnet 5.5 list prices per token (us. profile)
+GPT_IN_USD, GPT_OUT_USD = 4.4e-6, 22e-6  # GPT-5.6 Sol list prices per token (us. profile)
+GPT_IN_TOKENS = 590  # per call, measured
+GPT_R_LOW = 80  # output tokens per call at effort low, reasoning included: the median, measured
+GPT_R_DEFAULT = 95  # the same at the provider default (medium)
 CLAUDE5_TOKENS = 1.3  # Claude 5.x counts about 30% more tokens for the same text
 CANARY_EPISODES = 78
 PHASE0_CLAUDE = 11.50  # 2,820 calls (scripts/e5_phase0.py estimate)
-PHASE0_GPT = (8.23, 11.93)  # 1,620 calls at temperature 0; 2,220 with the action calls twice
+PHASE0_GPT = 9.05  # -fb2: 2,220 calls, the action calls twice
 PHASE0_SONNET5 = 14.04  # -fb1: 2,220 calls
 WORDING_SONNET5 = 2.81  # A-1 probe: 792 calls
-SMOKE = (12.0, 15.0)  # the frontier smoke of Oct 16, capped at $24
-P_GPT_RETEST = 0.5
+SMOKE_USD = 12.3  # the frontier smokes of Oct 16-17 (Sonnet 5.5 and GPT-5.6 Sol), as metered
 SONNET5_WP8 = (0.045, 0.287)  # lognormal median and sigma: P90 $0.065
 
 rng = random.Random(0)
@@ -54,7 +61,7 @@ def per_arm(n: int) -> int:
 
 
 def gpt_call(r: float) -> float:
-    return 1500 * IN_USD + (50 + r) * OUT_USD
+    return GPT_IN_TOKENS * GPT_IN_USD + r * GPT_OUT_USD
 
 
 def gpt_rate(r_med: float) -> tuple[float, float]:
@@ -95,7 +102,11 @@ def place(name: str, d: Draw, cost: float, proj: float, admitted: bool, spent: f
 
 
 def draw(
-    n: int = 120, r_med: float = 200, waste: bool = False, pre_in_nov: bool = False, sonnet: str = "model"
+    n: int = 120,
+    r_med: float = GPT_R_LOW,
+    waste: bool = False,
+    pre_in_nov: bool = False,
+    sonnet: str = "model",
 ) -> Draw:
     d = Draw()
     e = per_arm(n)
@@ -133,18 +144,18 @@ def draw(
     canary5 = (inference5 if sonnet in ("wp8", "no-compute") else rate5) * noise5
     d.rate["sonnet5"] = inference5
 
-    gpt_factor = gpt_call(r) / gpt_call(200)
+    gpt_factor = gpt_call(r) / gpt_call(GPT_R_LOW)
     s5_factor = sonnet5_call(r5) / sonnet5_call(200)
-    d.pre["smoke"] = rngp.uniform(*SMOKE)
+    d.pre["smoke"] = SMOKE_USD
     d.pre["phase0_claude"] = PHASE0_CLAUDE * ln(rngp, 1, 0.12)
-    d.pre["phase0_gpt"] = PHASE0_GPT[rngp.random() < P_GPT_RETEST] * gpt_factor
+    d.pre["phase0_gpt"] = PHASE0_GPT * gpt_factor
     d.pre["phase0_sonnet5"] = PHASE0_SONNET5 * s5_factor
     d.pre["wording"] = rngp.uniform(5, 12) + WORDING_SONNET5 * s5_factor  # dry run, Claude and GPT probes
     d.pre["canaries"] = rngp.uniform(6, 10) + rngp.uniform(4, 12)  # four arms at all levels, Qwen warm-ups
     d.pre["canary_sonnet5"] = CANARY_EPISODES * rate5 * noise5
 
     spent = sum(w.values()) + (sum(d.pre.values()) if pre_in_nov else 0.0)
-    gpt_probe = probe_calls * (1600 * IN_USD + (30 + r) * OUT_USD)
+    gpt_probe = probe_calls * (1600 * GPT_IN_USD + r * GPT_OUT_USD)
     place("gpt", d, e * rate + gpt_probe, FIT * (e * canary + gpt_probe), canary <= ADMIT, spent, False)
     probe5 = probe_calls * sonnet5_probe_call(r5)
     place(
@@ -167,7 +178,7 @@ def q(a: Sequence[float], p: float) -> float:
 def summarise(
     label: str,
     n: int = 120,
-    r_med: float = 200,
+    r_med: float = GPT_R_LOW,
     waste: bool = False,
     pre_in_nov: bool = False,
     sonnet: str = "model",
@@ -211,8 +222,10 @@ def d_keys(runs: Sequence[Draw]) -> list[str]:
 
 
 def main() -> None:
-    summarise("N=120, GPT effort low (R median 200)")
-    summarise("N=120, GPT at provider default (R median 300)", r_med=300)
+    summarise(f"N=120, GPT effort low (output median {GPT_R_LOW}, measured)")
+    summarise(
+        f"N=120, GPT at provider default (output median {GPT_R_DEFAULT}, measured)", r_med=GPT_R_DEFAULT
+    )
     summarise("N=120, E2-style warm-copy waste", waste=True)
     summarise("N=120, pre-freeze work slips into November", pre_in_nov=True)
     summarise("N=160", n=160)
