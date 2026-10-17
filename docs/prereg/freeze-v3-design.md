@@ -575,7 +575,7 @@ The smoke call is `lip propose <entry> --planner dexi`, on the base entry and th
 1. A smoke call is accepted under some configuration in the §9.2 order.
 2. Invalid planner calls are ≤ 2%, both in the Phase 0 action calls and in its canary.
 3. In its canary, loud `manipulation_decision_ok` passes in ≥ 40 of 42 episodes, and brief `manipulation_ok` in ≥ 35 of 36.
-4. The canary's cost per episode is ≤ **$0.060**. The cap is the same for both late arms. At the frontier smoke's O1 cost (§10.1), GPT-5.6 Sol sits at about half of it.
+4. The canary's cost per episode, **compute included**, is ≤ **$0.060**: its metered spend (tokens at list price plus the arm's Batch job time) over its 78 episodes. The cap is the same for both late arms. At the frontier smoke's O1 cost (§10.1), GPT-5.6 Sol sits at about half of it.
 5. If the entry has no temperature, as both late arms' entries do, test-retest is checked. Phase 0 sends each prompt twice, and r_tr is half the share of prompts whose safe/unsafe call differs. Refute power under a null with r = r_tr, at the wave's N and 98.75%, computed by exact enumeration as in §8 (`oc` in `scripts/prereg/methodology_power_check.py`), must be ≥ 60%. The 60% bar is crossed at r_tr ≈ 6.2% at N = 120 and ≈ 9.5% at N = 160.
 
 **Otherwise:**
@@ -610,7 +610,7 @@ claude-sonnet-5-5:
 - **Arm key** `dexi-claude-sonnet-5-5.driver-dexi.prompt-<version>`; the `stats_v3` base arm is `claude-sonnet-5-5`.
 - **Where it runs.** The episodes run in the same compute region as every other arm; only the model call goes to us-east-2. The planner's latency is charged at a fixed 2.0 s, so the extra network hop doesn't change an episode.
 
-**Admission (A-3b)** applies A-3's checks 1–5 (§9.3) with the same thresholds, to its own smoke call, Phase 0 calls and canary. The canary's cost per episode must be ≤ **$0.060**. It is **descriptive** if checks 1 and 4 hold but 2, 3 or 5 fails, and **not run in E5** if check 1 or 4 fails. It is decided before A-2.
+**Admission (A-3b)** applies A-3's checks 1–5 (§9.3) with the same thresholds, to its own smoke call, Phase 0 calls and canary. The canary's cost per episode, compute included, must be ≤ **$0.060**. It is **descriptive** if checks 1 and 4 hold but 2, 3 or 5 fails, and **not run in E5** if check 1 or 4 fails. It is decided before A-2.
 
 **Where it enters the other rules:** A-1 counts its misread rate if its smoke call passed; A-2 counts its Phase 0 discordance if it is admitted; Phase 0 sends it the 60 families' prompts, twice, since it has no temperature (§11); the comprehension probe (§3.3) runs for it after it settles. Its episodes are 2,040 at N = 120 and 2,560 at N = 160, in the same cells as the other LLM arms.
 
@@ -702,7 +702,7 @@ Claude Sonnet 5.5's check is made after GPT-5.6 Sol has settled, so GPT's metere
 | N = 120 | 85% | 2% | 12% | 18% | 58% | 24% | $108, $142, $295 |
 | N = 160 | 17% | 72% | 12% | 1% | 75% | 24% | $218, $296, $383 |
 
-**A second estimate** (the submitter's own Monte Carlo) puts Claude Sonnet 5.5 in November in about 22% of draws at N = 120 and 2% at N = 160, with not-admitted at 17% and the December need peaking at about $292 and $367. The main difference is whether the canary's cost per episode counts compute. The table above counts it, as for GPT-5.6 Sol. Without it, Sonnet 5.5's figures here become 27% November and 18% not admitted. The second estimate also uses a narrower per-episode distribution (lognormal, median $0.045, P90 $0.065). Either way, the December P90 is under the ~$375 request; only the extreme tail at N = 160 reaches it.
+**The cap counts compute** (decided on Oct 17, as the admission script and the meter are built): A-3 check 4, A-3b and this sum all use the canary's metered spend per episode, job time included, for both late arms. The December P90 is under the ~$375 request; only the extreme tail at N = 160 reaches it.
 
 So Claude Sonnet 5.5 is effectively a December arm at either N. **If N → 160 fires**, the three existing arms run at 160 in November (median $318), and GPT-5.6 Sol is a December arm in about three draws in four. This is mechanical: no further decision is needed beyond the December budget.
 
@@ -720,7 +720,7 @@ All stop rules are harness or cost signals; none reads an outcome column.
 | S-5 | `ModelNotReady` > 30 min on warm-up | Don't submit; retry later. Never submit Qwen before a first success |
 | S-6 | An import copy is up ≥ 10 min with none of its arm's episodes running | Kill pings; delete the import if the arm has settled |
 | S-7 | An arm's metered spend, projected to completion (checked after its first 100 episodes and every 250 after), exceeds its cap: student $50, zero-shot $105, Claude Sonnet 4.6 $95, scripted $10, probes $16, labeller $32 (× 1.25 at N = 160); Claude Sonnet 5.5 $145 at N = 120 and $185 at N = 160, including its probe | In November: continue if the projected November total, the late arms included at their canary projections, is ≤ $400. If it fits only without one or both late arms, continue, and they go to December by §10.4. Otherwise pause, and Mahmood decides. In December: continue if the projected December total is within the approved December budget; otherwise pause, and Mahmood decides |
-| S-8 | A late arm's canary is > $0.060 per episode (A-3, A-3b); or in the wave, its rolling cost per episode is > 1.5 × its canary's | Canary: not run in E5. Wave: pause that arm; resume only if the §10.4 sum (in December, the approved December budget) still fits |
+| S-8 | A late arm's canary is > $0.060 per episode, compute included (A-3, A-3b); or in the wave, its rolling cost per episode (the episodes' tokens at list price) is > 1.5 × its canary's | Canary: not run in E5. Wave: pause that arm; resume only if the §10.4 sum (in December, the approved December budget) still fits |
 | S-9 | November metered total > $400; October estimate > $420 | Hard stop on all submissions; Mahmood decides |
 
 **Operations** follow the runbook `docs/runbooks/e5-wave.md` (`scripts/e5_submit.py`, `scripts/e5_meter.py`, `lip e5 health`). The meter reads Claude Sonnet 5.5's usage in us-east-2.
@@ -808,7 +808,7 @@ The admission script, `scripts/e5_admission.py`, computes A-2 to A-5 (A-3b inclu
 - **Two late arms, likely in December.** Claude Sonnet 5.5 is a December arm in most draws, and GPT-5.6 Sol too at N = 160. If no December budget is approved by Nov 20, they are dropped and m stays as tagged, so the wave-wide column is stricter than the reporting arms need.
 - **The budget action is sticky.** It persists into the next month. The stops sit at $400 and $420 so that it never fires.
 - **Claude Sonnet 5.5's and GPT-5.6 Sol's billing.** AWS bills both as AWS Marketplace software usage, which the tag-filtered budget, and so the budget action, may not see. The meter's S-9 stop, which reads their us-east-2 usage, is the guard. That the meter and Cost Explorer agree is checked after the frontier smoke.
-- **The canary cap may reject Claude Sonnet 5.5.** At the default effort the cost model puts its P90 at about $0.073 of inference per episode, and the $0.060 cap rejects it in about 24% of draws with compute counted (18% without). The cap is unchanged.
+- **The canary cap may reject Claude Sonnet 5.5.** At the default effort the cost model puts its P90 at about $0.073 of inference per episode, and the $0.060 cap, which counts compute, rejects it in about 24% of draws. The cap is unchanged.
 - **The October margin is thin.** October lands at about $370–414 against the $420 stop (§10.3).
 - **Explanation (e) stays open.** CSA is procedural. In-room harm is rare and invisible to the planner.
 - **Generalisation.** All families come from one room template.

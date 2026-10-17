@@ -7,8 +7,8 @@ Per LLM arm, 2,040 episodes at N = 120 and 2,560 at N = 160. The pre-freeze work
 Phase 0, the wording check and all-level canaries) is October's; the wave is November's. GPT-5.6 Sol runs
 after the three existing arms, and Claude Sonnet 5.5 runs last. Each goes to December when the §10.4
 month-fit sum fails. Sonnet 5.5's sum is taken after GPT has settled, so it holds GPT's metered cost, and a
-deferred GPT defers Sonnet 5.5 too. Either arm is not run when its canary $/episode, compute included,
-exceeds the A-3 / A-3b cap.
+deferred GPT defers Sonnet 5.5 too. Either arm is not run when its canary $/episode, compute included (as
+built, decided 2026-10-17), exceeds the A-3 / A-3b cap.
 
 Both late arms fly at provider-default effort (decided 2026-10-17), and their tokens are the frontier
 smoke's default-effort cells (Oct 16-17, O1): GPT-5.6 Sol about 590 input and 95 output tokens per
@@ -19,8 +19,6 @@ and 5-7 (the smoke's O1 mixes averaged 4.7 and 4.3).
 Phase 0 uses `scripts/e5_phase0.py estimate`'s figures at those token counts, scaled by each draw's
 output tokens. Both base entries have no temperature, so each sends its action calls twice.
 
-The `wp8` Sonnet 5.5 variant reproduces the WP8 submitter's check (a lognormal $/episode with median
-$0.045 and P90 $0.065, and a canary test without compute), so the two estimates can be compared.
 """
 
 from __future__ import annotations
@@ -47,7 +45,6 @@ PHASE0_GPT = 9.80  # 2,220 calls, the action calls twice
 PHASE0_SONNET5 = 12.60  # 2,220 calls, the action calls twice
 WORDING_SONNET5 = 2.90  # A-1 probe: 792 calls
 SMOKE_USD = 12.3  # the frontier smokes of Oct 16-17 (Sonnet 5.5 and GPT-5.6 Sol), as metered
-SONNET5_WP8 = (0.045, 0.287)  # lognormal median and sigma: P90 $0.065
 
 rng = random.Random(0)
 rng5 = random.Random(1)
@@ -110,7 +107,6 @@ def draw(
     r_med: float = GPT_R,
     waste: bool = False,
     pre_in_nov: bool = False,
-    sonnet: str = "model",
 ) -> Draw:
     d = Draw()
     e = per_arm(n)
@@ -142,10 +138,8 @@ def draw(
     compute5 = rng5.uniform(0.005, 0.008)
     noise5 = ln(rng5, 1, 0.10)
     inference5 = calls5 * sonnet5_call(r5)
-    if sonnet == "wp8":
-        inference5 = ln(rng5, *SONNET5_WP8)
     rate5 = inference5 + compute5
-    canary5 = (inference5 if sonnet in ("wp8", "no-compute") else rate5) * noise5
+    canary5 = rate5 * noise5
     d.rate["sonnet5"] = inference5
 
     gpt_factor = gpt_call(r) / gpt_call(GPT_R)
@@ -185,9 +179,8 @@ def summarise(
     r_med: float = GPT_R,
     waste: bool = False,
     pre_in_nov: bool = False,
-    sonnet: str = "model",
 ) -> None:
-    runs = [draw(n, r_med, waste, pre_in_nov, sonnet) for _ in range(20000)]
+    runs = [draw(n, r_med, waste, pre_in_nov) for _ in range(20000)]
     pre = [sum(d.pre.values()) for d in runs]
     nov = [sum(d.nov.values()) + (sum(d.pre.values()) if pre_in_nov else 0.0) for d in runs]
     dec = [sum(d.dec.values()) for d in runs if d.dec]
@@ -231,9 +224,6 @@ def main() -> None:
     summarise("N=120, pre-freeze work slips into November", pre_in_nov=True)
     summarise("N=160", n=160)
     summarise("N=160, E2-style warm-copy waste", n=160, waste=True)
-    summarise("N=120, Sonnet 5.5 canary test without compute", sonnet="no-compute")
-    summarise("N=120, Sonnet 5.5 as the WP8 submitter's model", sonnet="wp8")
-    summarise("N=160, Sonnet 5.5 as the WP8 submitter's model", n=160, sonnet="wp8")
 
 
 if __name__ == "__main__":
