@@ -47,6 +47,7 @@ The submitter starts each arm once its conditions hold. It tops the arm up to it
 | 4 | `claude-sonnet-5-5` (us-east-2) | GPT settled, not admitted or dropped; S-8 admitted; §10.4 sum fits with GPT's spend included | ramps 10, 20, … to 40 | none; S-8 governs |
 | 5 | probes: `probe-claude`, `probe-student`, `probe-zero-shot`, `probe-gpt`, `probe-sonnet-5-5` | operator, by window | | $16 in total, plus GPT's and Sonnet's, which count in their arms |
 | 6 | `labeller` (outside AWS) | operator, by window | | $32 |
+| 6 | `labeller-2` (outside AWS): GPT-5.6 Sol's packets plus a matched draw | operator, by window, in GPT's month | | $14, counted in GPT's projection |
 
 The S-7 caps scale by 1.25 when `n_families` is above 120. S-4 lowers an arm's cap by 5 each time it fires.
 
@@ -166,7 +167,7 @@ In October, an arm also doesn't start if the estimate plus its P90 would exceed 
 - **GPT** runs if the committed spend plus its projection is at most $400.
 - **Sonnet** runs if the committed spend plus GPT's projection (when GPT runs this month) plus its own is at most $400.
 - **An arm that doesn't fit** goes to December, if December's `stop_usd` covers its projection on top of any arm deferred before it. Arms keep their order, so if GPT goes to December, Sonnet goes too. An arm that isn't admitted is left out, and the next arm is summed without it.
-- **December's `stop_usd`** is set by Mahmood, up to about $375 (GPT and Sonnet at most about $190 each). The config lists December's four arms without a stop. Until a stop is set, the deferred arms wait, and nothing is submitted in December. If none is set by Nov 20, the deferred arms are dropped.
+- **December's `stop_usd`** is set by Mahmood, up to about $390 (GPT at most about $205 with the second labeller, Sonnet about $185). The config lists December's five arms without a stop. Until a stop is set, the deferred arms wait, and nothing is submitted in December. If none is set by Nov 20, the deferred arms are dropped.
 
 The sum is taken when GPT is about to start. At that point Sonnet also gets a preview decision, so a December request can go to Mahmood early (at the plan's medians, Sonnet is expected to go to December). Sonnet's own decision is taken again when GPT has settled, with GPT's spend measured by then. A decision is kept until the month or a budget in the config changes. `e5 resume <arm>` makes the submitter take it again. `e5 month-fit` prints every month-fit arm's sum at any time, and `e5 status` shows the recorded decisions.
 
@@ -177,7 +178,7 @@ Each cycle classifies new attempts. An attempt is the episode's result unless it
 ## 8. Settlement and the end of the wave
 
 - An arm settles when every entry has a result or 3 attempts, and nothing is live. Its metering window closes then, and its import is deleted once every arm sharing it has settled.
-- Probes and the labeller: run `e5 window <arm> start` before and `e5 window <arm> end` after. Add `--usd` for spend outside AWS.
+- Probes and the labellers: run `e5 window <arm> start` before and `e5 window <arm> end` after. Add `--usd` for spend outside AWS. The second labeller (`labeller-2`) double-codes GPT-5.6 Sol's packets in GPT's month (`lip label-sample --double-code gpt-5.6-sol --out-2 <dir>`, `docs/scoring.md`); its spend is counted in GPT's projection.
 - `e5 run` exits when every Batch arm has settled, been dropped, failed admission, or waits for next month. It names the waiting arms. Check `e5 status` and `meter now`, then confirm in the Bedrock console that no import is left.
 - **December:** once Mahmood has set `stop_usd` for `"2026-12"` in the config, run `e5 preflight` and then `e5 run` again on December 1 or later. GPT goes first, then Sonnet. The December stop is enforced like November's.
 - The one pinned analysis run, `lip stats --design v3`, comes only after every arm, including any deferred to December, has settled or been dropped (§2.5).
