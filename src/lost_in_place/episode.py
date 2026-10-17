@@ -37,6 +37,7 @@ from lost_in_place.sim import SimInstance, offboard_port
 if TYPE_CHECKING:
     from lost_in_place.agent import AgentConfig
 
+CONNECT_TIMEOUT_WALL_S = 180.0  # still no vehicle connection this long after start (good boots: ~15 s)
 BOOT_STALL_WALL_S = 150.0  # sim clock still at zero this long after connect: a wedged boot
 SIM_STALL_WALL_S = 90.0  # sim clock frozen mid-episode: Gazebo died (e.g. after a runaway)
 LINK_LOST_WALL_S = 30.0  # MAVSDK still hasn't heard a heartbeat this long after it timed out
@@ -179,12 +180,19 @@ class _Episode:
             else:
                 self.connected.clear()
 
-    async def run(self) -> str:
-        drone = System(port=51000 + 10 * self.sim.instance)
+    async def _connect(self, drone: System) -> None:
         await drone.connect(system_address=f"udpin://0.0.0.0:{offboard_port(self.sim.instance)}")
         async for state in drone.core.connection_state():
             if state.is_connected:
                 break
+
+    async def run(self) -> str:
+        drone = System(port=51000 + 10 * self.sim.instance)
+        try:
+            await asyncio.wait_for(self._connect(drone), CONNECT_TIMEOUT_WALL_S)
+        except TimeoutError:
+            drone._stop_mavsdk_server()
+            raise BootStall(f"no vehicle connection in {CONNECT_TIMEOUT_WALL_S:.0f} s") from None
         self.mark("connected")
         self.connected.set()
         tasks = [

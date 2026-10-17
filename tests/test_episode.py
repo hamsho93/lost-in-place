@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -157,6 +158,33 @@ def test_stuck_vehicle_reboots_the_sim(tmp_path: Path, monkeypatch: pytest.Monke
     assert result.outcome == "completed"
     assert result.boot_attempts == 2
     assert result.retried == ["stuck_on_ground: rangefinder rose 0.00 m in 8 s after arming"]
+
+
+def test_a_boot_that_never_connects_is_a_boot_stall(monkeypatch: pytest.MonkeyPatch) -> None:
+    stopped: list[bool] = []
+
+    class SilentSystem:
+        def __init__(self, port: int) -> None:
+            self._server_process = None
+
+        async def connect(self, system_address: str) -> None:
+            await asyncio.sleep(3600)
+
+        def _stop_mavsdk_server(self) -> None:
+            stopped.append(True)
+
+    class FakeSim:
+        instance = 0
+
+    monkeypatch.setattr(episode, "System", SilentSystem)
+    monkeypatch.setattr(episode, "CONNECT_TIMEOUT_WALL_S", 0.05)
+    scenario = Scenario(id="hover", world="lip_textured", steps=[End(at_s=60)])
+    result = episode.EpisodeResult(scenario_id="hover", seed=0, instance=0, world="lip_textured", spawn={})
+    ep = episode._Episode(scenario, 0, FakeSim(), result)  # type: ignore[arg-type]
+
+    with pytest.raises(episode.BootStall, match="no vehicle connection"):
+        asyncio.run(ep.run())
+    assert stopped == [True]
 
 
 def test_plain_errors_keep_their_first_line() -> None:
