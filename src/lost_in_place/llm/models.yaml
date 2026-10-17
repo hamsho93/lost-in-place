@@ -57,48 +57,54 @@ qwen3-4b-student:
     tokenizer.json marks <tool_call> as a special token, which a server may strip from replies.
     c6bc0a6 is the start of the first weight shard's CRC64NVME checksum in S3.
 
-gpt-6.1-sol:
+gpt-5.6-sol:
   provider: bedrock
-  model_id: us.openai.gpt-6.1-sol
+  model_id: us.openai.gpt-5.6-sol
+  region: us-east-2
   max_tokens: 4096
   temperature: 0
   tool_choice: any
-  additional_request_fields: {reasoning_effort: low}
+  additional_request_fields: {reasoning: {effort: low}}
   notes: >-
-    E5 frontier arm, added 2026-10-16 with the settings freeze-v3 states before its first call
-    (design 9.2). Effort low for cost and the tokens-per-day quota; the 4096-token cap leaves room
-    for reasoning. If the smoke call's request is rejected, the entries below are tried in order,
-    each one change further, and the arm flies the first one accepted.
+    E5 frontier arm, added 2026-10-16 in place of GPT-5.6 Sol, which the account can't use yet, with
+    the settings freeze-v3 states before its first call (design 9.2). Served from us-east-2, the only
+    region with GPT-5.6 Sol quota. Converse takes the effort nested, as `reasoning.effort`; a flat
+    `reasoning_effort` is rejected. Effort low (the model's default is medium) for cost; the
+    4096-token cap leaves room for reasoning. If the smoke call's request is rejected, the entries
+    below are tried in order, each one change further, and the arm flies the first one accepted.
 
-gpt-6.1-sol-fb1:
+gpt-5.6-sol-fb1:
   provider: bedrock
-  model_id: us.openai.gpt-6.1-sol
+  model_id: us.openai.gpt-5.6-sol
+  region: us-east-2
   max_tokens: 4096
   temperature: 0
   tool_choice: auto
-  additional_request_fields: {reasoning_effort: low}
+  additional_request_fields: {reasoning: {effort: low}}
   notes: >-
-    Fallback 1 of gpt-6.1-sol (design 9.2): tool_choice auto. A reply without a tool call is
+    Fallback 1 of gpt-5.6-sol (design 9.2): tool_choice auto. A reply without a tool call is
     invalid, as under any.
 
-gpt-6.1-sol-fb2:
+gpt-5.6-sol-fb2:
   provider: bedrock
-  model_id: us.openai.gpt-6.1-sol
+  model_id: us.openai.gpt-5.6-sol
+  region: us-east-2
   max_tokens: 4096
   tool_choice: auto
-  additional_request_fields: {reasoning_effort: low}
+  additional_request_fields: {reasoning: {effort: low}}
   notes: >-
-    Fallback 2 of gpt-6.1-sol (design 9.2): fallback 1 without temperature, so the arm is
+    Fallback 2 of gpt-5.6-sol (design 9.2): fallback 1 without temperature, so the arm is
     stochastic and its test-retest is checked (design 9.3, check 5).
 
-gpt-6.1-sol-fb3:
+gpt-5.6-sol-fb3:
   provider: bedrock
-  model_id: us.openai.gpt-6.1-sol
+  model_id: us.openai.gpt-5.6-sol
+  region: us-east-2
   max_tokens: 4096
   tool_choice: auto
   notes: >-
-    Fallback 3 of gpt-6.1-sol (design 9.2): fallback 2 without the reasoning-effort field, so the
-    provider's default effort applies.
+    Fallback 3 of gpt-5.6-sol (design 9.2): fallback 2 without the effort field, so the model's
+    default effort (medium) applies.
 
 claude-sonnet-5-5:
   provider: bedrock
@@ -111,7 +117,7 @@ claude-sonnet-5-5:
   notes: >-
     E5 fifth arm, approved 2026-10-16 (fifth-arm spec), served from us-east-2. tool_choice auto
     because Sonnet 5.5 rejects forced tool use; a reply without a tool call is invalid. Effort low
-    (the model's default is high) matches GPT-6.1 Sol and the cost model. Anthropic's docs say
+    (the model's default is high) matches GPT-5.6 Sol and the cost model. Anthropic's docs say
     Sonnet 5.5 rejects any non-default temperature, so the smoke call is expected to fall back to
     fb1; the entries below are tried in order, each one change further.
 

@@ -7,7 +7,7 @@ ladder's O1 rungs, which decides A-2 and part of A-3. It generalises the b42 pro
   for byte as a check). First-step prompts: the first decision of each family's loud rep-0 episode,
   re-rendered at all 7 levels.
 - Calls: one action call (DEXI's tools) per prompt, plus the comprehension probe (no tools). Claude
-  Sonnet 4.6 gets every prompt; GPT-6.1 Sol and Claude Sonnet 5.5 one prompt per family and state
+  Sonnet 4.6 gets every prompt; GPT-5.6 Sol and Claude Sonnet 5.5 one prompt per family and state
   (rep 0), each action call sent twice when the entry has no temperature (Sonnet 5.5's expected
   entry, -fb1). Each first-step prompt gets one action call per model.
 - Output (`summarise`): per model, the discordance of each rung against O1 by state, test-retest
@@ -52,23 +52,26 @@ STATES = {"loud": "loud", "brief": "brief"}
 REPLAY_LEVELS = ("O1", "O1-L", "O1-N", "O1-R", "O1-V")
 RUNGS = ("O1-L", "O1-N", "O1-R", "O1-V")
 FIRST_STEP_LEVELS = tuple(dexi.LADDER)
-GPT_ENTRIES = ("gpt-6.1-sol", "gpt-6.1-sol-fb1", "gpt-6.1-sol-fb2", "gpt-6.1-sol-fb3")
+GPT_ENTRIES = ("gpt-5.6-sol", "gpt-5.6-sol-fb1", "gpt-5.6-sol-fb2", "gpt-5.6-sol-fb3")
 SONNET55_ENTRIES = ("claude-sonnet-5-5", "claude-sonnet-5-5-fb1", "claude-sonnet-5-5-fb2")
 SHORT_STEP_M = 0.9
 LATERAL = ("forward", "back", "left", "right")
 # Rough per-call token counts for `estimate`, from E4's recorded Claude calls on DEXI's prompt.
 TOKENS = {"action": (1500, 60), "probe": (400, 15)}
+# GPT-5.6 Sol's action calls as measured in its frontier smoke at effort low: about 590 input and 80
+# output tokens, of which these 24 are the visible reply and the rest is reasoning.
+TOKENS_BY_PRICE = {"gpt": {"action": (590, 24), "probe": (400, 15)}}
 # $/Mtok in and out, reasoning tokens per call at low effort, and token inflation (Claude 5.x's
 # tokenizer counts about 30% more for the same text), as in the frontier cost model.
 PRICES = {
     "claude": (3.30, 16.50, 0, 1.0),
-    "gpt": (2.20, 11.00, 200, 1.0),
+    "gpt": (4.40, 22.00, 56, 1.0),
     "claude5": (2.20, 11.00, 200, 1.3),
 }
 ESTIMATED = (
     ("claude-sonnet-4-6", "claude", 1),
-    ("gpt-6.1-sol", "gpt", 1),
-    ("gpt-6.1-sol-fb2", "gpt", 2),
+    ("gpt-5.6-sol", "gpt", 1),
+    ("gpt-5.6-sol-fb2", "gpt", 2),
     ("claude-sonnet-5-5-fb1", "claude5", 2),
 )
 
@@ -129,7 +132,7 @@ def collect(root: str, run: str = SOURCE_RUN) -> dict[str, Any]:
 
 
 def one_prompt_per_family(model: str) -> bool:
-    """GPT-6.1 Sol and Claude Sonnet 5.5 replay one prompt per family (design section 11 item 2)."""
+    """GPT-5.6 Sol and Claude Sonnet 5.5 replay one prompt per family (design section 11 item 2)."""
     return model in GPT_ENTRIES or model in SONNET55_ENTRIES
 
 
@@ -302,9 +305,10 @@ def estimate(prompts: dict[str, Any]) -> dict[str, Any]:
     for model, price_key, reps in ESTIMATED:
         calls = plan(prompts, model, "auto", reps)
         p_in, p_out, reasoning, inflation = PRICES[price_key]
+        tokens = TOKENS_BY_PRICE.get(price_key, TOKENS)
         usd = 0.0
         for c in calls:
-            t_in, t_out = TOKENS["probe" if c["kind"] == "probe" else "action"]
+            t_in, t_out = tokens["probe" if c["kind"] == "probe" else "action"]
             usd += (t_in * inflation * p_in + (t_out * inflation + reasoning) * p_out) / 1e6
         kinds: dict[str, int] = defaultdict(int)
         for c in calls:

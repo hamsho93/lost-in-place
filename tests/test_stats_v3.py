@@ -329,9 +329,9 @@ def test_arm_keys_and_observations_map_to_levels() -> None:
         ("dexi-claude-sonnet-4-6.driver-dexi.prompt-dexi-9b2e7a7", "O0"): ("claude-sonnet-4-6", "O0-V"),
         ("dexi-qwen3-4b-student.driver-dexi.prompt-dexi-v2", "O1"): ("qwen3-4b-student", "O1"),
         ("dexi-qwen3-4b-student.driver-dexi.prompt-dexi-v2", "O1L"): ("qwen3-4b-student", "O1-L"),
-        ("dexi-gpt-6.1-sol.driver-dexi.prompt-dexi-v2", "O1N"): ("gpt-6.1-sol", "O1-N"),
-        ("dexi-gpt-6.1-sol.driver-dexi.prompt-dexi-v2", "O1R"): ("gpt-6.1-sol", "O1-R"),
-        ("dexi-gpt-6.1-sol.driver-dexi.prompt-dexi-9b2e7a7", "O1"): ("gpt-6.1-sol", "O1-V"),
+        ("dexi-gpt-5.6-sol.driver-dexi.prompt-dexi-v2", "O1N"): ("gpt-5.6-sol", "O1-N"),
+        ("dexi-gpt-5.6-sol.driver-dexi.prompt-dexi-v2", "O1R"): ("gpt-5.6-sol", "O1-R"),
+        ("dexi-gpt-5.6-sol.driver-dexi.prompt-dexi-9b2e7a7", "O1"): ("gpt-5.6-sol", "O1-V"),
         ("dexi-rule-2m.driver-dexi.prompt-dexi-v2", "O1"): ("rule-2m", "O1"),
     }
     for (key, obs), mapped in expect.items():
@@ -397,38 +397,38 @@ def test_the_ladder_agrees_with_dexi_when_dexi_has_one() -> None:
 def test_gpt_fallback_entries_are_the_gpt_arm() -> None:
     for entry in stats_v3.GPT_ENTRIES:
         assert stats_v3.level_of(f"dexi-{entry}.driver-dexi.prompt-{stats_v3.PLAIN}", "O1R") == (
-            "gpt-6.1-sol",
+            "gpt-5.6-sol",
             "O1-R",
         )
     fb2 = [
-        attempt(i, "loud", "gpt-6.1-sol-fb2", level, score(i, "loud"))
+        attempt(i, "loud", "gpt-5.6-sol-fb2", level, score(i, "loud"))
         for i in range(3)
         for level in stats_v3.LEVELS
     ]
     data = stats_v3.collect(fb2)
-    assert {c.arm for c in data.results} == {"gpt-6.1-sol"}
-    assert data.entries == {"gpt-6.1-sol": "gpt-6.1-sol-fb2"}
-    assert len(data.results[Cell("gpt-6.1-sol", "O1", "loud")]) == 3
-    spec = record("a" * 64, arms="gpt-6.1-sol-fb2, claude-sonnet-4-6", m=8)
-    assert stats_v3.read_design(spec).confirmatory == ("claude-sonnet-4-6", "gpt-6.1-sol")
+    assert {c.arm for c in data.results} == {"gpt-5.6-sol"}
+    assert data.entries == {"gpt-5.6-sol": "gpt-5.6-sol-fb2"}
+    assert len(data.results[Cell("gpt-5.6-sol", "O1", "loud")]) == 3
+    spec = record("a" * 64, arms="gpt-5.6-sol-fb2, claude-sonnet-4-6", m=8)
+    assert stats_v3.read_design(spec).confirmatory == ("claude-sonnet-4-6", "gpt-5.6-sol")
     with pytest.raises(ValueError, match="names one base arm twice"):
-        stats_v3.read_design(record("a" * 64, arms="gpt-6.1-sol, gpt-6.1-sol-fb1", m=8))
+        stats_v3.read_design(record("a" * 64, arms="gpt-5.6-sol, gpt-5.6-sol-fb1", m=8))
 
 
 def test_an_analysis_mixing_two_gpt_entries_is_refused() -> None:
     mixed = [
-        attempt(0, "loud", "gpt-6.1-sol", "O1", score(0, "loud")),
-        attempt(1, "loud", "gpt-6.1-sol-fb1", "O1-V", score(1, "loud")),
+        attempt(0, "loud", "gpt-5.6-sol", "O1", score(0, "loud")),
+        attempt(1, "loud", "gpt-5.6-sol-fb1", "O1-V", score(1, "loud")),
     ]
-    with pytest.raises(ValueError, match=re.escape("gpt-6.1-sol is flown as gpt-6.1-sol, gpt-6.1-sol-fb1")):
+    with pytest.raises(ValueError, match=re.escape("gpt-5.6-sol is flown as gpt-5.6-sol, gpt-5.6-sol-fb1")):
         stats_v3.collect(mixed)
-    off = attempt(2, "loud", "gpt-6.1-sol-fb3", "O1", score(2, "loud"))
-    off.cell = (*off.cell[:2], f"dexi-gpt-6.1-sol-fb3.driver-dexi.prompt-{stats_v3.CLAIM}", "none", "O1L")
-    with pytest.raises(ValueError, match=re.escape("flown as gpt-6.1-sol, gpt-6.1-sol-fb3")):
+    off = attempt(2, "loud", "gpt-5.6-sol-fb3", "O1", score(2, "loud"))
+    off.cell = (*off.cell[:2], f"dexi-gpt-5.6-sol-fb3.driver-dexi.prompt-{stats_v3.CLAIM}", "none", "O1L")
+    with pytest.raises(ValueError, match=re.escape("flown as gpt-5.6-sol, gpt-5.6-sol-fb3")):
         stats_v3.collect([mixed[0], off])
-    canary = attempt(0, "loud", "gpt-6.1-sol-fb1", "O1", score(0, "loud"))
+    canary = attempt(0, "loud", "gpt-5.6-sol-fb1", "O1", score(0, "loud"))
     canary.scenario_id, canary.key = "k000_loud", canary.key.replace("c000", "k000")
-    assert stats_v3.collect([mixed[0], canary]).entries == {"gpt-6.1-sol": "gpt-6.1-sol"}
+    assert stats_v3.collect([mixed[0], canary]).entries == {"gpt-5.6-sol": "gpt-5.6-sol"}
 
 
 def test_sonnet_5_5_fallback_entries_are_one_arm_and_never_mixed() -> None:
@@ -440,7 +440,7 @@ def test_sonnet_5_5_fallback_entries_are_one_arm_and_never_mixed() -> None:
     mixed = [
         attempt(0, "loud", "claude-sonnet-5-5-fb1", "O1", score(0, "loud")),
         attempt(1, "brief", "claude-sonnet-5-5-fb2", "O1-N", score(1, "brief")),
-        attempt(2, "loud", "gpt-6.1-sol-fb1", "O1", score(2, "loud")),
+        attempt(2, "loud", "gpt-5.6-sol-fb1", "O1", score(2, "loud")),
     ]
     with pytest.raises(
         ValueError,
@@ -465,9 +465,9 @@ def test_gpt_entries_agree_with_the_registry_when_it_has_the_gpt_arm() -> None:
     from lost_in_place.llm.registry import load_models
 
     models = load_models()
-    if "gpt-6.1-sol" not in models:
-        pytest.skip("this build's models.yaml has no gpt-6.1-sol yet")
-    assert {m for m in models if m.startswith("gpt-6.1-sol")} == set(stats_v3.GPT_ENTRIES)
+    if "gpt-5.6-sol" not in models:
+        pytest.skip("this build's models.yaml has no gpt-5.6-sol yet")
+    assert {m for m in models if m.startswith("gpt-5.6-sol")} == set(stats_v3.GPT_ENTRIES)
 
 
 def test_collect_counts_what_is_outside_the_design_and_skips_canaries() -> None:
@@ -537,7 +537,7 @@ def test_verdicts_levels_and_readings_for_one_arm() -> None:
     ("m", "level", "z"), [(20, 0.9975, 3.023), (16, 0.996875, 2.955), (12, 0.995833, 2.865)]
 )
 def test_the_wave_wide_column_uses_m_from_the_design(m: int, level: float, z: float) -> None:
-    others = ("gpt-6.1-sol", "qwen3-4b-student", "qwen3-4b-zero-shot", "claude-sonnet-5-5")[: m // 4 - 1]
+    others = ("gpt-5.6-sol", "qwen3-4b-student", "qwen3-4b-zero-shot", "claude-sonnet-5-5")[: m // 4 - 1]
     data = stats_v3.collect(wave() + scripted())
     result = stats_v3.analyse(data, Design((ARM, *others), m, 120, dropped=others), resamples=50)
     assert result["analysis"]["levels"]["wave"] == level and round(result["analysis"]["z"]["wave"], 3) == z
@@ -553,10 +553,10 @@ def test_the_wave_wide_column_uses_m_from_the_design(m: int, level: float, z: fl
 
 
 def test_five_confirmatory_arms_with_two_fallback_entries_flown() -> None:
-    attempts = wave() + wave("gpt-6.1-sol-fb2") + wave("claude-sonnet-5-5-fb1") + scripted()
-    arms = f"{ARM}, gpt-6.1-sol, claude-sonnet-5-5-fb1, qwen3-4b-student, b"
+    attempts = wave() + wave("gpt-5.6-sol-fb2") + wave("claude-sonnet-5-5-fb1") + scripted()
+    arms = f"{ARM}, gpt-5.6-sol, claude-sonnet-5-5-fb1, qwen3-4b-student, b"
     design = stats_v3.read_design(record("a" * 64, arms=arms, m=20, dropped="b"))
-    assert design.live == (ARM, "claude-sonnet-5-5", "gpt-6.1-sol", "qwen3-4b-student")
+    assert design.live == (ARM, "claude-sonnet-5-5", "gpt-5.6-sol", "qwen3-4b-student")
     data = stats_v3.collect(attempts)
     assert data.entries["claude-sonnet-5-5"] == "claude-sonnet-5-5-fb1"
     with pytest.raises(stats_v3.Unsettled, match=r"qwen3-4b-student \(no scored results\)"):
@@ -564,7 +564,7 @@ def test_five_confirmatory_arms_with_two_fallback_entries_flown() -> None:
     design = stats_v3.read_design(record("a" * 64, arms=arms, m=20, dropped="qwen3-4b-student, b"))
     result = stats_v3.analyse(data, design, resamples=20)
     assert result["analysis"]["z"]["wave"] == pytest.approx(3.023, abs=5e-4)
-    for arm in (ARM, "gpt-6.1-sol", "claude-sonnet-5-5"):
+    for arm in (ARM, "gpt-5.6-sol", "claude-sonnet-5-5"):
         c = result["arms"][arm]["contrasts"]
         assert result["arms"][arm]["role"] == "confirmatory" and c["H4d(i)"]["wave"]["m"] == 20
         assert c["P-R"]["verdict"] == "confirmed"
@@ -630,12 +630,12 @@ def test_the_smoke_only_haiku_is_never_an_e5_arm() -> None:
 def test_dropped_arms_are_read_from_the_record() -> None:
     spec = record(
         "a" * 64,
-        arms="gpt-6.1-sol-fb1, claude-sonnet-5-5, " + ARM,
+        arms="gpt-5.6-sol-fb1, claude-sonnet-5-5, " + ARM,
         m=12,
-        dropped="gpt-6.1-sol, claude-sonnet-5-5-fb2",
+        dropped="gpt-5.6-sol, claude-sonnet-5-5-fb2",
     )
     assert stats_v3.read_design(spec) == Design(
-        (ARM, "claude-sonnet-5-5", "gpt-6.1-sol"), 12, 120, dropped=("claude-sonnet-5-5", "gpt-6.1-sol")
+        (ARM, "claude-sonnet-5-5", "gpt-5.6-sol"), 12, 120, dropped=("claude-sonnet-5-5", "gpt-5.6-sol")
     )
     with pytest.raises(ValueError, match="no value for Dropped arms"):
         stats_v3.read_design(record("a" * 64, dropped=None))
@@ -1040,11 +1040,11 @@ def test_the_cli_refuses_mixed_gpt_entries_and_names_off_ladder_cells(
     assert json.loads(captured.out)["inputs"]["off_ladder"] == {f"{off_key}-none-O1R": 1}
     write_runs(
         tmp_path / "mixed",
-        [attempt(i, "loud", f"gpt-6.1-sol{fb}", "O1", score(i, "loud")) for i, fb in enumerate(("", "-fb1"))],
+        [attempt(i, "loud", f"gpt-5.6-sol{fb}", "O1", score(i, "loud")) for i, fb in enumerate(("", "-fb1"))],
     )
     assert cli.main(["stats", str(tmp_path / "mixed"), "--design", "v3", "--root", str(root)]) == 1
     captured = capsys.readouterr()
-    assert captured.out == "" and "gpt-6.1-sol is flown as gpt-6.1-sol, gpt-6.1-sol-fb1" in captured.err
+    assert captured.out == "" and "gpt-5.6-sol is flown as gpt-5.6-sol, gpt-5.6-sol-fb1" in captured.err
 
 
 def test_lip_stats_without_design_is_freeze_v2s(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

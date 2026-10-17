@@ -9,7 +9,7 @@ from lost_in_place import cli, freeze, prompt_grid
 ROOT = Path(__file__).resolve().parents[1]
 SPEC_V3_TEXT = (ROOT / freeze.SPEC_V3).read_text()
 ARMS = ("qwen3-4b-zero-shot", "claude-sonnet-4-6", "qwen3-4b-student")
-FIVE = (*ARMS, "gpt-6.1-sol-fb2", "claude-sonnet-5-5-fb1")
+FIVE = (*ARMS, "gpt-5.6-sol-fb2", "claude-sonnet-5-5-fb1")
 ADAPTATION = freeze.Adaptation("t1", 120, ARMS)
 DIGEST = "sha256:" + "0" * 64
 VALUES = {row: f"{i:064x}" for i, row in enumerate(freeze.V3_ROWS)} | ADAPTATION.values()
@@ -125,7 +125,7 @@ def test_a_five_arm_record_with_fallbacks_and_a_dropped_arm_reads_the_same_in_st
     adaptation = freeze.Adaptation("t0", 160, FIVE).drop(("claude-sonnet-5-5",))
     design = stats_v3.read_design(freeze.write_record_v3(SPEC_V3_TEXT, VALUES | adaptation.values()))
     assert (design.m, design.n, design.dropped) == (20, 160, ("claude-sonnet-5-5",))
-    assert design.confirmatory == tuple(sorted({*ARMS, "gpt-6.1-sol", "claude-sonnet-5-5"}))
+    assert design.confirmatory == tuple(sorted({*ARMS, "gpt-5.6-sol", "claude-sonnet-5-5"}))
 
 
 def test_writing_the_v3_record_does_not_change_its_hash() -> None:
@@ -158,7 +158,7 @@ def test_an_adaptation_fixes_m_and_rejects_values_outside_the_rules() -> None:
         ("t0", 120, (*FIVE, "other-model"), "1 to 5 confirmatory arms, got 6"),
         ("t0", 120, ARMS[:1] * 2, "named twice"),
         ("t0", 120, ("claude-sonnet-5-5", "claude-sonnet-5-5-fb2"), "named twice: claude-sonnet-5-5"),
-        ("t0", 120, ("gpt-6.1-sol-fb1", "gpt-6.1-sol-fb3"), "named twice: gpt-6.1-sol"),
+        ("t0", 120, ("gpt-5.6-sol-fb1", "gpt-5.6-sol-fb3"), "named twice: gpt-5.6-sol"),
         ("t0", 120, ("dexi-claude-sonnet-5-5.driver-dexi.prompt-dexi-v2",), "not an arm key"),
         ("t0", 120, ("claude-haiku-5-5",), "smoke-only"),
         ("t0", 120, ("rule-2m",), "scripted control"),
@@ -176,11 +176,11 @@ def test_an_adaptation_fixes_m_and_rejects_values_outside_the_rules() -> None:
 
 def test_a_dropped_arm_stays_in_m_and_must_be_a_confirmatory_arm() -> None:
     five = freeze.Adaptation("t1", 120, FIVE)
-    dropped = five.drop(("gpt-6.1-sol",)).drop(("claude-sonnet-5-5-fb1",))
-    assert dropped.m == 20 and dropped.dropped == ("claude-sonnet-5-5-fb1", "gpt-6.1-sol")
-    assert dropped.values()[freeze.DROPPED_ROW] == "claude-sonnet-5-5-fb1, gpt-6.1-sol"
+    dropped = five.drop(("gpt-5.6-sol",)).drop(("claude-sonnet-5-5-fb1",))
+    assert dropped.m == 20 and dropped.dropped == ("claude-sonnet-5-5-fb1", "gpt-5.6-sol")
+    assert dropped.values()[freeze.DROPPED_ROW] == "claude-sonnet-5-5-fb1, gpt-5.6-sol"
     assert five.values()[freeze.DROPPED_ROW] == "none"
-    for arms in [("qwen3-4b-teacher",), ("gpt-6.1-sol", "gpt-6.1-sol-fb2")]:
+    for arms in [("qwen3-4b-teacher",), ("gpt-5.6-sol", "gpt-5.6-sol-fb2")]:
         with pytest.raises(ValueError, match="dropped arms must be confirmatory arms, once each"):
             five.drop(arms)
 
@@ -188,9 +188,9 @@ def test_a_dropped_arm_stays_in_m_and_must_be_a_confirmatory_arm() -> None:
 def test_the_adaptation_is_read_back_from_the_record() -> None:
     written = freeze.write_record_v3(SPEC_V3_TEXT, VALUES)
     assert freeze.adaptation_from_record(written) == freeze.Adaptation("t1", 120, tuple(sorted(ARMS)))
-    dropped = freeze.Adaptation("t1", 120, FIVE).drop(("gpt-6.1-sol",))
+    dropped = freeze.Adaptation("t1", 120, FIVE).drop(("gpt-5.6-sol",))
     assert freeze.adaptation_from_record(freeze.write_record_v3(SPEC_V3_TEXT, VALUES | dropped.values())) == (
-        freeze.Adaptation("t1", 120, tuple(sorted(FIVE)), ("gpt-6.1-sol",))
+        freeze.Adaptation("t1", 120, tuple(sorted(FIVE)), ("gpt-5.6-sol",))
     )
     with pytest.raises(ValueError, match="no value for"):
         freeze.adaptation_from_record(SPEC_V3_TEXT)
@@ -327,7 +327,7 @@ def test_freeze_record_defaults_to_v2_and_refuses_v3_only_flags(capsys: pytest.C
 
 
 FIFTH_ARM_ENTRIES = {
-    "gpt-6.1-sol-fb2": "  provider: bedrock\n  model_id: openai.gpt-6.1-sol\n",
+    "gpt-5.6-sol-fb2": "  provider: bedrock\n  model_id: openai.gpt-5.6-sol\n",
     "claude-sonnet-5-5-fb1": (
         "  provider: bedrock\n  model_id: us.anthropic.claude-sonnet-5-5\n  region: us-east-2\n"
     ),
@@ -360,6 +360,6 @@ def test_cli_records_five_arms_then_drops_one(repo: Path, capsys: pytest.Capture
     assert cli.main([*args, "--image-digest", DIGEST, "--check"]) == 0
     assert cli.main([*args, "--drop", "claude-sonnet-4-5"]) == 1
     assert "dropped arms must be confirmatory arms" in capsys.readouterr().err
-    assert cli.main([*args, "--drop", "gpt-6.1-sol", "--arms", "x"]) == 2
+    assert cli.main([*args, "--drop", "gpt-5.6-sol", "--arms", "x"]) == 2
     assert (repo / freeze.SPEC_V3).read_text() == after
-    assert cli.main(["freeze-record", "--root", str(ROOT), "--drop", "gpt-6.1-sol"]) == 2
+    assert cli.main(["freeze-record", "--root", str(ROOT), "--drop", "gpt-5.6-sol"]) == 2

@@ -21,7 +21,7 @@ class ModelSpec(BaseModel):
     temperature: float | None = None
     tool_choice: Literal["any", "auto"] = "any"
     # Bedrock Converse only: model-specific request fields, sent as `additionalModelRequestFields`
-    # (e.g. {reasoning_effort: low}); omitted from the request when empty.
+    # (e.g. {reasoning: {effort: low}}); omitted from the request when empty.
     additional_request_fields: dict[str, Any] = Field(default_factory=dict)
     # OpenAI-compatible servers only: where the server is, the environment variable holding its
     # key (local servers need none), and extra request fields such as chat_template_kwargs.

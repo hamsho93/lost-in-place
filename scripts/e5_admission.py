@@ -3,14 +3,14 @@ amendment), from whitelisted inputs only.
 
 Inputs, none of them an outcome column (section 2.5):
 - `--phase0`: `e5_phase0.py summarise` (discordance, r_tr, invalid rates; retired families only);
-- `--smoke`: the smoke-call record of both smoked arms, `{"gpt-6.1-sol": {"tried": [...]},
+- `--smoke`: the smoke-call record of both smoked arms, `{"gpt-5.6-sol": {"tried": [...]},
   "claude-sonnet-5-5": {"tried": [...]}}`, each try `{"entry": ..., "result": "accepted" |
   "rejected", "error": ...}` in that arm's fallback order (section 9.2); an arm left out was not tried;
 - `--canary`: `e5_admission.py canary-health` (per canary arm: planner calls, invalid calls,
   `manipulation_decision_ok` on loud, `manipulation_ok` on brief, metered dollars).
 
 The rules, in the order the design applies them:
-- A-3 (GPT-6.1 Sol) and A-3b (Claude Sonnet 5.5), the same checks and thresholds: (1) a smoke call
+- A-3 (GPT-5.6 Sol) and A-3b (Claude Sonnet 5.5), the same checks and thresholds: (1) a smoke call
   accepted in the arm's fallback order; (2) invalid planner calls at most 2% in its Phase 0 action
   calls and in its canary; (3) canary loud `manipulation_decision_ok` in at least 40 of 42 episodes
   and brief `manipulation_ok` in at least 35 of 36; (4) canary cost at most $0.060 per episode; (5) if
@@ -26,7 +26,7 @@ The rules, in the order the design applies them:
   `stats_v3` read them; `record_arms` is that flag's value.
 
     uv run --extra aws python scripts/e5_admission.py canary-health s3://<bucket>/runs --template t1 \\
-        --usd gpt-6.1-sol=4.10 --usd claude-sonnet-5-5-fb1=3.50 --out runs/canary/health.json
+        --usd gpt-5.6-sol=4.10 --usd claude-sonnet-5-5-fb1=3.50 --out runs/canary/health.json
     uv run python scripts/e5_admission.py decide --phase0 runs/phase0/phase0.json \\
         --smoke runs/smoke/smoke.json --canary runs/canary/health.json --out runs/adaptation/a2-a5.json
 """
@@ -47,7 +47,7 @@ from lost_in_place.llm.registry import get_model
 
 CLAUDE = "claude-sonnet-4-6"
 EXISTING_ARMS = ("qwen3-4b-student", "qwen3-4b-zero-shot", CLAUDE)
-GPT_ARM, SONNET55_ARM = "gpt-6.1-sol", "claude-sonnet-5-5"
+GPT_ARM, SONNET55_ARM = "gpt-5.6-sol", "claude-sonnet-5-5"
 GPT_ENTRIES = (GPT_ARM, f"{GPT_ARM}-fb1", f"{GPT_ARM}-fb2", f"{GPT_ARM}-fb3")
 SONNET55_ENTRIES = (SONNET55_ARM, f"{SONNET55_ARM}-fb1", f"{SONNET55_ARM}-fb2")
 # Each smoked arm, its fallback order, and the rule that admits it.
@@ -152,7 +152,7 @@ def smoke_entry(smoke: dict[str, Any], entries: tuple[str, ...]) -> tuple[str | 
 def a3(
     phase0: dict[str, Any], smoke: dict[str, Any], canary: dict[str, Any], n: int, arm: str = GPT_ARM
 ) -> dict[str, Any]:
-    """A-3 for GPT-6.1 Sol, or A-3b for Claude Sonnet 5.5: `smoke` is the whole record."""
+    """A-3 for GPT-5.6 Sol, or A-3b for Claude Sonnet 5.5: `smoke` is the whole record."""
     if not isinstance(smoke.get(arm, {}), dict) or set(smoke) - set(SMOKED):
         raise SystemExit(f"smoke record: give {{arm: {{'tried': [...]}}}} for arms among {', '.join(SMOKED)}")
     entry, problems = smoke_entry(smoke.get(arm, {}), SMOKED[arm])

@@ -23,7 +23,7 @@ base arm (the model) and the ladder level (`level_of`, `LADDER`): `dexi-v2` with
 O1R is O0, O1, O1-L, O1-N and O1-R; `dexi-9b2e7a7` with O0 and O1 is O0-V and O1-V. A DEXI arm at any
 other pair (`dexi-9b2e7a7` at O1L, say) is off the ladder: it is excluded, counted and named in the
 report, never mapped. A non-DEXI arm key, or a validator other than `none`, is outside the design and
-only counted. The GPT arm is whichever of `gpt-6.1-sol` and its three pre-declared fallback entries
+only counted. The GPT arm is whichever of `gpt-5.6-sol` and its three pre-declared fallback entries
 the smoke call accepted (design 9.2), and the Sonnet 5.5 arm likewise of `claude-sonnet-5-5` and its
 two; each entry is its base arm, and an analysis holding two entries of one arm is refused, as is any
 input holding the smoke-only `claude-haiku-5-5`. The condition is the scenario
@@ -122,7 +122,7 @@ LADDER: dict[str, tuple[str, str]] = {
 }
 LEVELS = tuple(LADDER)
 ARM_KEY = re.compile(r"dexi-(?P<model>.+)\.driver-dexi\.prompt-(?P<prompt>[^.]+)")
-GPT_ARM = "gpt-6.1-sol"
+GPT_ARM = "gpt-5.6-sol"
 GPT_ENTRIES = (GPT_ARM, f"{GPT_ARM}-fb1", f"{GPT_ARM}-fb2", f"{GPT_ARM}-fb3")
 SONNET_ARM = "claude-sonnet-5-5"
 SONNET_ENTRIES = (SONNET_ARM, f"{SONNET_ARM}-fb1", f"{SONNET_ARM}-fb2")
@@ -157,7 +157,7 @@ def ladder_level(observation: str, prompt_version: str) -> str | None:
 
 
 def base_arm(model: str) -> str:
-    """The arm a model entry flies as: a pre-declared fallback entry (GPT-6.1 Sol's, Sonnet 5.5's) is
+    """The arm a model entry flies as: a pre-declared fallback entry (GPT-5.6 Sol's, Sonnet 5.5's) is
     its arm."""
     return BASE_ARM.get(model, model)
 

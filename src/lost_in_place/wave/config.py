@@ -87,7 +87,7 @@ class Arm(Strict):
     p90_usd: float = Field(0.0, ge=0)
     # Section 10.4 and S-8: the arm runs last, only if the month-fit sum passes, and pauses when its
     # rolling cost per episode exceeds `s8_factor` x its canary's. Month-fit arms are summed in the
-    # order listed (GPT-6.1 Sol, then Claude Sonnet 5.5).
+    # order listed (GPT-5.6 Sol, then Claude Sonnet 5.5).
     month_fit: bool = False
     canary_usd_per_episode: float | None = Field(None, gt=0)
     probe_usd: float = Field(0.0, ge=0)
