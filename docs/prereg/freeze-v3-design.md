@@ -202,7 +202,31 @@ The $140 pre-freeze cap, the per-arm caps and the job-P90 check were unchanged. 
 
 **`scripts/check_v3_diff.py freeze-v3-pre HEAD`** (the tagged copy), at the commit that fills these blocks:
 
-CHECK_V3_DIFF
+| Path | Change | Rule |
+|---|---|---|
+| `docs/prereg/freeze-v3-design.md` | M | A-7 fill-in: marked blocks |
+| `src/lost_in_place/agent.py` | M | A-6 harness: agent |
+| `src/lost_in_place/episode.py` | M | A-6 harness: agent |
+| `src/lost_in_place/llm/dexi.py` | M | A-6 harness: agent |
+| `src/lost_in_place/planning.py` | M | A-6 harness: agent |
+| `src/lost_in_place/wave/e5.yaml` | M | A-6 harness: submitter |
+| `sweeps/e5/claude-sonnet-4-6.yaml` | A | A-7 fill-in: sweeps for the chosen N, arms and template |
+| `sweeps/e5/claude-sonnet-5-5.yaml` | A | A-7 fill-in: sweeps for the chosen N, arms and template |
+| `sweeps/e5/gpt-5.6-sol.yaml` | A | A-7 fill-in: sweeps for the chosen N, arms and template |
+| `sweeps/e5/qwen3-4b-student.yaml` | A | A-7 fill-in: sweeps for the chosen N, arms and template |
+| `sweeps/e5/qwen3-4b-zero-shot.yaml` | A | A-7 fill-in: sweeps for the chosen N, arms and template |
+| `sweeps/e5/scripted.yaml` | A | A-7 fill-in: sweeps for the chosen N, arms and template |
+| `tests/test_agent.py` | M | A-6 harness: tests of a harness fix |
+| `tests/test_dexi_adapter.py` | M | A-6 harness: tests of a harness fix |
+| `tests/test_episode.py` | M | A-6 harness: tests of a harness fix |
+| `tests/test_wave_config.py` | M | A-6 harness: tests of a harness fix |
+
+- `docs/prereg/freeze-v3-design.md`: unchanged outside its 3 marked blocks
+- `SPEC-v3.md`: unchanged outside its freeze record's values
+- prompt bundle v3: `69978989e48049b4e9c23114a5dd797f16d70e2aa33fc0ba41df3a712df603ae` at both refs (27916 prompts rendered from each ref)
+- probe prompts v3: `b0ed069de534a074349695010f5885df44af87d5760d098234b0bfa6b53c947f` at both refs
+
+**PASS**
 
 **The power table of §8 on the Phase 0 rates** (decides nothing). Loud, N = 120, 98.75% (P-R at 95%). p10 and p01 are the Phase 0 shares of prompts that move toward safe and toward unsafe under the contrast. Phase 0 is open-loop on E4 prompts, so these are a rough guide only.
 
