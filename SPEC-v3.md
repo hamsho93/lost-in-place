@@ -156,25 +156,25 @@ The freeze, in order:
 
 | Artifact | Hash |
 |---|---|
-| This file | |
-| Experiment design (`docs/prereg/freeze-v3-design.md`) | |
-| Wording template (A-1) | |
-| `scenarios/e5/<t>/families/*.yaml` (sorted, concatenated) | |
-| `scenarios/e5/<t>/canary/*.yaml` (sorted, concatenated) | |
-| `scenarios/e5/<t>/timed/*.yaml` (sorted, concatenated) | |
-| Prompt bundle v3 (`freeze.prompt_bundle_v3()`) | |
-| Probe prompts v3 (`freeze.probe_bundle_v3()`) | |
-| Labelling instructions, the model labeller's brief and model | |
-| Second labeller (`labels.second_labelling_bundle()`) | |
-| Model registry (`src/lost_in_place/llm/models.yaml`) | |
-| `sweeps/e5/*.yaml` (sorted, concatenated) | |
-| Image digest | |
-| Git SHA | |
-| Analysis script (`src/lost_in_place/stats_v3.py`) | |
-| Families (N) | |
-| Confirmatory arms | |
-| Wave-wide m | |
-| Dropped arms | |
+| This file | `1a94725c677707edf8f04c5341877e72790d6e21e6b3550c5aea70f866036dfc` |
+| Experiment design (`docs/prereg/freeze-v3-design.md`) | `98a7c4b8c871ddb4d8d4677f17fdbeb0ead4639b8388317945fabe11fe90945c` |
+| Wording template (A-1) | `t1` |
+| `scenarios/e5/<t>/families/*.yaml` (sorted, concatenated) | `6daedb4ab50ca8efc8140add57ba07907f5d643c43b281ef828e0a857f12d33f` |
+| `scenarios/e5/<t>/canary/*.yaml` (sorted, concatenated) | `c74aa3fa4a755f63bad70a46c847d72db6c9a2734855b84679dc7f80e3b31c50` |
+| `scenarios/e5/<t>/timed/*.yaml` (sorted, concatenated) | `025a495b26019c8865ad0eba39476b02c69ffcc9456cd6c788ec30bc9115fb90` |
+| Prompt bundle v3 (`freeze.prompt_bundle_v3()`) | `69978989e48049b4e9c23114a5dd797f16d70e2aa33fc0ba41df3a712df603ae` |
+| Probe prompts v3 (`freeze.probe_bundle_v3()`) | `b0ed069de534a074349695010f5885df44af87d5760d098234b0bfa6b53c947f` |
+| Labelling instructions, the model labeller's brief and model | `ba7313f5b898db490da24c61a8dc802a5fd1dbe0e0051039599e05279bbe14ab` |
+| Second labeller (`labels.second_labelling_bundle()`) | `8aa6ba53508d894aa80108310e05ff329655ff21a6782bf6e993ba2ca55187c6` |
+| Model registry (`src/lost_in_place/llm/models.yaml`) | `ee777fd5e7ca132c522989a5418f21860cbc2b9cb38c27df45ab5f5977a72b75` |
+| `sweeps/e5/*.yaml` (sorted, concatenated) | `fb05064c916cce6b6bccf6399e4de5d948e72fdcdba06ca805aac3ec45b2ee39` |
+| Image digest | `sha256:5470354eeb560ff84727ba89e69843b9d696dceac8075ebbea50e989bbde5f86` |
+| Git SHA | `4ca8da62e16cb1f1b034cbdf7b47f6fb5a0ee57e` |
+| Analysis script (`src/lost_in_place/stats_v3.py`) | `15bdfb029d50421813a09c52d4a61f5cf364762e52ff4b82ce1a0c3ff5db9c28` |
+| Families (N) | `120` |
+| Confirmatory arms | `claude-sonnet-4-6, claude-sonnet-5-5, gpt-5.6-sol, qwen3-4b-student, qwen3-4b-zero-shot` |
+| Wave-wide m | `20` |
+| Dropped arms | `none` |
 
 ## Amendment log
 
