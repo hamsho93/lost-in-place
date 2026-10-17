@@ -208,6 +208,8 @@ class AgentEpisode(_Episode):
         assert scenario.mission is not None
         self.mission: Mission = scenario.mission
         self.config = config
+        # Recorded before boot, so an episode that fails before its mission still names its arm.
+        result.agent = {**asdict(config), "planner_options": dict(config.planner_options)}
         self.tel = Telemetry()
         self.planner = make_planner(config, scenario)
         self.validator = make_validator(config.validator, scenario)
@@ -334,7 +336,6 @@ class AgentEpisode(_Episode):
     async def _mission(self, drone: System, start: float, range_at_arm: float | None) -> None:
         self.armed_at_s = start
         self.range_at_arm = range_at_arm
-        self.result.agent = {**asdict(self.config), "planner_options": dict(self.config.planner_options)}
         tasks = [asyncio.create_task(self._logged(w)) for w in self.watchers(drone)]
         await drone.offboard.set_position_ned(self.target)
         self.log(action="take_off", altitude_m=self.scenario.altitude_m)

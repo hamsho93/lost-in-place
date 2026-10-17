@@ -1,6 +1,7 @@
 import asyncio
 import json
 import math
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -192,6 +193,17 @@ def _advance_clock(ep: AgentEpisode, rate_s: float = 0.5) -> asyncio.Task[None]:
                 ep.sim_us += int(rate_s * 1e6)
 
     return asyncio.create_task(tick())
+
+
+def test_the_arm_is_recorded_before_the_episode_boots() -> None:
+    from lost_in_place.report import _attempt
+
+    config = AgentConfig(planner="scripted-cautious", validator="none", observation="O1")
+    ep = _agent_episode("cross_healthy.yaml", config)
+    ep.result.outcome = "no_local_position"
+    episode = asdict(ep.result)
+    assert episode["agent"]["planner"] == "scripted-cautious"
+    assert _attempt("k", "1", 0.0, episode, None).cell[2:] == ("scripted-cautious", "none", "O1")
 
 
 def test_decision_pauses_the_world_and_charges_latency() -> None:
