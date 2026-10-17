@@ -88,12 +88,25 @@ claude-sonnet-5-5:
   region: us-east-2
   max_tokens: 4096
   tool_choice: auto
+  additional_request_fields: {thinking: {type: adaptive, display: summarized}}
   notes: >-
     E5 fifth arm, approved 2026-10-16 (fifth-arm spec), served from us-east-2. tool_choice auto
     because Sonnet 5.5 rejects forced tool use; a reply without a tool call is invalid. No
     temperature, which Sonnet 5.5 rejects at any non-default value, so the arm is stochastic and its
     test-retest is checked. Provider-default effort (high): no effort field, decided 2026-10-17 from
-    the frontier smoke, which flew these exact settings.
+    the frontier smoke. Thinking stays adaptive, its default, but displayed as a summary (decided
+    2026-10-17), which bills the same; the summaries are kept in the traces and are blinded like
+    refusal reasons (design 2.5). If the smoke call's request is rejected, fb1 below is tried.
+
+claude-sonnet-5-5-fb1:
+  provider: bedrock
+  model_id: us.anthropic.claude-sonnet-5-5
+  region: us-east-2
+  max_tokens: 4096
+  tool_choice: auto
+  notes: >-
+    Fallback 1 of claude-sonnet-5-5 (design 9.4): no thinking field, so the display is the default,
+    omitted. The configuration the frontier smoke flew at default effort.
 
 # Smoke-only: checks the us-east-2 request shape cheaply. Not an E5 arm; no freeze-v3 sweep uses it.
 claude-haiku-5-5:

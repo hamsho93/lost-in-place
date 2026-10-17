@@ -154,6 +154,15 @@ def test_packet_gives_the_goal_in_both_frames() -> None:
     assert "**Goal in the truth frame:**" in text
 
 
+def test_packet_leaves_out_the_models_reasoning() -> None:
+    episode = _episode("b00_loud", inject=True)
+    episode["planner_decisions"] = [
+        {"model": "claude-sonnet-5-5", "reasoning": "Flow reads zero, so hold.", "text": "Holding now."}
+    ]
+    text = labels.packet("abc123", episode)
+    assert "Flow reads zero" not in text and "Holding now" not in text
+
+
 def test_packet_does_not_name_the_arm() -> None:
     text = labels.packet("abc123", _episode("b00_loud", inject=True)).lower()
     for leak in ("dexi", "qwen", "student", "geometric", "validator", "o1", "envelope", "waypoint 1"):

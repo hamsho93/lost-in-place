@@ -431,19 +431,23 @@ def test_an_analysis_mixing_two_gpt_entries_is_refused() -> None:
     assert stats_v3.collect([mixed[0], canary]).entries == {"gpt-5.6-sol": "gpt-5.6-sol"}
 
 
-def test_sonnet_5_5_is_one_arm_apart_from_gpts() -> None:
-    assert stats_v3.SONNET_ENTRIES == ("claude-sonnet-5-5",)
-    key = f"dexi-claude-sonnet-5-5.driver-dexi.prompt-{stats_v3.CLAIM}"
-    assert stats_v3.level_of(key, "O0") == ("claude-sonnet-5-5", "O0-V")
+def test_sonnet_5_5_fallback_entry_is_its_arm_and_never_mixed() -> None:
+    for entry in stats_v3.SONNET_ENTRIES:
+        key = f"dexi-{entry}.driver-dexi.prompt-{stats_v3.CLAIM}"
+        assert stats_v3.level_of(key, "O0") == ("claude-sonnet-5-5", "O0-V")
+    assert stats_v3.SONNET_ENTRIES == ("claude-sonnet-5-5", "claude-sonnet-5-5-fb1")
     assert stats_v3.base_arm("claude-sonnet-4-6") == "claude-sonnet-4-6"
-    both = [
+    mixed = [
         attempt(0, "loud", "claude-sonnet-5-5", "O1", score(0, "loud")),
+        attempt(1, "brief", "claude-sonnet-5-5-fb1", "O1-N", score(1, "brief")),
         attempt(2, "loud", "gpt-5.6-sol-fb1", "O1", score(2, "loud")),
     ]
-    assert stats_v3.collect(both).entries == {
-        "claude-sonnet-5-5": "claude-sonnet-5-5",
-        "gpt-5.6-sol": "gpt-5.6-sol-fb1",
-    }
+    with pytest.raises(
+        ValueError, match=re.escape("claude-sonnet-5-5 is flown as claude-sonnet-5-5, claude-sonnet-5-5-fb1")
+    ):
+        stats_v3.collect(mixed)
+    with pytest.raises(ValueError, match="names one base arm twice"):
+        stats_v3.read_design(record("a" * 64, arms="claude-sonnet-5-5, claude-sonnet-5-5-fb1", m=8))
 
 
 def test_fifth_arm_entries_agree_with_the_registry_when_it_has_them() -> None:
@@ -547,13 +551,16 @@ def test_the_wave_wide_column_uses_m_from_the_design(m: int, level: float, z: fl
     assert result["analysis"]["dropped_arms"] == list(others)
 
 
-def test_five_confirmatory_arms_with_a_fallback_entry_flown() -> None:
-    attempts = wave() + wave("gpt-5.6-sol-fb1") + wave("claude-sonnet-5-5") + scripted()
-    arms = f"{ARM}, gpt-5.6-sol, claude-sonnet-5-5, qwen3-4b-student, b"
+def test_five_confirmatory_arms_with_two_fallback_entries_flown() -> None:
+    attempts = wave() + wave("gpt-5.6-sol-fb1") + wave("claude-sonnet-5-5-fb1") + scripted()
+    arms = f"{ARM}, gpt-5.6-sol, claude-sonnet-5-5-fb1, qwen3-4b-student, b"
     design = stats_v3.read_design(record("a" * 64, arms=arms, m=20, dropped="b"))
     assert design.live == (ARM, "claude-sonnet-5-5", "gpt-5.6-sol", "qwen3-4b-student")
     data = stats_v3.collect(attempts)
-    assert data.entries["gpt-5.6-sol"] == "gpt-5.6-sol-fb1"
+    assert (data.entries["gpt-5.6-sol"], data.entries["claude-sonnet-5-5"]) == (
+        "gpt-5.6-sol-fb1",
+        "claude-sonnet-5-5-fb1",
+    )
     with pytest.raises(stats_v3.Unsettled, match=r"qwen3-4b-student \(no scored results\)"):
         stats_v3.analyse(data, design, resamples=20)
     design = stats_v3.read_design(record("a" * 64, arms=arms, m=20, dropped="qwen3-4b-student, b"))

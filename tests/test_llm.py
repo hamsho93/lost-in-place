@@ -259,6 +259,9 @@ def test_reasoning_is_recorded_in_the_decision() -> None:
     assert "additionalModelRequestFields" not in stub.requests[0]
 
 
+SUMMARIZED = {"thinking": {"type": "adaptive", "display": "summarized"}}
+
+
 def test_sonnet_5_5_entry_is_the_one_the_fifth_arm_spec_states() -> None:
     assert get_model("claude-sonnet-5-5").model_dump(exclude={"name", "notes"}) == {
         "provider": "bedrock",
@@ -267,15 +270,22 @@ def test_sonnet_5_5_entry_is_the_one_the_fifth_arm_spec_states() -> None:
         "max_tokens": 4096,
         "temperature": None,
         "tool_choice": "auto",
-        "additional_request_fields": {},
+        "additional_request_fields": SUMMARIZED,
         "base_url": None,
         "api_key_env": None,
         "extra_body": {},
         "chat_template": None,
     }
-    for retired in ("claude-sonnet-5-5-fb1", "claude-sonnet-5-5-fb2"):
-        with pytest.raises(LookupError):
-            get_model(retired)
+
+
+def test_sonnet_5_5_fallback_drops_only_the_thinking_display() -> None:
+    base, fb1 = (get_model(n) for n in ("claude-sonnet-5-5", "claude-sonnet-5-5-fb1"))
+    assert fb1.additional_request_fields == {}
+    assert base.model_dump(exclude={"name", "notes", "additional_request_fields"}) == fb1.model_dump(
+        exclude={"name", "notes", "additional_request_fields"}
+    )
+    with pytest.raises(LookupError):
+        get_model("claude-sonnet-5-5-fb2")
 
 
 def test_haiku_5_5_smoke_entry_kept_effort_low() -> None:
@@ -288,13 +298,15 @@ def test_haiku_5_5_smoke_entry_kept_effort_low() -> None:
     assert haiku.additional_request_fields == {"output_config": {"effort": "low"}}
 
 
-def test_sonnet_5_5_request_sends_no_effort_or_temperature() -> None:
-    request = BedrockConverseClient(get_model("claude-sonnet-5-5"), client=object(), env={}).request(
-        "s", "u", tool_specs()
+def test_sonnet_5_5_requests_ask_for_summarized_thinking_and_send_no_temperature() -> None:
+    base, fb1 = (
+        BedrockConverseClient(get_model(n), client=object(), env={}).request("s", "u", tool_specs())
+        for n in ("claude-sonnet-5-5", "claude-sonnet-5-5-fb1")
     )
-    assert "additionalModelRequestFields" not in request
-    assert request["inferenceConfig"] == {"maxTokens": 4096}
-    assert request["toolConfig"]["toolChoice"] == {"auto": {}}
+    assert base["additionalModelRequestFields"] == SUMMARIZED
+    assert base["inferenceConfig"] == fb1["inferenceConfig"] == {"maxTokens": 4096}
+    assert base["toolConfig"]["toolChoice"] == {"auto": {}}
+    assert "additionalModelRequestFields" not in fb1
 
 
 def test_a_us_east_2_profile_is_called_on_the_us_east_2_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:

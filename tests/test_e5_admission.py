@@ -58,8 +58,8 @@ def _arm(
 
 GPT, SONNET = "gpt-5.6-sol", "claude-sonnet-5-5"
 EXISTING = ("qwen3-4b-student", "qwen3-4b-zero-shot", "claude-sonnet-4-6")
-GPT_FB1 = "gpt-5.6-sol-fb1"
-ORDER = {GPT: (GPT, GPT_FB1), SONNET: (SONNET,)}
+GPT_FB1, SONNET_FB1 = "gpt-5.6-sol-fb1", "claude-sonnet-5-5-fb1"
+ORDER = {GPT: (GPT, GPT_FB1), SONNET: (SONNET, SONNET_FB1)}
 
 
 def _tried(arm: str, entry: str) -> dict[str, Any]:
@@ -196,10 +196,9 @@ def test_a3_and_a3b_not_run(adm: ModuleType, arm: str) -> None:
     assert r["status"] == "not run" and r["entry"] is None
     del smoke[arm]
     assert adm.decide(phase0, smoke, canary)[rule]["status"] == "not run"
-    if len(adm.SMOKED[arm]) > 1:
-        skipped = smoke | {arm: {"tried": [{"entry": adm.SMOKED[arm][1], "result": "accepted"}]}}
-        r = adm.decide(phase0, skipped, canary)[rule]
-        assert r["status"] == "not run" and "the order is" in r["checks"]["1_smoke_call"]["problems"][0]
+    skipped = smoke | {arm: {"tried": [{"entry": adm.SMOKED[arm][1], "result": "accepted"}]}}
+    r = adm.decide(phase0, skipped, canary)[rule]
+    assert r["status"] == "not run" and "the order is" in r["checks"]["1_smoke_call"]["problems"][0]
 
 
 def test_the_smoke_record_is_checked(adm: ModuleType) -> None:
@@ -419,7 +418,7 @@ def test_dry_run_from_recorded_runs_to_the_adaptation_block(
 
 @pytest.mark.parametrize(
     ("gpt", "sonnet"),
-    [(GPT, SONNET), (GPT_FB1, SONNET)],
+    [(GPT, SONNET), (GPT_FB1, SONNET_FB1)],
 )
 def test_the_arms_are_named_as_the_freeze_record_and_stats_v3_read_them(
     adm: ModuleType, gpt: str, sonnet: str

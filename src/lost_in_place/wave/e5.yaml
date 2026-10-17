@@ -180,7 +180,7 @@ arms:
       max_tokens: 4096
       temperature: null
       tool_choice: auto
-      additional_request_fields: null
+      additional_request_fields: {thinking: {type: adaptive, display: summarized}}
 
   - name: probe-sonnet-5-5
     kind: external

@@ -55,7 +55,7 @@ LLM_MODELS = ("qwen3-4b-student", "qwen3-4b-zero-shot", "claude-sonnet-4-6")
 GPT_ARM = "gpt-5.6-sol"
 GPT_ENTRIES = (GPT_ARM, f"{GPT_ARM}-fb1")
 SONNET55_ARM = "claude-sonnet-5-5"
-SONNET55_ENTRIES = (SONNET55_ARM,)
+SONNET55_ENTRIES = (SONNET55_ARM, f"{SONNET55_ARM}-fb1")
 # The arms whose registry entry is the one their smoke call accepted (sections 9.2 and 9.3).
 SMOKED = {GPT_ARM: GPT_ENTRIES, SONNET55_ARM: SONNET55_ENTRIES}
 SCRIPTED_ARM = "scripted"

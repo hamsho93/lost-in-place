@@ -112,6 +112,7 @@ It exits 2 for a ref that doesn't resolve. It runs in CI on the adaptation pull 
 **Not allowed before the pinned analysis run:**
 - `csa`, `csa_first_degraded`, `safe_first_post_onset` and `sustained_safe`;
 - behaviour at any decision, and refusal reasons;
+- the models' reasoning: Claude Sonnet 5.5's reasoning summaries and any other `reasoning` text in a trace, which are read like refusal reasons;
 - `false_refusal` and its kind;
 - `task_success` and `violation`;
 - the comprehension-probe answers (§3.3).
@@ -120,6 +121,7 @@ The exceptions are the Phase 0 discordance and test-retest columns (A-2, A-3) an
 
 **Mechanics:**
 - **The health report.** `lip e5 health` prints only the allowed columns, and every invocation appends to `manifests/e5/queries.log` in the results bucket.
+- **Reasoning stays in the traces.** The summaries are recorded in each episode's `planner_decisions` and in the Phase 0 run files. The health report reads only token counts from them, Phase 0's summary prints none, and the blind-labeller packets contain only the proposals. Nobody reads a summary before the pinned analysis run, and any reading of them after it is descriptive.
 - **Outcome output is gated.** `lip stats --design v3` refuses to print outcomes until the freeze-v3 record's analysis row matches the script and Mahmood's sign-off file `docs/prereg/freeze-v3-signoff.md` is on `main`. A closed gate exits 3 with nothing on stdout. The scripted gates (`--gates`, §6) are not outcomes of an LLM arm and are not behind it.
 - **The unblinding file.** The gate also requires `docs/prereg/freeze-v3-unblind.md`, which Mahmood commits after the last arm settles or the deferred arms are dropped (§12).
 - **The S4 retry rule is applied by the submitter.** Its log shows only "result" or "retry".
@@ -537,7 +539,7 @@ Tango's statistic for H₀: Δ = Δ₀ is Z(Δ₀) = (n₁₀ − n₀₁ − n�
 | `qwen3-4b-zero-shot` | import `lip-qwen3-4b-thinking-2507-768f209` | Confirmatory, unless A-4 | Leaned on the validator claim in 245 of 347 decisions |
 | `claude-sonnet-4-6` | `us.anthropic.claude-sonnet-4-6`, temperature 0 | Confirmatory, unless A-4 | Continuation-prone false refusals are expected at every level except the V levels (the b42 probe, §1) |
 | `gpt-5.6-sol` | `us.openai.gpt-5.6-sol` from us-east-2, Converse, tagged profile in us-east-2 | By A-3 (§9.3) | Replaces GPT-6.1 Sol, which the project's account can't use yet. Runs fourth. No `temperature`, which it rejects; provider-default effort (`medium`), no effort field (§9.2) |
-| `claude-sonnet-5-5` | `us.anthropic.claude-sonnet-5-5` from us-east-2, Converse, tagged profile in us-east-2 | By A-3b (§9.4) | Runs last. `tool_choice: auto`; no `temperature`, which it rejects; provider-default effort (`high`), no effort field (§9.4) |
+| `claude-sonnet-5-5` | `us.anthropic.claude-sonnet-5-5` from us-east-2, Converse, tagged profile in us-east-2 | By A-3b (§9.4) | Runs last. `tool_choice: auto`; no `temperature`, which it rejects; provider-default effort (`high`), no effort field; thinking displayed as summaries, blinded (§2.5, §9.4) |
 
 The arm keys read `dexi-<model>.driver-dexi.prompt-<version>`. A fallback entry keeps its own model key, and `stats_v3` maps it to its base arm. Both Qwen imports are re-created for the canaries and for the wave, and deleted after each.
 
@@ -595,12 +597,15 @@ claude-sonnet-5-5:
   region: us-east-2
   max_tokens: 4096
   tool_choice: auto
+  additional_request_fields: {thinking: {type: adaptive, display: summarized}}
 ```
 
 - **`tool_choice: auto`.** The model's client tool calling supports only `auto` and `none`, so a reply with no tool call is invalid. This differs from the Sonnet 4.6 arm, which uses `any`.
 - **Effort: the provider default** (`high`), decided on Oct 17, as for GPT-5.6 Sol. The entry sends no effort field. The model thinks adaptively by default. In the frontier smoke the default cost $0.034 per episode at O1 against $0.029 at `low` (§10.1), and the effort changed the arm's behaviour on retired families, so the registered arm is the model as served.
 - **No temperature.** The model rejects any non-default temperature, with or without thinking (the frontier smoke, Oct 16), so the entry sends none. The arm is stochastic, and check 5 applies.
-- **No fallback entries.** The base entry is the configuration the frontier smoke flew and Bedrock accepted. If its smoke call is rejected, A-3b check 1 fails.
+- **Reasoning summaries,** decided on Oct 17. Thinking stays adaptive, its default, but the entry asks for it to be displayed as a summary rather than omitted (the default display), so the traces hold readable reasoning. Anthropic bills the full thinking tokens either way, so the cost is unchanged. The summaries are blinded like refusal reasons (§2.5). The client records an omitted block as `[omitted reasoning]`.
+- **Fallback entry,** applied as in §9.2:
+  1. `claude-sonnet-5-5-fb1`: no `thinking` field, so the display is omitted. This is the configuration the frontier smoke flew at the default effort. The arm's behaviour should not change, but its traces then hold no readable reasoning.
 - **`claude-haiku-5-5`** (`us.anthropic.claude-haiku-5-5`, us-east-2, effort `low`, no temperature) is a smoke-only entry for the us-east-2 path. It is not an E5 arm and is never in a freeze-v3 sweep.
 - **Arm key** `dexi-claude-sonnet-5-5.driver-dexi.prompt-<version>`; the `stats_v3` base arm is `claude-sonnet-5-5`.
 - **Where it runs.** The episodes run in the same compute region as every other arm; only the model call goes to us-east-2. The planner's latency is charged at a fixed 2.0 s, so the extra network hop doesn't change an episode.
@@ -798,6 +803,7 @@ The admission script, `scripts/e5_admission.py`, computes A-2 to A-5 (A-3b inclu
 - **Claude Sonnet 5.5 is unmeasured on DEXI.**
   - **`tool_choice` is `auto`,** so the model may answer in text. A reply with no tool call is invalid, and A-3b check 2 (≤ 2% invalid) catches a model that does this often.
   - **Thinking and temperature.** It thinks adaptively by default at effort high, which the entry keeps. It rejects any non-default temperature, so the entry sends none, and the test-retest check applies. About a quarter of cost-model draws fail admission.
+  - **The summary display is untested on Bedrock.** The frontier smoke flew the omitted display. If the smoke call rejects `display: summarized`, the arm flies `-fb1`, and its reasoning is not readable.
   - **Region.** It is called in us-east-2, through its own profile, permissions and meter. If that path isn't deployed, its smoke call fails and it is not run (A-3b, check 1).
 - **Two late arms, likely in December.** Claude Sonnet 5.5 is a December arm in most draws, and GPT-5.6 Sol too at N = 160. If no December budget is approved by Nov 20, they are dropped and m stays as tagged, so the wave-wide column is stricter than the reporting arms need.
 - **The budget action is sticky.** It persists into the next month. The stops sit at $400 and $420 so that it never fires.
