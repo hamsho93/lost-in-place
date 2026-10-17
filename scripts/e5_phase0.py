@@ -59,7 +59,7 @@ LATERAL = ("forward", "back", "left", "right")
 # Rough per-call token counts for `estimate`, from E4's recorded Claude calls on DEXI's prompt.
 TOKENS = {"action": (1500, 60), "probe": (400, 15)}
 # The late arms' action calls as measured in the frontier smoke at default effort (O1, Oct 16-17):
-# GPT-5.6 Sol about 593 input and 97 output tokens, of which these 24 are the visible reply and the
+# GPT-5.6 Sol about 593 input and 95 output tokens, of which these 24 are the visible reply and the
 # rest is reasoning; Claude Sonnet 5.5 about 1,463 and 290 in its own tokenizer, the visible reply
 # taken as E4's 60 times 1.3. Their probes are E4's, the Claude 5.x ones scaled by 1.3.
 TOKENS_BY_PRICE = {
@@ -70,7 +70,7 @@ TOKENS_BY_PRICE = {
 # TOKENS; the measured counts above already include it).
 PRICES = {
     "claude": (3.30, 16.50, 0, 1.0),
-    "gpt": (4.40, 22.00, 73, 1.0),
+    "gpt": (4.40, 22.00, 71, 1.0),
     "claude5": (2.20, 11.00, 212, 1.0),
 }
 ESTIMATED = (

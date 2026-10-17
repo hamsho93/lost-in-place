@@ -22,11 +22,11 @@ The rules, in the order the design applies them:
   against O1, in loud or in brief, has more than 10% of prompts discordant in each direction; else 120.
 - A-4, each existing arm: descriptive if more than 2% of its canary planner calls are invalid.
 - A-5: m = 4 x the confirmatory arms, at most 20. Arms are registry model names, a smoked arm by the
-  entry it flies (e.g. `claude-sonnet-5-5-fb1`), as `lip freeze-record --freeze v3 --arms` and
+  entry it flies (e.g. `gpt-5.6-sol-fb1`), as `lip freeze-record --freeze v3 --arms` and
   `stats_v3` read them; `record_arms` is that flag's value.
 
     uv run --extra aws python scripts/e5_admission.py canary-health s3://<bucket>/runs --template t1 \\
-        --usd gpt-5.6-sol=4.10 --usd claude-sonnet-5-5-fb1=3.50 --out runs/canary/health.json
+        --usd gpt-5.6-sol=4.10 --usd claude-sonnet-5-5=3.50 --out runs/canary/health.json
     uv run python scripts/e5_admission.py decide --phase0 runs/phase0/phase0.json \\
         --smoke runs/smoke/smoke.json --canary runs/canary/health.json --out runs/adaptation/a2-a5.json
 """

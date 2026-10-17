@@ -17,7 +17,7 @@
 3. `freeze-v3` may differ from `freeze-v3-pre` only by applying the adaptation rules in §2.3, and a script checks the diff.
 4. Mahmood signs off on the `freeze-v3` tag, and only then does the wave run.
 
-**Budget:** $450 a month in October and November. The pre-freeze work has a median of $80 (P90 $94), which brings October close to its $420 stop; the November wave a median of $329, under a metered hard stop at $400. GPT-5.6 Sol and then Claude Sonnet 5.5 run last, each in November only if a month-fit check passes; otherwise in December, on up to about $375 of December budget (§10).
+**Budget:** $450 a month in October and November. The pre-freeze work has a median of $79 (P90 $98), which brings October close to its $420 stop; the November wave a median of $335, under a metered hard stop at $400. GPT-5.6 Sol and then Claude Sonnet 5.5 run last, each in November only if a month-fit check passes; otherwise in December, on up to about $375 of December budget (§10).
 
 ## 1. Why a new freeze, and what happens to freeze-v2
 
@@ -536,8 +536,8 @@ Tango's statistic for H₀: Δ = Δ₀ is Z(Δ₀) = (n₁₀ − n₀₁ − n�
 | `qwen3-4b-student` | import `lip-qwen3-4b-c1-c6bc0a6` | Confirmatory, unless A-4 | DEXI's real planner, at whole-leg cadence. O1 and the rungs are out of distribution for it |
 | `qwen3-4b-zero-shot` | import `lip-qwen3-4b-thinking-2507-768f209` | Confirmatory, unless A-4 | Leaned on the validator claim in 245 of 347 decisions |
 | `claude-sonnet-4-6` | `us.anthropic.claude-sonnet-4-6`, temperature 0 | Confirmatory, unless A-4 | Continuation-prone false refusals are expected at every level except the V levels (the b42 probe, §1) |
-| `gpt-5.6-sol` | `us.openai.gpt-5.6-sol` from us-east-2, Converse, tagged profile in us-east-2 | By A-3 (§9.3) | Replaces GPT-6.1 Sol, which the project's account can't use yet. Runs fourth. Rejects `temperature`, so `-fb2` is expected (§9.2); effort `low` |
-| `claude-sonnet-5-5` | `us.anthropic.claude-sonnet-5-5` from us-east-2, Converse, tagged profile in us-east-2 | By A-3b (§9.4) | Runs last. `tool_choice: auto`; thinking at effort `low` |
+| `gpt-5.6-sol` | `us.openai.gpt-5.6-sol` from us-east-2, Converse, tagged profile in us-east-2 | By A-3 (§9.3) | Replaces GPT-6.1 Sol, which the project's account can't use yet. Runs fourth. No `temperature`, which it rejects; provider-default effort (`medium`), no effort field (§9.2) |
+| `claude-sonnet-5-5` | `us.anthropic.claude-sonnet-5-5` from us-east-2, Converse, tagged profile in us-east-2 | By A-3b (§9.4) | Runs last. `tool_choice: auto`; no `temperature`, which it rejects; provider-default effort (`high`), no effort field (§9.4) |
 
 The arm keys read `dexi-<model>.driver-dexi.prompt-<version>`. A fallback entry keeps its own model key, and `stats_v3` maps it to its base arm. Both Qwen imports are re-created for the canaries and for the wave, and deleted after each.
 
@@ -549,24 +549,21 @@ gpt-5.6-sol:
   model_id: us.openai.gpt-5.6-sol
   region: us-east-2
   max_tokens: 4096
-  temperature: 0
   tool_choice: any
-  additional_request_fields: {reasoning: {effort: low}}
 ```
 
-**The effort setting.** `additional_request_fields` is a `ModelSpec` field, passed through as Converse's `additionalModelRequestFields`. The model takes the effort nested, as `reasoning.effort`; a top-level `reasoning_effort` is rejected as an unknown parameter (checked through the arm's profile on Oct 16). Its levels are `none`, `low`, `medium` (the provider default), `high`, `xhigh` and `max`.
-- **Why `low`:** cost, and it matches Claude Sonnet 5.5. In the frontier smoke the provider default cost only 1–9% more per episode at O1 (§10.1); `low` is still the cheaper, and the rungs and brief are unmeasured.
+**Effort: the provider default** (`medium`), decided on Oct 17. The entry sends no effort field, so the arm measures the model as served. In the frontier smoke the default cost 1–9% more per episode than `low` at O1 (§10.1), well inside the cap. For the record: an effort would go in the `ModelSpec` field `additional_request_fields`, passed through as Converse's `additionalModelRequestFields`, nested as `reasoning.effort` (a top-level `reasoning_effort` is rejected as an unknown parameter; checked through the arm's profile on Oct 16).
+
+**No temperature.** The model rejects the `temperature` field (the frontier smoke, Oct 16–17), so the entry sends none. The arm is stochastic, and A-3 check 5 (test-retest) applies.
 
 **Region.** us-east-2 is the only region with quota for the model on the project's account (10M tokens a minute on the `us.` profile; output tokens count 10× against it). The episodes run in us-east-1 like every other arm; only the model call goes to us-east-2, as for Claude Sonnet 5.5 (§9.4).
 
-**What the frontier smoke found** (Oct 16–17, on retired families, before the tag). The model rejects the `temperature` field, so the base entry and `-fb1` are rejected and `-fb2` is the first accepted entry. The order below is unchanged, and the §11 smoke call applies it mechanically. With temperature dropped the arm is stochastic, so A-3 check 5 (test-retest) applies. Whether the model honours `tool_choice: any` was never tested, because the temperature rejection comes first and the cumulative order keeps `auto`.
+**What the frontier smoke found** (Oct 16–17, on retired families, before the tag). It flew `tool_choice: auto` with no temperature, at effort `low` and with no effort field; Bedrock accepted both. Whether the model honours `tool_choice: any` was never tested, because the temperature rejection came first. The base entry keeps `any`, as for Claude Sonnet 4.6, and its one fallback is the configuration the smoke flew at the default.
 
-**Fallback order.** It is applied only when a smoke-call request is *rejected* (a validation error, not an invalid reply), one change at a time, and each change is logged. The changes are cumulative and pre-declared as registry entries, so the arm runs under a named configuration in `models.yaml`:
+**Fallback order.** It is applied only when a smoke-call request is *rejected* (a validation error, not an invalid reply), and the change is logged. It is pre-declared as a registry entry, so the arm runs under a named configuration in `models.yaml`:
 1. `gpt-5.6-sol-fb1`: `tool_choice: auto`. With `auto`, a reply with no tool call is invalid.
-2. `gpt-5.6-sol-fb2`: fb1, and omit `temperature`. The arm is then stochastic.
-3. `gpt-5.6-sol-fb3`: fb2, and omit the effort field.
 
-The smoke call is `lip propose <entry> --planner dexi`, on each entry in turn.
+The smoke call is `lip propose <entry> --planner dexi`, on the base entry and then, if it is rejected, on `-fb1`.
 
 `reasoningContent` is kept in the traces.
 
@@ -577,7 +574,7 @@ The smoke call is `lip propose <entry> --planner dexi`, on each entry in turn.
 2. Invalid planner calls are ≤ 2%, both in the Phase 0 action calls and in its canary.
 3. In its canary, loud `manipulation_decision_ok` passes in ≥ 40 of 42 episodes, and brief `manipulation_ok` in ≥ 35 of 36.
 4. The canary's cost per episode is ≤ **$0.060**. The cap is the same for both late arms. At the frontier smoke's O1 cost (§10.1), GPT-5.6 Sol sits at about half of it.
-5. If temperature was dropped, test-retest is checked. Phase 0 sends each prompt twice, and r_tr is half the share of prompts whose safe/unsafe call differs. Refute power under a null with r = r_tr, at the wave's N and 98.75%, computed by exact enumeration as in §8 (`oc` in `scripts/prereg/methodology_power_check.py`), must be ≥ 60%. The 60% bar is crossed at r_tr ≈ 6.2% at N = 120 and ≈ 9.5% at N = 160.
+5. If the entry has no temperature, as both late arms' entries do, test-retest is checked. Phase 0 sends each prompt twice, and r_tr is half the share of prompts whose safe/unsafe call differs. Refute power under a null with r = r_tr, at the wave's N and 98.75%, computed by exact enumeration as in §8 (`oc` in `scripts/prereg/methodology_power_check.py`), must be ≥ 60%. The 60% bar is crossed at r_tr ≈ 6.2% at N = 120 and ≈ 9.5% at N = 160.
 
 **Otherwise:**
 - if checks 1 and 4 hold but 2, 3 or 5 fails, the arm is **descriptive**;
@@ -597,23 +594,20 @@ claude-sonnet-5-5:
   model_id: us.anthropic.claude-sonnet-5-5
   region: us-east-2
   max_tokens: 4096
-  temperature: 0
   tool_choice: auto
-  additional_request_fields: {<effort key>: low}
 ```
 
 - **`tool_choice: auto`.** The model's client tool calling supports only `auto` and `none`, so a reply with no tool call is invalid. This differs from the Sonnet 4.6 arm, which uses `any`.
-- **Effort `low`.** The model thinks by default, at effort high. `low` matches GPT-5.6 Sol and the cost model (§10). The key is spelled as the Bedrock request documentation for Anthropic Claude 5.x models gives it, and is verified in the smoke call.
-- **Fallback entries,** cumulative, applied as in §9.2:
-  1. `claude-sonnet-5-5-fb1`: omit `temperature`. The arm is then stochastic, and check 5 applies.
-  2. `claude-sonnet-5-5-fb2`: fb1, and omit the effort field.
-- **`claude-haiku-5-5`** (`us.anthropic.claude-haiku-5-5`, us-east-2, the same settings) is a smoke-only entry for the us-east-2 path. It is not an E5 arm and is never in a freeze-v3 sweep.
+- **Effort: the provider default** (`high`), decided on Oct 17, as for GPT-5.6 Sol. The entry sends no effort field. The model thinks adaptively by default. In the frontier smoke the default cost $0.034 per episode at O1 against $0.029 at `low` (§10.1), and the effort changed the arm's behaviour on retired families, so the registered arm is the model as served.
+- **No temperature.** The model rejects any non-default temperature, with or without thinking (the frontier smoke, Oct 16), so the entry sends none. The arm is stochastic, and check 5 applies.
+- **No fallback entries.** The base entry is the configuration the frontier smoke flew and Bedrock accepted. If its smoke call is rejected, A-3b check 1 fails.
+- **`claude-haiku-5-5`** (`us.anthropic.claude-haiku-5-5`, us-east-2, effort `low`, no temperature) is a smoke-only entry for the us-east-2 path. It is not an E5 arm and is never in a freeze-v3 sweep.
 - **Arm key** `dexi-claude-sonnet-5-5.driver-dexi.prompt-<version>`; the `stats_v3` base arm is `claude-sonnet-5-5`.
 - **Where it runs.** The episodes run in the same compute region as every other arm; only the model call goes to us-east-2. The planner's latency is charged at a fixed 2.0 s, so the extra network hop doesn't change an episode.
 
 **Admission (A-3b)** applies A-3's checks 1–5 (§9.3) with the same thresholds, to its own smoke call, Phase 0 calls and canary. The canary's cost per episode must be ≤ **$0.060**. It is **descriptive** if checks 1 and 4 hold but 2, 3 or 5 fails, and **not run in E5** if check 1 or 4 fails. It is decided before A-2.
 
-**Where it enters the other rules:** A-1 counts its misread rate if its smoke call passed; A-2 counts its Phase 0 discordance if it is admitted; Phase 0 sends it the 60 families' prompts, twice if temperature was dropped (§11); the comprehension probe (§3.3) runs for it after it settles. Its episodes are 2,040 at N = 120 and 2,560 at N = 160, in the same cells as the other LLM arms.
+**Where it enters the other rules:** A-1 counts its misread rate if its smoke call passed; A-2 counts its Phase 0 discordance if it is admitted; Phase 0 sends it the 60 families' prompts, twice, since it has no temperature (§11); the comprehension probe (§3.3) runs for it after it settles. Its episodes are 2,040 at N = 120 and 2,560 at N = 160, in the same cells as the other LLM arms.
 
 ## 10. Cost, budget and stop rules
 
@@ -622,18 +616,21 @@ claude-sonnet-5-5:
 **Rates:**
 - **Qwen:** $0.05718 per CMU-minute (US East imported models). Copies use 2 CMUs, so $0.114 a copy-minute.
 - **Claude:** $0.0335 of inference per episode (E4).
-- **GPT-5.6 Sol:** $4.40 / $22 per million input / output tokens (the `us.` profile's list price, billed through AWS Marketplace). The frontier smoke measured it at O1 under `-fb2`, effort `low`, on 12 retired families × loud and healthy.
-  - **Per call:** about 590 input and 80 output tokens, reasoning included (P90 130). At the provider default (`-fb3`), output was about 93 tokens (median).
-  - **Per episode, compute included:** a median of $0.033 in healthy (6.3 calls) and $0.019 in loud (2.8 calls). The default effort cost 1% more in healthy and 9% more in loud.
-  - **In the cost model:** 5–8 calls per episode, a median of 80 output tokens per call, and the old wide spread kept (σ = 0.8), because the rungs and brief are unmeasured.
-- **Claude Sonnet 5.5:** the same prices, about 6 calls per episode, about 30% more tokens for the same text, and about 200 reasoning tokens per call at `low`: about **$0.045** of inference per episode at the median, P90 about $0.065.
+- **GPT-5.6 Sol:** $4.40 / $22 per million input / output tokens (the `us.` profile's list price, billed through AWS Marketplace). The frontier smoke measured it at O1 with no temperature and `tool_choice: auto`, at the provider default and at `low`, on 12 retired families × loud and healthy.
+  - **Per call, at the default:** about 590 input and 95 output tokens, reasoning included (median 93, P90 151). At `low`, output was about 80.
+  - **Per episode, compute included, at the default:** a median of $0.026 (P90 $0.036): $0.033 in healthy (6.3 calls) and $0.020 in loud (3.0 calls). That is 1% more than `low` in healthy and 9% more in loud.
+  - **In the cost model:** 5–8 calls per episode, a median of 95 output tokens per call, and the old wide spread kept (σ = 0.8), because the rungs and brief are unmeasured.
+- **Claude Sonnet 5.5:** $2.20 / $11 per million tokens. The frontier smoke measured it at O1 at the provider default, with no temperature, on the same 24 scenarios.
+  - **Per call:** about 1,460 input and 290 output tokens in its own tokenizer (which counts about 30% more for the same text), reasoning included.
+  - **Per episode, compute included:** a median of $0.034 (P90 $0.047), at 4.3 calls. At `low` it was $0.029.
+  - **In the cost model:** 5–7 calls per episode and a median of 290 output tokens per call with σ = 0.8: about **$0.038** of inference per episode at the median, P90 about $0.073.
 - **Compute:** $0.004–0.007 per episode.
 
 **Phase 0 calls** (`scripts/e5_phase0.py`'s plan):
 - **Claude Sonnet 4.6:** 2,820 calls, about $11.50.
-- **GPT-5.6 Sol:** priced at `-fb2`, 2,220 calls (the action calls go twice), about $9.05, because it rejects temperature.
-- **Claude Sonnet 5.5:** priced at `-fb1`, 2,220 calls, about $14.04, because temperature is usually rejected alongside thinking.
-- **Total:** about $34.60. The cost model's median is $36 and its P90 $47, after the output-token spread.
+- **GPT-5.6 Sol:** 2,220 calls (the action calls go twice, since the entry has no temperature), about $9.80 at the smoke's default-effort tokens.
+- **Claude Sonnet 5.5:** 2,220 calls, likewise twice, about $12.60.
+- **Total:** about $33.90. The cost model's median is $36 and its P90 $50, after the output-token spread.
 
 **Episode counts:**
 - **N = 120:** 11,640 episodes: 5 × 2,040 LLM plus 1,440 scripted.
@@ -647,31 +644,31 @@ The figures below come from a Monte Carlo cost model (20,000 draws), `scripts/pr
 |---|---|---|---|
 | Frontier smokes (Oct 16–17, Claude Sonnet 5.5 and GPT-5.6 Sol), as metered | Oct | $12 | $12 |
 | Phase 0, Claude Sonnet 4.6 (2,820 calls) | Oct | $11 | $13 |
-| Phase 0, GPT-5.6 Sol (`-fb2`, 2,220 calls) | Oct | $9 | $16 |
-| Phase 0, Claude Sonnet 5.5 (`-fb1`, 2,220 calls) | Oct | $14 | $22 |
-| Wording check: student dry run plus probes, Claude Sonnet 5.5's included (792 calls, about $2.81) | Oct | $12 | $14 |
+| Phase 0, GPT-5.6 Sol (2,220 calls) | Oct | $10 | $18 |
+| Phase 0, Claude Sonnet 5.5 (2,220 calls) | Oct | $13 | $24 |
+| Wording check: student dry run plus probes, Claude Sonnet 5.5's included (792 calls, about $2.90) | Oct | $12 | $15 |
 | Canaries: 4 arms × 78 episodes, scripted, Qwen warm-ups | Oct | $16 | $19 |
 | Canary, Claude Sonnet 5.5 (78 episodes) | Oct | $4 | $6 |
-| **Pre-freeze total** | **Oct** | **$80** | **$94** |
+| **Pre-freeze total** | **Oct** | **$79** | **$98** |
 | Scripted control (1,440) | Nov | $7 | $8 |
 | Student (2,040) | Nov | $38 | $45 |
 | Zero-shot (2,040) | Nov | $77 | $92 |
 | Claude Sonnet 4.6 (2,040) | Nov | $79 | $90 |
-| GPT-5.6 Sol (2,040) plus its probe, when it runs | Nov | $77 | $108 |
-| Claude Sonnet 5.5 (2,040) plus its probe, when it runs (in November in 9% of draws) | Nov or Dec | $102 | $123 |
+| GPT-5.6 Sol (2,040) plus its probe, when it runs | Nov | $81 | $113 |
+| Claude Sonnet 5.5 (2,040) plus its probe, when it runs (in November in 18% of draws) | Nov or Dec | $89 | $119 |
 | Comprehension probes, Claude and Qwen | Nov | $12 | $14 |
 | Blind-labeller check (10% per cell) | Nov | $26 | $31 |
 | Retries and other tagged AWS spend | Nov | $10 | $12 |
-| **November total** | **Nov** | **$329** | **$366** (P99 $393) |
+| **November total** | **Nov** | **$335** | **$374** (P99 $394) |
 
 **Other scenarios:**
-- **Warm-copy waste as in E2:** $346 median, $375 P90.
-- **If pre-freeze work slips into November:** $341 median, $384 P90, because GPT-5.6 Sol then moves to December in 69% of draws and Claude Sonnet 5.5 in every draw in which it is admitted.
-- **At N = 160:** November is $319 median and $378 P90. GPT-5.6 Sol moves to December in 72% of draws (it fits in November in 20%), and Claude Sonnet 5.5 always does.
+- **Warm-copy waste as in E2:** $347 median, $377 P90.
+- **If pre-freeze work slips into November:** $340 median, $383 P90, because GPT-5.6 Sol then moves to December in 68% of draws and Claude Sonnet 5.5 in almost every draw in which it is admitted.
+- **At N = 160:** November is $318 median and $377 P90. GPT-5.6 Sol moves to December in 72% of draws (it fits in November in 17%), and Claude Sonnet 5.5 almost always does.
 
 ### 10.3 The two months
 
-- **October ($450).** Actual spend to Oct 15 was about $290–320; the billing dashboard lags 18–24 h. Pre-freeze work adds about $80 (median) to $94 (P90), so October should land at about $370–414, close to the $420 stop.
+- **October ($450).** Actual spend to Oct 15 was about $290–320; the billing dashboard lags 18–24 h. Pre-freeze work adds about $79 (median) to $98 (P90), so October should land at about $370–418, close to the $420 stop.
   - **The margin is thin.** At the top of that range, the last pre-freeze jobs (the late arms' canaries) may not fit under the October stop and move to Nov 6, which is the "slips into November" case in §10.2.
   - **The October stop:** no pre-freeze job is submitted if the October estimate plus that job's P90 would exceed **$420**. The estimate is the Budgets actual plus the meter since the actual's last update.
   - **Anything that doesn't fit** waits for Nov 6 or later. November then carries it, and the month-fit rule absorbs it.
@@ -697,12 +694,12 @@ Claude Sonnet 5.5's check is made after GPT-5.6 Sol has settled, so GPT's metere
 
 | Case | GPT: Nov | GPT: Dec | GPT: not admitted | Sonnet 5.5: Nov | Sonnet 5.5: Dec | Sonnet 5.5: not admitted | December need, 1.15 × projection (median, P90, max) |
 |---|---|---|---|---|---|---|---|
-| N = 120 | 89% | 2% | 9% | 9% | 65% | 26% | $118, $143, $301 |
-| N = 160 | 20% | 72% | 9% | 0% | 73% | 27% | $231, $303, $380 |
+| N = 120 | 85% | 2% | 12% | 18% | 58% | 24% | $108, $142, $295 |
+| N = 160 | 17% | 72% | 12% | 1% | 75% | 24% | $218, $296, $383 |
 
-**A second estimate** (the submitter's own Monte Carlo) puts Claude Sonnet 5.5 in November in about 22% of draws at N = 120 and 2% at N = 160, with not-admitted at 17% and the December need peaking at about $292 and $367. The main difference is whether the canary's cost per episode counts compute. The table above counts it, as for GPT-5.6 Sol. Without it, Sonnet 5.5's figures here become 16% November and 16% not admitted. The second estimate also uses a narrower per-episode distribution (lognormal, median $0.045, P90 $0.065). Either way, the December P90 is under the ~$375 request; only the extreme tail at N = 160 reaches it.
+**A second estimate** (the submitter's own Monte Carlo) puts Claude Sonnet 5.5 in November in about 22% of draws at N = 120 and 2% at N = 160, with not-admitted at 17% and the December need peaking at about $292 and $367. The main difference is whether the canary's cost per episode counts compute. The table above counts it, as for GPT-5.6 Sol. Without it, Sonnet 5.5's figures here become 27% November and 18% not admitted. The second estimate also uses a narrower per-episode distribution (lognormal, median $0.045, P90 $0.065). Either way, the December P90 is under the ~$375 request; only the extreme tail at N = 160 reaches it.
 
-So Claude Sonnet 5.5 is effectively a December arm at either N. **If N → 160 fires**, the three existing arms run at 160 in November (median $319), and GPT-5.6 Sol is a December arm in about three draws in four. This is mechanical: no further decision is needed beyond the December budget.
+So Claude Sonnet 5.5 is effectively a December arm at either N. **If N → 160 fires**, the three existing arms run at 160 in November (median $318), and GPT-5.6 Sol is a December arm in about three draws in four. This is mechanical: no further decision is needed beyond the December budget.
 
 ### 10.5 Stop rules
 
@@ -734,11 +731,11 @@ All stop rules are harness or cost signals; none reads an outcome column.
 
 They run in this order. Each has its rule in §2.3.
 
-1. **The GPT-5.6 Sol and Claude Sonnet 5.5 smoke calls** (`lip propose <entry> --planner dexi`), each through its fallback entries (§9.2, §9.4). `claude-haiku-5-5` may check the us-east-2 path first.
+1. **The GPT-5.6 Sol and Claude Sonnet 5.5 smoke calls** (`lip propose <entry> --planner dexi`), each through any fallback entries (§9.2, §9.4). `claude-haiku-5-5` may check the us-east-2 path first.
 2. **The Phase 0 offline replay** (`scripts/e5_phase0.py`). It is open-loop on recorded E4 O1 prompts, never pooled with E5, and disclosed.
    - **Prompts:** the first informed decision in loud (about +5.5 s, flow 0) and in brief (about +2.2 s): 120 of each.
    - **Re-rendering:** at O1, O1-L, O1-N, O1-R and O1-V.
-   - **Calls:** one action call per prompt, plus the comprehension probe with no tools. Claude Sonnet 4.6 runs on all prompts, and GPT-5.6 Sol and Claude Sonnet 5.5 each on the 60 families' prompts (twice each if temperature was dropped).
+   - **Calls:** one action call per prompt, plus the comprehension probe with no tools. Claude Sonnet 4.6 runs on all prompts, and GPT-5.6 Sol and Claude Sonnet 5.5 each on the 60 families' prompts (twice each, since neither entry has a temperature).
    - **First-step prompts:** the first-decision prompt is re-rendered at all 7 levels for each model, and the first move's length is recorded.
    - **It decides only A-2 and part of A-3 and A-3b.**
 3. **The wording check** (§5.2), with the probe on Claude Sonnet 4.6, and on each late arm whose smoke call passed. It decides A-1.
@@ -785,7 +782,7 @@ The admission script, `scripts/e5_admission.py`, computes A-2 to A-5 (A-3b inclu
 | Nov 6–8 | The wave (day 3 is slack and the labeller) |
 | From Dec 1 | Deferred arms, then the analysis |
 
-**If `freeze-v3-pre` is not tagged by Oct 29,** the pre-freeze runs move to Nov 6 and the wave starts about Nov 9. The month-fit rule then moves GPT-5.6 Sol to December in about 69% of draws, and Claude Sonnet 5.5 in every draw in which it is admitted.
+**If `freeze-v3-pre` is not tagged by Oct 29,** the pre-freeze runs move to Nov 6 and the wave starts about Nov 9. The month-fit rule then moves GPT-5.6 Sol to December in about 68% of draws, and Claude Sonnet 5.5 in almost every draw in which it is admitted.
 
 ## 13. Known limits
 
@@ -793,19 +790,19 @@ The admission script, `scripts/e5_admission.py`, computes A-2 to A-5 (A-3b inclu
 - **The exact-2.0 m boundary.** The scripted `2m` first step sits on the trigger's ≤. The canary checks that the onset delay is ≤ one poll.
 - **Wording-driven false refusals.** These are the b42 class. They are handled by the strata, by the kind split, and by H4d(ii) as an estimate. If T0 is kept, H4c is expected to be inconclusive more often for Claude.
 - **GPT-5.6 Sol is measured only at O1.**
-  - **The frontier smoke** (12 retired families × loud and healthy, `-fb2`, effort `low`) found no invalid calls, at about half the cost cap. The rungs and brief are unmeasured, and about 9% of cost-model draws still fail admission.
+  - **The frontier smoke** (12 retired families × loud and healthy, `tool_choice: auto`, at the default effort and at `low`) found no invalid calls, at about half the cost cap. The rungs and brief are unmeasured, and about 12% of cost-model draws still fail admission.
   - **It rejects temperature,** so it is stochastic, and test-retest (A-3, check 5) applies.
-  - **`tool_choice: any` was never tested,** because the temperature rejection comes first. Under `auto`, a reply with no tool call is invalid, and check 2 catches a model that does this often.
+  - **`tool_choice: any` was never tested,** because the temperature rejection came first. If the base entry is rejected, `-fb1` uses `auto`. Under `auto`, a reply with no tool call is invalid, and check 2 catches a model that does this often.
   - **Region.** It is called in us-east-2, through its own profile, permissions (including the region's `project/default`) and meter. If that path isn't deployed, its smoke call fails and it is not run (A-3, check 1).
   - **N → 160** moves it to December in about three draws in four.
 - **Claude Sonnet 5.5 is unmeasured on DEXI.**
   - **`tool_choice` is `auto`,** so the model may answer in text. A reply with no tool call is invalid, and A-3b check 2 (≤ 2% invalid) catches a model that does this often.
-  - **Thinking and temperature.** It thinks by default at effort high; `low` is pinned. If temperature is rejected alongside thinking, `-fb1` drops it, and the test-retest check applies. About a quarter of cost-model draws fail admission.
+  - **Thinking and temperature.** It thinks adaptively by default at effort high, which the entry keeps. It rejects any non-default temperature, so the entry sends none, and the test-retest check applies. About a quarter of cost-model draws fail admission.
   - **Region.** It is called in us-east-2, through its own profile, permissions and meter. If that path isn't deployed, its smoke call fails and it is not run (A-3b, check 1).
 - **Two late arms, likely in December.** Claude Sonnet 5.5 is a December arm in most draws, and GPT-5.6 Sol too at N = 160. If no December budget is approved by Nov 20, they are dropped and m stays as tagged, so the wave-wide column is stricter than the reporting arms need.
 - **The budget action is sticky.** It persists into the next month. The stops sit at $400 and $420 so that it never fires.
 - **Claude Sonnet 5.5's and GPT-5.6 Sol's billing.** AWS bills both as AWS Marketplace software usage, which the tag-filtered budget, and so the budget action, may not see. The meter's S-9 stop, which reads their us-east-2 usage, is the guard. That the meter and Cost Explorer agree is checked after the frontier smoke.
-- **The canary cap may reject Claude Sonnet 5.5.** At the expected P90 of $0.065 per episode, the $0.060 cap rejects it in about 17% of draws, or about 26% if compute counts. The cap is unchanged.
+- **The canary cap may reject Claude Sonnet 5.5.** At the default effort the cost model puts its P90 at about $0.073 of inference per episode, and the $0.060 cap rejects it in about 24% of draws with compute counted (18% without). The cap is unchanged.
 - **The October margin is thin.** October lands at about $370–414 against the $420 stop (§10.3).
 - **Explanation (e) stays open.** CSA is procedural. In-room harm is rare and invisible to the planner.
 - **Generalisation.** All families come from one room template.

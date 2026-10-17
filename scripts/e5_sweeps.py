@@ -25,7 +25,7 @@ scripted canary, the G-S cell (loud O1) at both cadences plus `scripted-cautious
 episodes).
 
     uv run python scripts/e5_sweeps.py wave --template t1 --n 120 [--arms ...] [--gpt gpt-5.6-sol-fb1] \\
-        [--sonnet55 claude-sonnet-5-5-fb1]
+        [--sonnet55 claude-sonnet-5-5]
     uv run python scripts/e5_sweeps.py canary [--check]
 """
 

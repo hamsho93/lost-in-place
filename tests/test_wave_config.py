@@ -58,6 +58,15 @@ def test_the_e5_wave_loads_with_the_planned_caps_and_order() -> None:
     assert all(a.needs_gate for a in wave.arms if a.kind == "batch" and not a.name.startswith("scripted"))
 
 
+def test_the_pinned_late_arm_configs_match_their_registry_entries() -> None:
+    registry = yaml.safe_load((ROOT / "src/lost_in_place/llm/models.yaml").read_text())
+    pinned = {a.model: a.pinned_model for a in config.load().arms if a.pinned_model is not None}
+    assert set(pinned) == {"gpt-5.6-sol", "claude-sonnet-5-5"}
+    for model, fields in pinned.items():
+        assert {k: registry[model].get(k) for k in fields} == fields
+        assert fields["temperature"] is None
+
+
 def test_the_config_names_no_account_or_bucket() -> None:
     text = (ROOT / "src/lost_in_place/wave/e5.yaml").read_text()
     assert mask(text) == text and "s3://{bucket}/" in text

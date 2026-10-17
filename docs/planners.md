@@ -206,17 +206,15 @@ uv run lip run scenarios/e5/t0/canary/k000_loud.yaml --planner dexi \
   --planner-opt model=rule-2m --planner-opt driver=dexi --planner-opt prompt=dexi-v2 --obs O1
 ```
 
-**The late arms, GPT-5.6 Sol and Claude Sonnet 5.5,** use a `ModelSpec` field, `additional_request_fields`, that the Bedrock client passes to Converse as `additionalModelRequestFields`; their entries set the reasoning effort to low (design §9.2, §9.4). GPT-5.6 Sol takes it nested, as `{reasoning: {effort: low}}`, and rejects `temperature`, so its smoke call is expected to settle on `-fb2`. The replies' `reasoningContent` is kept in the traces. Each has pre-declared fallback entries, tried in order only when Bedrock rejects the smoke call's request (`lip propose <entry> --planner dexi`). Each entry adds one change to the one before:
+**The late arms, GPT-5.6 Sol and Claude Sonnet 5.5,** run at their provider-default reasoning effort, with no effort field and no `temperature`, which both reject (design §9.2, §9.4). An entry that does need extra Converse fields sets the `ModelSpec` field `additional_request_fields`, which the Bedrock client passes as `additionalModelRequestFields` (GPT-5.6 Sol would take an effort nested, as `{reasoning: {effort: …}}`). The replies' `reasoningContent` is kept in the traces. GPT-5.6 Sol has one pre-declared fallback entry, tried only when Bedrock rejects the smoke call's request (`lip propose <entry> --planner dexi`):
 
 | Entry | Change |
 | --- | --- |
 | `gpt-5.6-sol-fb1` | `tool_choice: auto` |
-| `gpt-5.6-sol-fb2` | and no `temperature` |
-| `gpt-5.6-sol-fb3` | and no `additional_request_fields` |
-| `claude-sonnet-5-5-fb1` | no `temperature` (the base entry already uses `tool_choice: auto`) |
-| `claude-sonnet-5-5-fb2` | and no `additional_request_fields` |
 
-A fallback entry is its own arm key; `stats_v3` maps it to its base arm. **Claude Sonnet 5.5** is called in another region than the rest of the stack: its entry sets `region: us-east-2`, where its tagged profile lives, while the episodes run where they always do. Its client tool calling supports only `auto` and `none`, so a reply with no tool call counts as invalid. `claude-haiku-5-5`, with the same settings, is only for checking that path with a cheap call; it is never in an E5 sweep.
+Claude Sonnet 5.5's base entry already uses `tool_choice: auto`, the configuration its frontier smoke flew, and has no fallback entry.
+
+A fallback entry is its own arm key; `stats_v3` maps it to its base arm. **Claude Sonnet 5.5** is called in another region than the rest of the stack: its entry sets `region: us-east-2`, where its tagged profile lives, while the episodes run where they always do. Its client tool calling supports only `auto` and `none`, so a reply with no tool call counts as invalid. `claude-haiku-5-5`, with the same settings but effort low, is only for checking that path with a cheap call; it is never in an E5 sweep.
 
 **Execution anchors.** Under every driver, the agent logs an `execution_anchor` event for each executed decision whose flown action is a `move`, `rotate` or `take_off`, or differs from the proposal: `decision_index`, `name` (the flown action), `proposed_sim_s`, `executed_sim_s`, and the `proposed` and `flown` arguments. Holds, rejected proposals, `land`, `refuse` and continued epochs get none. Each decision records `flown_args` and `executed_sim_us`. Under `driver=freeze-v2`, `proposed` always equals `flown`. The scorer uses them to flag moves proposed before a fault onset and executed after it ([scoring.md](scoring.md#e5-fields-spec-02)).
 
