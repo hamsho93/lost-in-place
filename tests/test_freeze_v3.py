@@ -7,7 +7,15 @@ import pytest
 from lost_in_place import cli, freeze, prompt_grid
 
 ROOT = Path(__file__).resolve().parents[1]
-SPEC_V3_TEXT = (ROOT / freeze.SPEC_V3).read_text()
+FROZEN_SPEC_V3_TEXT = (ROOT / freeze.SPEC_V3).read_text()
+SPEC_V3_TEXT = freeze._blank(FROZEN_SPEC_V3_TEXT, freeze.V3_ROWS)
+FROZEN_ARMS = (
+    "claude-sonnet-4-6",
+    "claude-sonnet-5-5",
+    "gpt-5.6-sol",
+    "qwen3-4b-student",
+    "qwen3-4b-zero-shot",
+)
 ARMS = ("qwen3-4b-zero-shot", "claude-sonnet-4-6", "qwen3-4b-student")
 FIVE = (*ARMS, "gpt-5.6-sol-fb1", "claude-sonnet-5-5")
 ADAPTATION = freeze.Adaptation("t1", 120, ARMS)
@@ -65,7 +73,7 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     for path, text in files.items():
         (root / path).parent.mkdir(parents=True, exist_ok=True)
         (root / path).write_text(text)
-    shutil.copy(ROOT / freeze.SPEC_V3, root / freeze.SPEC_V3)
+    (root / freeze.SPEC_V3).write_text(SPEC_V3_TEXT)
     monkeypatch.setattr(freeze, "PROBE_TEXTS", {"wording-check": "scripts/probe_text.py:TEXT"})
     monkeypatch.setattr(prompt_grid, "render_grid", lambda root: {"sha256": "grid"})
     _git(root, "init", "-q")
@@ -80,8 +88,11 @@ def test_the_freeze_type_names_each_record() -> None:
     assert (freeze.Freeze.V3.spec, freeze.Freeze.V3.rows) == (freeze.SPEC_V3, freeze.V3_ROWS)
 
 
-def test_spec_v3_has_every_v3_row_in_order_and_blank_until_the_freeze() -> None:
+def test_spec_v3_has_every_v3_row_in_order_and_freeze_v3_filled_each() -> None:
     assert _table(SPEC_V3_TEXT) == [(row, "") for row in freeze.V3_ROWS]
+    assert [row for row, value in _table(FROZEN_SPEC_V3_TEXT) if value] == list(freeze.V3_ROWS)
+    assert freeze.adaptation_from_record(FROZEN_SPEC_V3_TEXT) == freeze.Adaptation("t1", 120, FROZEN_ARMS)
+    assert freeze.recorded_v3(FROZEN_SPEC_V3_TEXT)[freeze.ROWS[0]] == freeze.spec_hash_v3(FROZEN_SPEC_V3_TEXT)
 
 
 def test_the_rows_stats_v3_reads_keep_their_exact_strings() -> None:
