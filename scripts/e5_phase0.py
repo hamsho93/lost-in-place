@@ -53,7 +53,7 @@ REPLAY_LEVELS = ("O1", "O1-L", "O1-N", "O1-R", "O1-V")
 RUNGS = ("O1-L", "O1-N", "O1-R", "O1-V")
 FIRST_STEP_LEVELS = tuple(dexi.LADDER)
 GPT_ENTRIES = ("gpt-5.6-sol", "gpt-5.6-sol-fb1")
-SONNET55_ENTRIES = ("claude-sonnet-5-5",)
+SONNET55_ENTRIES = ("claude-sonnet-5-5", "claude-sonnet-5-5-fb1")
 SHORT_STEP_M = 0.9
 LATERAL = ("forward", "back", "left", "right")
 # Rough per-call token counts for `estimate`, from E4's recorded Claude calls on DEXI's prompt.

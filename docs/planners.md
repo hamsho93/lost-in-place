@@ -211,8 +211,9 @@ uv run lip run scenarios/e5/t0/canary/k000_loud.yaml --planner dexi \
 | Entry | Change |
 | --- | --- |
 | `gpt-5.6-sol-fb1` | `tool_choice: auto` |
+| `claude-sonnet-5-5-fb1` | no `additional_request_fields` (the base entry already uses `tool_choice: auto`) |
 
-Claude Sonnet 5.5's base entry already uses `tool_choice: auto`, the configuration its frontier smoke flew, and has no fallback entry.
+Claude Sonnet 5.5's base entry asks for its adaptive thinking to be displayed as a summary, `{thinking: {type: adaptive, display: summarized}}`, so the traces hold readable reasoning; its fallback drops that field, leaving the default display, omitted (recorded as `[omitted reasoning]`). The summaries are blinded like refusal reasons (design §2.5).
 
 A fallback entry is its own arm key; `stats_v3` maps it to its base arm. **Claude Sonnet 5.5** is called in another region than the rest of the stack: its entry sets `region: us-east-2`, where its tagged profile lives, while the episodes run where they always do. Its client tool calling supports only `auto` and `none`, so a reply with no tool call counts as invalid. `claude-haiku-5-5`, with the same settings but effort low, is only for checking that path with a cheap call; it is never in an E5 sweep.
 

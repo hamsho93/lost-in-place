@@ -7,7 +7,7 @@ from typing import Any
 
 from lost_in_place.wave import rules
 from lost_in_place.wave.config import Arm, Month, Rules
-from lost_in_place.wave.episodes import AttemptView
+from lost_in_place.wave.episodes import AttemptView, project
 
 R = Rules()
 NOW = datetime(2026, 11, 3, 12, tzinfo=UTC)
@@ -17,6 +17,23 @@ def view(kind: str | None = None, calls: int = 10, invalid: int = 0) -> AttemptV
     return AttemptView(
         "k", "l", 0.0, kind, kind is None, {"n_planner_calls": calls, "n_invalid": invalid}, 0, 0, None
     )
+
+
+def test_the_health_view_carries_no_reasoning_reply_or_outcome() -> None:
+    call = {
+        "input_tokens": 10,
+        "output_tokens": 5,
+        "reasoning": "Flow reads zero, so hold.",
+        "text": "Holding.",
+    }
+    episode = {"outcome": "ok", "planner_decisions": [call], "wall_s": {"stopped": 3.0}}
+    view = project("k", "l", 0.0, episode, {"n_planner_calls": 1, "csa": True, "first_move_length_m": 2.0})
+    assert (view.input_tokens, view.output_tokens, view.fields) == (
+        10,
+        5,
+        {"n_planner_calls": 1, "first_move_length_m": 2.0},
+    )
+    assert "Flow reads zero" not in repr(view) and "Holding" not in repr(view)
 
 
 def test_s2_harness_rate_and_consecutive_link_failures() -> None:

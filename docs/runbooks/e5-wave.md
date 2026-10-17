@@ -11,7 +11,7 @@ alias meter='uv run --extra aws python scripts/e5_meter.py'
 
 ## Blinding
 
-During the wave, read only `lip e5 health`, the submitter's output, `e5 status` and the meter. Never open a `score.json` or `episode.json`, and don't run `lip stats` or `lip report` on an E5 sweep. Every health query is appended to `manifests/e5/queries.log`, which is disclosed. The S4 log records only `result` or `retry`.
+During the wave, read only `lip e5 health`, the submitter's output, `e5 status` and the meter. Never open a `score.json` or `episode.json` (an `episode.json` also holds Claude Sonnet 5.5's reasoning summaries, which are blinded like refusal reasons), and don't run `lip stats` or `lip report` on an E5 sweep. Every health query is appended to `manifests/e5/queries.log`, which is disclosed. The S4 log records only `result` or `retry`.
 
 ## 1. Pre-flight (S-0)
 

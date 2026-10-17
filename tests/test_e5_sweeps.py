@@ -67,7 +67,7 @@ def test_family_globs_match_exactly_the_first_n_names(gen: ModuleType, n: int) -
     ("template", "n", "gpt", "sonnet55"),
     [
         ("t0", 120, "gpt-5.6-sol", "claude-sonnet-5-5"),
-        ("t1", 160, "gpt-5.6-sol-fb1", "claude-sonnet-5-5"),
+        ("t1", 160, "gpt-5.6-sol-fb1", "claude-sonnet-5-5-fb1"),
     ],
 )
 def test_wave_sweeps_have_the_designs_cells(
@@ -165,7 +165,7 @@ def test_the_committed_canary_sweeps_are_the_generators(
     llm = (*gen.LLM_MODELS, *gen.GPT_ENTRIES, *gen.SONNET55_ENTRIES)
     assert (gen.GPT_ENTRIES, gen.SONNET55_ENTRIES) == (
         ("gpt-5.6-sol", "gpt-5.6-sol-fb1"),
-        ("claude-sonnet-5-5",),
+        ("claude-sonnet-5-5", "claude-sonnet-5-5-fb1"),
     )
     assert not list(committed.glob("*haiku*"))
     assert {p.stem for p in committed.glob("*.yaml")} == {
@@ -196,9 +196,11 @@ def test_the_cli_passes_both_smoked_entries(gen: ModuleType, tmp_path: Path) -> 
     out = tmp_path / "e5"
     argv = ["wave", "--template", "t1", "--n", "120", "--arms", "gpt-5.6-sol", "claude-sonnet-5-5"]
     assert (
-        gen.main([*argv, "--gpt", "gpt-5.6-sol-fb1", "--sonnet55", "claude-sonnet-5-5", "--out", str(out)])
+        gen.main(
+            [*argv, "--gpt", "gpt-5.6-sol-fb1", "--sonnet55", "claude-sonnet-5-5-fb1", "--out", str(out)]
+        )
         == 0
     )
     assert sorted(p.name for p in out.iterdir()) == ["claude-sonnet-5-5.yaml", "gpt-5.6-sol.yaml"]
-    assert "dexi/claude-sonnet-5-5" in (out / "claude-sonnet-5-5.yaml").read_text()
+    assert "dexi/claude-sonnet-5-5-fb1" in (out / "claude-sonnet-5-5.yaml").read_text()
     assert "dexi/gpt-5.6-sol-fb1" in (out / "gpt-5.6-sol.yaml").read_text()
