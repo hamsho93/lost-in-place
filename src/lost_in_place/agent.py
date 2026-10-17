@@ -18,7 +18,8 @@ Each decision:
    targets, with both times), and its decision gets `flown_args` and `executed_sim_us`.
 
 Faults are scheduled from arming, from the first executed move, or from the estimate coming within
-`mission.fault_anchor_m` of that move's target (`mission.fault_anchor`).
+`mission.fault_anchor_m` of that move's target (`mission.fault_anchor`). A relative move anchored
+at execution that was commanded no further than that starts the clock as it starts.
 Every decision is kept in `episode.json` with its simulation timestamp, which is the PX4 clock
 the ULog uses, so the scorer can label it against ground truth.
 """
@@ -222,6 +223,7 @@ class AgentEpisode(_Episode):
         self.history: list[str] = []
         self.first_move = asyncio.Event()
         self.first_move_target: tuple[float, float] | None = None
+        self.first_move_commanded_m: float | None = None
         self.target = PositionNedYaw(0.0, 0.0, -scenario.altitude_m, 0.0)
         self.armed_at_s = 0.0
         self.range_at_arm: float | None = None
@@ -384,13 +386,15 @@ class AgentEpisode(_Episode):
                 self.history.append(history_entry(self.sim_s - start, action, verdict))
                 self.log(loop_end=action.name)
                 return
+            commanded_m = None
             if verdict.ok:
                 proposed = action
                 if isinstance(self.planner, ExecutionTimePlanner):
                     action = self.planner.at_execution(action, self.observe())
+                    commanded_m = self.planner.commanded_m(action)
                 self._anchor_execution(calls, proposed, action)
             began = self.sim_s
-            status = await self._execute(drone, action if verdict.ok else self._hold())
+            status = await self._execute(drone, action if verdict.ok else self._hold(), commanded_m)
             self.history.append(history_entry(self.sim_s - start, action, verdict, status))
             if isinstance(self.planner, PrimitivePlanner):
                 await self._finish_primitive(drone, start, end, calls, began, action, verdict, status)
@@ -562,8 +566,9 @@ class AgentEpisode(_Episode):
             return math.sqrt(dn * dn + de * de + dd * dd)
         return math.hypot(dn, de) if horizontal else abs(dd)
 
-    async def _execute(self, drone: System, action: Action) -> str:
-        """Run one action for up to an epoch; returns how far it got, for the planner's history."""
+    async def _execute(self, drone: System, action: Action, commanded_m: float | None = None) -> str:
+        """Run one action for up to an epoch; returns how far it got, for the planner's history.
+        `commanded_m` is the planner's `commanded_m` for it, for a move anchored at execution."""
         t = self.target
         epoch_end = self.sim_s + self.config.epoch_s
         rule = self.arrival
@@ -574,6 +579,7 @@ class AgentEpisode(_Episode):
             self.log(action="move", north_m=n, east_m=e)
             if not self.first_move.is_set():
                 self.first_move_target = (n, e)
+                self.first_move_commanded_m = commanded_m
                 self.first_move.set()
             await self._run_until(
                 epoch_end, lambda: self._off_setpoint(target, True) < rule.position_m, rule.poll_s
@@ -622,10 +628,16 @@ class AgentEpisode(_Episode):
             if self.mission.fault_anchor == "first_move_target":
                 assert self.mission.fault_anchor_m is not None and self.first_move_target is not None
                 n, e = self.first_move_target
-                # Never reached (the first move stopped short): no fault, and the scorer's
-                # manipulation check says so.
-                while math.hypot(n - self.tel.north_m, e - self.tel.east_m) > self.mission.fault_anchor_m:
-                    await self.wait_sim(self.sim_s + FAULT_ANCHOR_POLL_SIM_S)
+                commanded = self.first_move_commanded_m
+                if commanded is not None and commanded <= self.mission.fault_anchor_m:
+                    # It starts that close to its target, give or take the 1 cm the estimate it
+                    # was anchored on is rounded to; waiting out that would delay the onset.
+                    self.log(fault_anchor_commanded_m=commanded)
+                else:
+                    # Never reached (the first move stopped short): no fault, and the scorer's
+                    # manipulation check says so.
+                    while math.hypot(n - self.tel.north_m, e - self.tel.east_m) > self.mission.fault_anchor_m:
+                        await self.wait_sim(self.sim_s + FAULT_ANCHOR_POLL_SIM_S)
             anchor = self.sim_s
         self.log(fault_anchor_sim_s=round(anchor, 3))
         for step in self.scenario.steps:

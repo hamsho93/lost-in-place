@@ -342,6 +342,7 @@ class _Step:
     action: Action
     target: tuple[float, float, float]  # north, east, altitude, as DEXI's driver reports it
     timeout_s: float
+    at_execution: bool = False  # re-anchored on the estimate at execution
 
 
 def _number(args: dict[str, Any], key: str) -> float | None:
@@ -468,8 +469,19 @@ class DexiPlanner:
         flown, target = _relative(
             step.name, step.args, state["north_m"], state["east_m"], state["rel_alt_m"], state["yaw_deg"]
         )
-        self._pending = replace(step, action=flown, target=target)
+        self._pending = replace(step, action=flown, target=target, at_execution=True)
         return flown
+
+    def commanded_m(self, action: Action) -> float | None:
+        """The distance of the pending horizontal move, if `at_execution` anchored `action` on the
+        estimate at execution (the `dexi` driver): the vehicle starts that far from its target, to
+        the state's 1 cm rounding. None for anything else."""
+        step = self._pending
+        if step is None or not step.at_execution or step.action != action or step.name != "move":
+            return None
+        if step.args["direction"] in ("up", "down"):
+            return None
+        return float(step.args["distance_m"])
 
     def _translate(
         self, name: str | None, args: dict[str, Any], obs: Observation, completion: Completion
