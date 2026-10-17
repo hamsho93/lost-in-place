@@ -100,23 +100,23 @@ def test_the_plan_sends_claude_everything_and_gpt_one_prompt_per_family(
     claude = p0.plan(prompts, "claude-sonnet-4-6", "auto", p0.repeats("claude-sonnet-4-6", "auto"))
     kinds = {k: sum(c["kind"] == k for c in claude) for k in ("action", "probe", "first_step")}
     assert kinds == {"action": 12 * 5, "probe": 12 * 5, "first_step": 3 * 7}
-    assert p0.repeats("gpt-5.6-sol", "auto") == 1 and p0.repeats("gpt-5.6-sol-fb2", "auto") == 2
-    gpt = p0.plan(prompts, "gpt-5.6-sol-fb2", "auto", 2)
+    assert p0.repeats("claude-sonnet-4-6", "auto") == 1 and p0.repeats("gpt-5.6-sol", "auto") == 2
+    gpt = p0.plan(prompts, "gpt-5.6-sol", "auto", 2)
     kinds = {k: sum(c["kind"] == k for c in gpt) for k in ("action", "probe", "first_step")}
     assert kinds == {"action": 6 * 5 * 2, "probe": 6 * 5, "first_step": 3 * 7}
     assert all(c["rep"] == 0 for c in gpt)
     assert len({c["id"] for c in gpt}) == len(gpt)
     probe = next(c for c in gpt if c["kind"] == "probe")
     assert probe["tools"] is False and probe["prompt"].endswith("\n\n" + PROBE_QUESTION)
-    assert p0.repeats("claude-sonnet-5-5", "auto") == 1 and p0.repeats("claude-sonnet-5-5-fb1", "auto") == 2
-    sonnet = p0.plan(prompts, "claude-sonnet-5-5-fb1", "auto", 2)
+    assert p0.repeats("claude-sonnet-5-5", "auto") == 2 and p0.repeats("gpt-5.6-sol-fb1", "auto") == 2
+    sonnet = p0.plan(prompts, "claude-sonnet-5-5", "auto", 2)
     assert [{k: c[k] for k in c if k != "prompt"} for c in sonnet] == [
         {k: c[k] for k in c if k != "prompt"} for c in gpt
     ]
     estimate = p0.estimate(prompts)
-    assert set(estimate) == {"claude-sonnet-4-6", "gpt-5.6-sol", "gpt-5.6-sol-fb2", "claude-sonnet-5-5-fb1"}
-    assert estimate["claude-sonnet-5-5-fb1"]["calls"] == estimate["gpt-5.6-sol-fb2"]["calls"] == len(gpt)
-    assert estimate["claude-sonnet-5-5-fb1"]["usd"] > estimate["gpt-5.6-sol-fb2"]["usd"]
+    assert set(estimate) == {"claude-sonnet-4-6", "gpt-5.6-sol", "claude-sonnet-5-5"}
+    assert estimate["claude-sonnet-5-5"]["calls"] == estimate["gpt-5.6-sol"]["calls"] == len(gpt)
+    assert estimate["claude-sonnet-5-5"]["usd"] > estimate["gpt-5.6-sol"]["usd"]
 
 
 ARGS: dict[str, dict[str, Any]] = {
@@ -211,11 +211,11 @@ def test_the_stub_run_touches_no_model(
     out = tmp_path / "p.json"
     assert p0.main(["prompts", str(tmp_path / "runs"), "--out", str(out)]) == 0
     assert json.loads(capsys.readouterr().out)["replay"] == {"loud": 4, "brief": 4}
-    assert p0.main(["run", "gpt-5.6-sol-fb2", "--prompts", str(out), "--out", str(tmp_path / "g.jsonl")]) == 0
+    assert p0.main(["run", "gpt-5.6-sol", "--prompts", str(out), "--out", str(tmp_path / "g.jsonl")]) == 0
     printed = json.loads(capsys.readouterr().out.splitlines()[-1])
     assert printed["live"] is False and printed["sent"] == 2 * 2 * 5 * 3 + 2 * 7
     assert p0.main(["summarise", str(tmp_path / "g.jsonl"), "--prompts", str(out)]) == 0
-    s = json.loads(capsys.readouterr().out)["models"]["gpt-5.6-sol-fb2"]
+    s = json.loads(capsys.readouterr().out)["models"]["gpt-5.6-sol"]
     assert s["retest"]["r_tr"] == 0.0 and s["repeats"] == 2 and s["temperature"] is None
     assert p0.main(["estimate", "--prompts", str(out)]) == 0
     assert json.loads(capsys.readouterr().out)["claude-sonnet-4-6"]["calls"] == 8 * 5 * 2 + 2 * 7

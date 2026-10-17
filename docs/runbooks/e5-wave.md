@@ -2,7 +2,7 @@
 
 How to fly the E5 wave (freeze-v3 plan §10.5 and §12 step 5), following the cost and operations review. The submitter, the import pinger, the meter and the health report all run on the operator's machine, in tmux. They read and write AWS through OperatorRole, whose credentials refresh themselves. The bucket, queue, role and inference profiles come from the `LostInPlaceSim` stack's outputs at run time.
 
-Arms, caps, order, prices and thresholds live in `src/lost_in_place/wave/e5.yaml`. The adaptation PR (WP18) fills in the E5 sweep paths, `n_families`, and the canary cost per episode and pinned smoke config of GPT-5.6 Sol and Claude Sonnet 5.5 (including Sonnet's effort field, once the smoke call confirms its spelling). Nothing else should change after the `freeze-v3` tag.
+Arms, caps, order, prices and thresholds live in `src/lost_in_place/wave/e5.yaml`. The adaptation PR (WP18) fills in the E5 sweep paths, `n_families`, and the canary cost per episode and pinned smoke config of GPT-5.6 Sol and Claude Sonnet 5.5 (the entry each smoke call accepted). Nothing else should change after the `freeze-v3` tag.
 
 ```bash
 alias e5='uv run --extra aws python scripts/e5_submit.py'

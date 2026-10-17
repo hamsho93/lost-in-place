@@ -22,11 +22,11 @@ The rules, in the order the design applies them:
   against O1, in loud or in brief, has more than 10% of prompts discordant in each direction; else 120.
 - A-4, each existing arm: descriptive if more than 2% of its canary planner calls are invalid.
 - A-5: m = 4 x the confirmatory arms, at most 20. Arms are registry model names, a smoked arm by the
-  entry it flies (e.g. `claude-sonnet-5-5-fb1`), as `lip freeze-record --freeze v3 --arms` and
+  entry it flies (e.g. `gpt-5.6-sol-fb1`), as `lip freeze-record --freeze v3 --arms` and
   `stats_v3` read them; `record_arms` is that flag's value.
 
     uv run --extra aws python scripts/e5_admission.py canary-health s3://<bucket>/runs --template t1 \\
-        --usd gpt-5.6-sol=4.10 --usd claude-sonnet-5-5-fb1=3.50 --out runs/canary/health.json
+        --usd gpt-5.6-sol=4.10 --usd claude-sonnet-5-5=3.50 --out runs/canary/health.json
     uv run python scripts/e5_admission.py decide --phase0 runs/phase0/phase0.json \\
         --smoke runs/smoke/smoke.json --canary runs/canary/health.json --out runs/adaptation/a2-a5.json
 """
@@ -48,8 +48,8 @@ from lost_in_place.llm.registry import get_model
 CLAUDE = "claude-sonnet-4-6"
 EXISTING_ARMS = ("qwen3-4b-student", "qwen3-4b-zero-shot", CLAUDE)
 GPT_ARM, SONNET55_ARM = "gpt-5.6-sol", "claude-sonnet-5-5"
-GPT_ENTRIES = (GPT_ARM, f"{GPT_ARM}-fb1", f"{GPT_ARM}-fb2", f"{GPT_ARM}-fb3")
-SONNET55_ENTRIES = (SONNET55_ARM, f"{SONNET55_ARM}-fb1", f"{SONNET55_ARM}-fb2")
+GPT_ENTRIES = (GPT_ARM, f"{GPT_ARM}-fb1")
+SONNET55_ENTRIES = (SONNET55_ARM,)
 # Each smoked arm, its fallback order, and the rule that admits it.
 SMOKED = {GPT_ARM: GPT_ENTRIES, SONNET55_ARM: SONNET55_ENTRIES}
 RULES = {GPT_ARM: "A-3", SONNET55_ARM: "A-3b"}

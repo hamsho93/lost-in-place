@@ -259,8 +259,8 @@ def test_script_plans_and_estimates_without_calling_a_model(
     gpt, sonnet55 = est["probes"][1], est["probes"][2]
     # Sonnet 5.5 counts more tokens for the same text; GPT-5.6 Sol costs twice as much per token.
     assert sonnet55["input_tokens"] > gpt["input_tokens"] and gpt["usd"] > sonnet55["usd"]
-    fb1 = wording.probe_cost("claude-sonnet-5-5-fb1", script._prompts(SCENARIOS))
-    assert fb1 == {**sonnet55, "model": "claude-sonnet-5-5-fb1"}
+    fb1 = wording.probe_cost("gpt-5.6-sol-fb1", script._prompts(SCENARIOS))
+    assert fb1 == {**gpt, "model": "gpt-5.6-sol-fb1"}
     assert script.main(["--scenarios", str(SCENARIOS), "prompts", "--out", str(tmp_path / "p.json")]) == 0
     assert len(json.loads((tmp_path / "p.json").read_text())) == 264
 

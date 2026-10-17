@@ -25,7 +25,7 @@ scripted canary, the G-S cell (loud O1) at both cadences plus `scripted-cautious
 episodes).
 
     uv run python scripts/e5_sweeps.py wave --template t1 --n 120 [--arms ...] [--gpt gpt-5.6-sol-fb1] \\
-        [--sonnet55 claude-sonnet-5-5-fb1]
+        [--sonnet55 claude-sonnet-5-5]
     uv run python scripts/e5_sweeps.py canary [--check]
 """
 
@@ -53,9 +53,9 @@ SILENT_FAMILIES = 30
 CANARY_FAMILIES = 6
 LLM_MODELS = ("qwen3-4b-student", "qwen3-4b-zero-shot", "claude-sonnet-4-6")
 GPT_ARM = "gpt-5.6-sol"
-GPT_ENTRIES = (GPT_ARM, f"{GPT_ARM}-fb1", f"{GPT_ARM}-fb2", f"{GPT_ARM}-fb3")
+GPT_ENTRIES = (GPT_ARM, f"{GPT_ARM}-fb1")
 SONNET55_ARM = "claude-sonnet-5-5"
-SONNET55_ENTRIES = (SONNET55_ARM, f"{SONNET55_ARM}-fb1", f"{SONNET55_ARM}-fb2")
+SONNET55_ENTRIES = (SONNET55_ARM,)
 # The arms whose registry entry is the one their smoke call accepted (sections 9.2 and 9.3).
 SMOKED = {GPT_ARM: GPT_ENTRIES, SONNET55_ARM: SONNET55_ENTRIES}
 SCRIPTED_ARM = "scripted"
