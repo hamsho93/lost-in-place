@@ -155,7 +155,7 @@ Reading us-east-2 needs nothing extra from OperatorRole: its `cloudwatch:GetMetr
 | S-5 | warm-up fails after 30 min | doesn't submit the arm | `e5 ping --restart` later |
 | S-6 | copy up for 10 min, none of its episodes running | stops pings | `e5 unkill` if the arm still has work |
 | S-7 | projected arm spend > its cap (after 100 settled, then every 250) | continues if the month still fits without the month-fit arms not yet started, and records which of them (in order) it pushes to December; otherwise pauses | page Mahmood on a pause |
-| S-8 | a month-fit arm's canary > $0.060/episode, or its rolling 100-episode cost > 1.5 × canary | doesn't admit the arm, or pauses it | resume only if the §10.4 sum still fits |
+| S-8 | a month-fit arm's canary > $0.060/episode, compute included, or its rolling 100-episode token cost > 1.5 × canary | doesn't admit the arm, or pauses it | resume only if the §10.4 sum still fits |
 | S-9 | November metered > $400; October estimate > $420; December metered > its `stop_usd` | hard stop on all submissions | page Mahmood |
 | S-9 | no `stop_usd` for the month (December until Mahmood sets it) | submits nothing; no hard stop | none |
 
