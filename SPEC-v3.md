@@ -156,7 +156,7 @@ The freeze, in order:
 
 | Artifact | Hash |
 |---|---|
-| This file | `1a94725c677707edf8f04c5341877e72790d6e21e6b3550c5aea70f866036dfc` |
+| This file | `775d2d855fb16bff116f7ddf5bbca5c0040063a03539bc0c74944817d84ffc4c` |
 | Experiment design (`docs/prereg/freeze-v3-design.md`) | `98a7c4b8c871ddb4d8d4677f17fdbeb0ead4639b8388317945fabe11fe90945c` |
 | Wording template (A-1) | `t1` |
 | `scenarios/e5/<t>/families/*.yaml` (sorted, concatenated) | `6daedb4ab50ca8efc8140add57ba07907f5d643c43b281ef828e0a857f12d33f` |
@@ -180,3 +180,4 @@ The freeze, in order:
 
 | Date | Change | Why |
 |---|---|---|
+| 2026-10-17 | **The comprehension probe is uninformative for the Claude arms** (design §3.3; §2.7, departure 3). Under the frozen parser, every one of Claude Sonnet 4.6's 1,200 Phase 0 probe replies is invalid (not two yes/no lines), and so are 337 of Claude Sonnet 5.5's 600 (56%); GPT-5.6 Sol's have none. The in-wave probe, a secondary, is therefore expected to say little for the two Claude arms. The replies were not read. The parser, the probe text (the probe-prompts row) and every other row are unchanged; only this file's row in the [freeze record](#freeze-record) is refreshed (it was `1a94725c677707edf8f04c5341877e72790d6e21e6b3550c5aea70f866036dfc` at `freeze-v3`). | Found in the pre-freeze runs, from the parse rate alone. Mahmood decided not to change the parser, and to disclose the limitation in design §2.7 and here, after the `freeze-v3` tag. Approved by Mahmood on 2026-10-17 |
