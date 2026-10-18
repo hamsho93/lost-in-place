@@ -1,7 +1,7 @@
 # The E5 wave as started on Oct 17, 2026 (SPEC-v3 amendment of that date): the packaged `e5.yaml`
 # with only its months and deferral deadline changed, and `scripted-rest` marked `needs_gate` so that
-# the S-1 gate's trigger waits on `scripted-gate` alone (SPEC-v3 amendment of 2026-10-18). Run with
-# `--config` this file.
+# the S-1 gate's trigger waits on `scripted-gate` alone, and the wave-level stop raised from $450 to
+# $500 (SPEC-v3 amendments of 2026-10-18). Run with `--config` this file.
 #
 # The E5 wave (freeze-v3 plan sections 10 and 12, step 5), as `scripts/e5_submit.py` runs it.
 #
@@ -27,8 +27,9 @@ months:
   # The month-fit sum is taken against that stop, so a late arm runs only if the spend so far (with
   # the other arms' remaining projections and the fixed items) plus 1.15 x its canary projection
   # stays within it. November has no budget for this wave, and nothing defers: a late arm that
-  # doesn't fit is dropped (the deadline has passed).
-  "2026-10": {stop_usd: 871.99}  # $421.99 metered at 20:02 UTC + $450
+  # doesn't fit is dropped (the deadline has passed). The SPEC-v3 amendment of 2026-10-18 raises the
+  # wave-level stop to $500, decided before GPT-5.6 Sol's actual spend was read for the fit check.
+  "2026-10": {stop_usd: 921.99}  # $421.99 metered at 20:02 UTC + $500
   "2026-11": {arms: []}
 deferral_deadline: "2026-10-16"
 
