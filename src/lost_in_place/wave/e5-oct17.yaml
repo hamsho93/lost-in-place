@@ -1,5 +1,7 @@
 # The E5 wave as started on Oct 17, 2026 (SPEC-v3 amendment of that date): the packaged `e5.yaml`
-# with only its months and deferral deadline changed. Run with `--config` this file.
+# with only its months and deferral deadline changed, and `scripted-rest` marked `needs_gate` so that
+# the S-1 gate's trigger waits on `scripted-gate` alone (SPEC-v3 amendment of 2026-10-18). Run with
+# `--config` this file.
 #
 # The E5 wave (freeze-v3 plan sections 10 and 12, step 5), as `scripts/e5_submit.py` runs it.
 #
@@ -108,6 +110,7 @@ arms:
     sweep: sweeps/e5/scripted.yaml
     select: {scenario_regex: '_(loud|brief|healthy)$', invert: true}
     cap: 64
+    needs_gate: true
     start_after: [{arm: claude, fraction: 0.9}, {arm: student}]
     cap_usd: 10
     estimate_usd: 2.3
