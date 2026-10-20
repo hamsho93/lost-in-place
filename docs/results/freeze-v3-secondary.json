@@ -2250,7 +2250,7 @@
  "pre_freeze_disclosures": [
   {
    "date": "2026-10-17",
-   "item": "loud onset rule as flown (A-6 fix 3): a first move anchored at execution with commanded distance <= 2.0 m starts the fault at move start; onset 0-0.4 s earlier for every LLM arm; SPEC-v3 section 3 text predates it",
+   "item": "loud onset rule as flown (A-6 fix 3): a first move anchored at execution with commanded distance <= 2.0 m starts the fault at move start; onset 0-0.4 s earlier for the arms with 2.0 m first steps (claude-sonnet-4-6, claude-sonnet-5-5, gpt-5.6-sol, qwen3-4b-zero-shot) and the scripted control; the student's whole-leg first move (median about 4.7 m) is unaffected; SPEC-v3 section 3 text predates it",
    "commit": "07c157c",
    "merge": "b2fe9ba",
    "approval": "Mahmood (relayed)"
