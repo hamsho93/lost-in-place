@@ -1,0 +1,212 @@
+{
+  "amendment": "SPEC-v3, 2026-10-21 (E5b), launch",
+  "image": {
+    "tag": "freeze-v3-e5b-a6e4453bb5df",
+    "digest": "sha256:b216798340e7f100c1c16cec3b833fba5426b8266084392b778779dff8757f61",
+    "workflow_run": "https://github.com/hamsho93/lost-in-place/actions/runs/39586749205",
+    "job_definitions": {
+      "SweepEpisode": 26,
+      "Episode": 28
+    }
+  },
+  "profiles": {
+    "stack": "LipE5bProfiles (us-east-2)",
+    "llama-3-3-70b": "5q09rx7qb7z2",
+    "deepseek-v3-2": "72dqpzp8v9qg",
+    "mistral-large-3": "yhigwpq0v06t"
+  },
+  "smoke": {
+    "llama-3-3-70b": {
+      "tried": [
+        {
+          "entry": "llama-3-3-70b",
+          "result": "accepted",
+          "error": null,
+          "tool_call_parsed": true,
+          "reasoning_block": false,
+          "input_tokens": 883,
+          "output_tokens": 16
+        }
+      ]
+    },
+    "deepseek-v3-2": {
+      "tried": [
+        {
+          "entry": "deepseek-v3-2",
+          "result": "accepted",
+          "error": null,
+          "tool_call_parsed": true,
+          "reasoning_block": false,
+          "input_tokens": 932,
+          "output_tokens": 27
+        }
+      ]
+    },
+    "mistral-large-3": {
+      "tried": [
+        {
+          "entry": "mistral-large-3",
+          "result": "accepted",
+          "error": null,
+          "tool_call_parsed": true,
+          "reasoning_block": false,
+          "input_tokens": 722,
+          "output_tokens": 29
+        }
+      ]
+    }
+  },
+  "canary_windows_utc": {
+    "start": "2026-10-21T10:49:26Z",
+    "end": {
+      "deepseek-v3-2": "2026-10-21T11:20:39Z",
+      "mistral-large-3": "2026-10-21T11:25:47Z",
+      "llama-3-3-70b": "2026-10-21T11:30:54Z"
+    }
+  },
+  "canary_health": {
+    "arms": {
+      "deepseek-v3-2": {
+        "brief_episodes": 36,
+        "brief_manipulation_ok": 36,
+        "episodes": 78,
+        "invalid_calls": 0,
+        "loud_episodes": 42,
+        "loud_manipulation_decision_ok": 42,
+        "missing": 0,
+        "planner_calls": 367,
+        "sweep": "e5-canary-t1-deepseek-v3-2",
+        "usd": 0.53
+      },
+      "llama-3-3-70b": {
+        "brief_episodes": 36,
+        "brief_manipulation_ok": 35,
+        "episodes": 78,
+        "invalid_calls": 483,
+        "loud_episodes": 42,
+        "loud_manipulation_decision_ok": 40,
+        "missing": 0,
+        "planner_calls": 792,
+        "sweep": "e5-canary-t1-llama-3-3-70b",
+        "usd": 0.98
+      },
+      "mistral-large-3": {
+        "brief_episodes": 36,
+        "brief_manipulation_ok": 36,
+        "episodes": 78,
+        "invalid_calls": 0,
+        "loud_episodes": 42,
+        "loud_manipulation_decision_ok": 42,
+        "missing": 0,
+        "planner_calls": 369,
+        "sweep": "e5-canary-t1-mistral-large-3",
+        "usd": 0.42
+      }
+    },
+    "template": "t1"
+  },
+  "admission": {
+    "deepseek-v3-2": {
+      "checks": {
+        "1_smoke_call": {
+          "accepted": "deepseek-v3-2",
+          "ok": true,
+          "problems": []
+        },
+        "2_invalid": {
+          "at_most": 0.02,
+          "canary_rate": 0.0,
+          "ok": true
+        },
+        "3_manipulation": {
+          "brief": "36/36",
+          "loud": "42/42",
+          "need": "loud >= 40/42, brief >= 35/36",
+          "ok": true
+        },
+        "4_cost": {
+          "at_most": 0.06,
+          "ok": true,
+          "usd_per_episode": 0.006794871794871795
+        },
+        "5_retest": {
+          "ok": true,
+          "required": false
+        }
+      },
+      "entry": "deepseek-v3-2",
+      "status": "descriptive",
+      "usd_per_episode": 0.006794871794871795
+    },
+    "llama-3-3-70b": {
+      "checks": {
+        "1_smoke_call": {
+          "accepted": "llama-3-3-70b",
+          "ok": true,
+          "problems": []
+        },
+        "2_invalid": {
+          "at_most": 0.02,
+          "canary_rate": 0.6098484848484849,
+          "ok": false
+        },
+        "3_manipulation": {
+          "brief": "35/36",
+          "loud": "40/42",
+          "need": "loud >= 40/42, brief >= 35/36",
+          "ok": true
+        },
+        "4_cost": {
+          "at_most": 0.06,
+          "ok": true,
+          "usd_per_episode": 0.012564102564102564
+        },
+        "5_retest": {
+          "ok": true,
+          "required": false
+        }
+      },
+      "entry": "llama-3-3-70b",
+      "status": "descriptive",
+      "usd_per_episode": 0.012564102564102564
+    },
+    "mistral-large-3": {
+      "checks": {
+        "1_smoke_call": {
+          "accepted": "mistral-large-3",
+          "ok": true,
+          "problems": []
+        },
+        "2_invalid": {
+          "at_most": 0.02,
+          "canary_rate": 0.0,
+          "ok": true
+        },
+        "3_manipulation": {
+          "brief": "36/36",
+          "loud": "42/42",
+          "need": "loud >= 40/42, brief >= 35/36",
+          "ok": true
+        },
+        "4_cost": {
+          "at_most": 0.06,
+          "ok": true,
+          "usd_per_episode": 0.005384615384615384
+        },
+        "5_retest": {
+          "ok": true,
+          "required": false
+        }
+      },
+      "entry": "mistral-large-3",
+      "status": "descriptive",
+      "usd_per_episode": 0.005384615384615384
+    }
+  },
+  "baseline": {
+    "command": "uv run --extra aws python scripts/e5_meter.py --config src/lost_in_place/wave/e5b.yaml now",
+    "at": "2026-10-21T11:33:27Z",
+    "estimate_usd": 553.17,
+    "stop_usd": 733.17
+  }
+}

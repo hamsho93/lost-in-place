@@ -106,7 +106,12 @@ def test_every_e5b_record_row_is_one_check_prints(e5b: ModuleType) -> None:
     recorded = e5b.recorded_e5b((ROOT / "SPEC-v3.md").read_text())
     _, values = e5b.check()
     assert "Model registry with the E5b entries" in recorded
+    # The image digest is compared with the live job definition's (`check --image-digest`), not computed.
+    digest = recorded.pop(e5b.IMAGE_ROW, None)
     assert {row: values.get(row) for row in recorded} == recorded
+    if digest is not None:
+        assert e5b.check(image_digest=digest)[0] == []
+        assert e5b.check(image_digest="sha256:" + "0" * 64)[0] != []
 
 
 def test_the_image_recipe_must_build_on_one_digest(e5b: ModuleType) -> None:
@@ -158,7 +163,7 @@ def test_a_config_naming_another_entry_than_the_sweep_fails(e5b: ModuleType, tmp
     assert len(problems) == 1 and "deepseek-v3-2" in problems[0]
 
 
-def test_the_wave_config_pins_the_registry_and_sends_nothing_yet(e5b: ModuleType) -> None:
+def test_the_wave_config_pins_the_registry_and_the_launch_values(e5b: ModuleType) -> None:
     wave = config.load(CONFIG)
     registry = yaml.safe_load((ROOT / "src/lost_in_place/llm/models.yaml").read_text())
     models = load_models()
@@ -168,11 +173,13 @@ def test_the_wave_config_pins_the_registry_and_sends_nothing_yet(e5b: ModuleType
         assert arm.pinned_model is not None and arm.model in e5b.ARMS[arm.name]
         assert {k: registry[arm.model].get(k) for k in arm.pinned_model} == arm.pinned_model
         assert arm.bedrock_model == models[arm.model].model_id and models[arm.model].region == "us-east-2"
-        assert arm.needs_gate and arm.canary_usd_per_episode is None
+        assert arm.needs_gate and arm.canary_usd_per_episode is not None
+        assert arm.canary_usd_per_episode <= wave.rules.gpt_admission_usd_per_episode
         probe = wave.arm(f"probe-{arm.name}")
         assert probe.counted_in == arm.name and probe.estimate_usd == arm.probe_usd
         assert probe.price == arm.price and probe.bedrock_model == arm.bedrock_model
-    assert all(m.stop_usd is None for m in wave.months.values())
+    # Sign-off choice 7: October alone funds the wave, at the baseline reading plus $180.
+    assert wave.months["2026-10"].stop_usd == 733.17 and wave.months["2026-11"].stop_usd is None
     assert wave.preflight_commands == (("uv", "run", "python", "scripts/e5b.py", "check"),)
     assert sum(a.cap for a in wave.arms if a.name in e5b.ARMS) <= wave.max_in_flight
     text = CONFIG.read_text()
