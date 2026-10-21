@@ -156,7 +156,7 @@ The freeze, in order:
 
 | Artifact | Hash |
 |---|---|
-| This file | `3ba4e1bc19d6773ce0f9d725cd3c2437a1f9481ac1850161096b1405eea9dd1f` |
+| This file | `4b937f72f0ae4e7d1484a7743471b20f3c69a0c40ededb6acb979e177c813ffc` |
 | Experiment design (`docs/prereg/freeze-v3-design.md`) | `98a7c4b8c871ddb4d8d4677f17fdbeb0ead4639b8388317945fabe11fe90945c` |
 | Wording template (A-1) | `t1` |
 | `scenarios/e5/<t>/families/*.yaml` (sorted, concatenated) | `6daedb4ab50ca8efc8140add57ba07907f5d643c43b281ef828e0a857f12d33f` |
@@ -186,3 +186,111 @@ The freeze, in order:
 | 2026-10-18 | **The wave-level stop is raised from $450 to $500** (design §10.4, §10.5 S-9; the amendment of 2026-10-17). The metered wave-level hard stop is now October's metered total at the wave's start plus $500, so $921.99. The late arms' fit rule is otherwise unchanged: Claude Sonnet 5.5 still runs last, after GPT-5.6 Sol, and only if the spend so far plus 1.15 × its canary projection stays within the stop. Nothing defers. The raise was decided at 21:51 UTC on Oct 18, while GPT-5.6 Sol was running (254 of 2,040 settled) and before its actual spend was read for Sonnet 5.5's fit check. At 21:13 UTC, Sonnet 5.5's preview fit was $860.81 against $871.99, about $11 of headroom. No outcome of any E5 arm was read. The config is `src/lost_in_place/wave/e5-oct17.yaml` (commit `6c77fb1fadec138c0448ff68bcfa582e52cf7639`, SHA-256 `79aef0f4a428f559bf0a75994e15f595c03b2fb9262777b5a25c9934eefc8d66`), with only October's `stop_usd` changed from 871.99 to 921.99. The AWS budget stays at $900 with its action STANDBY (no infrastructure change), and the meter remains the S-9 guard. Only this file's row in the [freeze record](#freeze-record) is refreshed (it was `7d653159590346d77ffaea928b587afd6495a73941ebcf70e43fe94b2857aab0` after the entry above). | So that Sonnet 5.5 isn't dropped on a thin fit margin. Approved by Mahmood ("Go") on 2026-10-18 at 21:51 UTC |
 | 2026-10-19 | **Post-freeze tooling: `scripts/e5_label_sample.py`** (§6 scorer agreement; design §2.7). Each E5 sweep's episodes live under their own runs prefix, and `lip label-sample` takes one manifest, but the second labeller's matched draw needs every LLM arm in one sample. The script takes the six E5 manifests, reads each one's attempts from its own prefix, and calls the frozen `labels.pick`, `labels.sample` and `labels.double_code` unchanged on their union, loading each packet from the prefix its attempt came from (commit `4415dc4`, with tests). `labels.py`, the brief, the instructions, the fraction (10% per cell), the seeds and both labeller models are as recorded. It was checked only on the a6b canary manifests, and only its counts were read. Labeller spend, which is outside AWS, is recorded in the metering windows as estimated at the plan's rate. Only this file's row in the [freeze record](#freeze-record) is refreshed (it was `67aceca7c8069a2f8ad2e61bd5b881ffd37d3319de391dc1ba86a13d8bef6d9c` after the entry above). | Needed to run the frozen procedure on a wave of six sweeps. No outcome of any E5 arm was read. Approved by the coordinator for Mahmood on 2026-10-19 |
 | 2026-10-19 | **Nine of Qwen3-4B zero-shot's in-wave probe calls are missing** (§6 comprehension probe; design §3.3). The in-wave probe for `qwen3-4b-zero-shot` planned 840 calls (120 families × 7 levels) and got 831 replies. The other 9 calls ended in client errors with no reply, on the first and only run (exit code 0). They are recorded as missing probe calls: not rerun, not counted as invalid replies, and not imputed. The probe's invalid rate for this arm is over the 831 replies. The other four probes got a reply to every call they sent. Only call counts and the invalid rate were read, never the replies. Only this file's row in the [freeze record](#freeze-record) is refreshed (it was `801914b911b5fe3a58c291c824d40640ebb038bfc7a3c5a68e4bc852827049fa` after the entry above). | Reported by the wave coordinator from the probe's summary line. Mahmood's call, relayed by the coordinator on 2026-10-19: record them as missing, with no rerun |
+| 2026-10-21 | **E5b: three later arms, each descriptive** (design §9.3, "Later models"; see [E5b](#e5b-three-later-arms-amendment-of-2026-10-21)). Llama 3.3 70B, DeepSeek V3.2 and Mistral Large 3 fly E5's frozen protocol. Each is descriptive, because E5 was unblinded on Oct 19. Five registry entries are appended after the frozen registry, whose bytes are unchanged. Added: `sweeps/e5b/`, `sweeps/e5b-canary/`, `src/lost_in_place/wave/e5b.yaml`, `scripts/e5b.py` (the pre-flight, canary health and admission) and the image recipe `docker/Dockerfile.e5b` (the frozen digest plus the registry). The stack now grants an in-region model id its own foundation model. E5's record rows are unchanged: the model-registry and prompt-bundle rows still name what E5 flew, and `scripts/e5b.py check` replaces `lip freeze-record --freeze v3 --check` as E5b's pre-flight. Only this file's row in the [freeze record](#freeze-record) is refreshed (it was `3ba4e1bc19d6773ce0f9d725cd3c2437a1f9481ac1850161096b1405eea9dd1f` after the entry above). | Mahmood approved E5b on 2026-10-21: the three models and smoke calls up to about $5. **Draft:** the arms, disclosures, analysis, labelling and budget take effect only when he signs off this entry, and nothing but the smoke calls is flown before then. Two independent internal reviews were made before sign-off, as for E5 |
+
+## E5b: three later arms (amendment of 2026-10-21)
+
+**Draft, not in force until Mahmood signs it off.** Nothing of E5b is flown before then: no canary and no wave episode. Only the smoke calls (design §9.2) are flown before sign-off, under his approval of Oct 21.
+
+### Status
+
+E5b flies three more Bedrock models on E5's frozen protocol, as design §9.3 ("Later models") allows by a dated arm addendum. E5 was unblinded on Oct 19 (`docs/prereg/freeze-v3-unblind.md`, commit `d7153de`), so **every E5b arm is descriptive**: it gets estimates and intervals, no verdict, and no place in m. The record's confirmatory arms, N = 120 and m = 20 are unchanged. A confirmatory claim about any of these models would need a new freeze.
+
+### Arms
+
+| Arm | Registry entry, then fallback (§9.2 order) | Model | Lab | Size, weights | Called through | `tool_choice` | Temperature | Output tokens |
+|---|---|---|---|---|---|---|---|---|
+| `llama-3-3-70b` | `llama-3-3-70b`; none | `us.meta.llama3-3-70b-instruct-v1:0` | Meta | 70B dense, open | the `us.` system profile, copied into a tagged us-east-2 profile | auto | 0 | at most 4,096 |
+| `deepseek-v3-2` | `deepseek-v3-2`, then `deepseek-v3-2-fb1` | `deepseek.v3.2` | DeepSeek | 671B MoE, open | the in-region foundation model, copied into a tagged us-east-2 profile | any; fallback auto | 0 | at most 4,096 |
+| `mistral-large-3` | `mistral-large-3`, then `mistral-large-3-fb1` | `mistral.mistral-large-3-675b-instruct` | Mistral | 675B MoE (41B active), open | the in-region foundation model, copied into a tagged us-east-2 profile | any; fallback auto | 0 | at most 4,096 |
+
+None is a reasoning model, and none sends `additional_request_fields`. The entries follow the frozen registry in `src/lost_in_place/llm/models.yaml`; every byte of the registry recorded at `freeze-v3` is unchanged.
+
+### Disclosures
+
+1. **Not each lab's newest model, and for Meta not even the newest one Bedrock serves.** DeepSeek V3.2 and Mistral Large 3 are their labs' newest general-purpose models that Bedrock serves in us-east-2 on the project's account (the Oct 21 quota listing). DeepSeek's V4 family is not on Bedrock. Mistral's other models there are a coding model (Devstral 2), a reasoning model (Magistral Small 1.2) and small models (Ministral 3). Llama 3.3 70B (Dec 2024) is older than Meta's Llama 4 Scout and Maverick, which Bedrock also serves in us-east-2. It was chosen for the dense 70B tier between the 4B Qwen arms and the frontier arms, and because the peer benchmarks use it. None of the three should be read as its lab's current frontier.
+2. **`tool_choice` differs across arms.** Converse accepts only `auto` for Meta models, so Llama flies `auto` with no fallback. Bedrock documents `any` for Mistral Large but not for DeepSeek V3.2; each base entry tries `any`, and its `-fb1` entry (`auto`) is flown only if the smoke call's request is rejected (§9.2). Under `auto`, a reply with no tool call is an invalid proposal, as for Claude Sonnet 5.5 (departure 13). Every E5b table gives each arm's `tool_choice`, E5's included: `any` for Claude Sonnet 4.6, GPT-5.6 Sol and the Qwen arms, `auto` for Claude Sonnet 5.5.
+3. **Serving path.** All three are called in us-east-2 through tagged application inference profiles, so the project budget, `BudgetStop` and the meter cover them, as for GPT-5.6 Sol and Claude Sonnet 5.5 (departure 14). Episodes run in us-east-1, and the planner's latency is charged at the fixed 2.0 s.
+4. **The image is E5's plus one file.** The registry is baked into the frozen image, so the frozen image can't resolve the new entries. E5b runs on an image built `FROM` the frozen digest `sha256:5470354e…` with only `src/lost_in_place/llm/models.yaml` replaced (`docker/Dockerfile.e5b`). It is built and pushed tagged `freeze-v3-e5b-<sha>` by `.github/workflows/image-e5b.yml` on `main`. PX4, Gazebo, the worlds, the scenarios, the runner, the scorer and the prompts are the frozen image's layers. This departs from §9.3's "same image" in that one file. The digest is recorded below at launch.
+5. **The models' end of life.** DeepSeek V3.2's model card gives an end of life no sooner than Dec 1, 2026, and Mistral Large 3's no sooner than Dec 2, 2026, each followed by a legacy period. No rerun is planned past mid-2027.
+6. **Decided after E5's results were read.** The three models and this protocol were chosen after E5 was unblinded, by people who had read its results. The choice used peer benchmarks, availability and price, not E5's per-arm outcomes. The E5b outcomes themselves stay blinded until E5b's own unblinding (below).
+
+### Protocol: E5's, unchanged
+
+The families, template T1, N = 120, the states, levels, cells, prompts, driver, validators (`none`), latency, seeds, shuffle, scorer, decision rule, retry rule and stop rules S-0 to S-9, with their thresholds, are E5's. `scripts/e5b.py sweeps` writes the sweeps with `scripts/e5_sweeps.py`'s builders, and `tests/test_e5b.py` checks that each LLM sweep equals E5's in every cell except the arm name: 2,040 episodes per arm. Only the names differ (`e5b-<arm>`), so each sweep has its own runs prefix and manifest.
+
+Operationally, E5b differs from E5's wave in four ways:
+- **The S-1 gate is flown again** on the E5b image: E5's scripted control, gate cells only (`sweeps/e5b/scripted.yaml`, sweep `e5b-scripted`), before any LLM episode, with E5's gate command. E5's scripted remainder (timed loud, flowscale) is not flown again.
+- **The three arms run side by side** after the gate, at 21 slots each.
+- **The pre-flight is `scripts/e5b.py check`** in place of `lip freeze-record --freeze v3 --check`. The latter now differs in two rows, the model registry and the prompt bundle, because the E5b entries were added to both. The check passes only if every other row matches. The registry recorded at `freeze-v3` must be a byte prefix of the current one, followed by exactly the E5b entries. The prompt bundle, without the E5b entries' wire digests, must hash to the recorded `69978989…`, so every E5 prompt and every E5 arm's request is unchanged. Each arm's sweep and config entry must also name the same registry entry.
+- **The wave config** is `src/lost_in_place/wave/e5b.yaml`, run with `scripts/e5_submit.py --config`.
+
+### Admission (design §9.3, A-3 checks 1–4)
+
+Each arm is decided separately, by `scripts/e5b.py admission`, from:
+- the smoke record, `{arm: {"tried": [...]}}` in §9.2's fallback order. The smoke call is `lip propose <entry> --planner dexi`, on the base entry, then on `-fb1` only if the base entry is rejected.
+- `scripts/e5b.py canary-health`, which calls the frozen `e5_admission.canary_health` over the E5b canary sweeps (`sweeps/e5b-canary/`, named `e5-canary-t1-<entry>` so that the frozen function reads them unchanged).
+
+Each arm's canary is the accepted entry's 78 episodes on k000–k005. Its checks:
+1. A smoke call is accepted.
+2. Invalid planner calls are at most 2% in the canary. E5b flies no Phase 0: N is fixed, and check 5 doesn't apply.
+3. Loud `manipulation_decision_ok` passes in at least 40 of 42 episodes, and brief `manipulation_ok` in at least 35 of 36.
+4. The canary's cost per episode, compute included, is at most $0.060.
+5. Not required: every E5b entry has temperature 0.
+
+An arm is **not run** if check 1 or 4 fails. Otherwise it is **descriptive** whether or not checks 2 and 3 pass, and their outcomes are reported with its results. The accepted entry's sweep (`scripts/e5b.py sweeps --deepseek … --mistral …`) and each admitted arm's `canary_usd_per_episode` are committed to `e5b.yaml` before the arm's first submission. Until then the submitter refuses it.
+
+### Blinding
+
+`lip stats --design v3`'s gate has been open since E5's unblinding, so it would not stop an early E5b read; E5b's blinding is procedural. Until every E5b arm has settled, been dropped or been found not run, only design §2.5's allowed columns are read. The health report and the submitter log their queries to `manifests/e5b/queries.log`. No `lip stats --design v3` run touches an E5b manifest, except `--gates` on `e5b-scripted`. No trace, probe answer or label is read. Mahmood then commits `docs/prereg/e5b-unblind.md`, and the analysis follows.
+
+### Analysis
+
+There is one pinned run of the frozen `lip stats --design v3` (analysis script `15bdfb02…`, unchanged) over E5's six manifests and the three E5b LLM manifests. `e5b-scripted` is left out: the scripted gates come from E5's control, as in E5's pinned run.
+- **E5's arms.** Their rows must equal E5's pinned output. Any difference is reported, and E5's pinned run stands.
+- **The E5b arms.** Each prints as a "descriptive arm".
+- **Fallback names.** The frozen script maps only GPT-5.6 Sol's and Claude Sonnet 5.5's fallbacks to their arms, so a flown `-fb1` entry is reported under its own name.
+- **Comprehension probes.** Each arm's probe is `scripts/e5_probe.py` over its sweep: 840 calls, run after the arm settles, with the answers blinded as above.
+- **The write-up.** It gives a per-arm table with provider, size, open or closed weights, serving path and `tool_choice`, with no ranking.
+
+### Labelling
+
+After the three arms settle, and before E5b's unblinding, `scripts/e5_label_sample.py` runs over the three E5b manifests. It uses the frozen `labels.py`, brief and instructions, a 10% sample per cell, seed 0, and `gpt-5.6-sol-high` as labeller of record. Mahmood adjudicates disagreements, as for E5.
+
+The script requires a double-coded arm, so `--double-code llama-3-3-70b` is passed. Its `blind-2` set, the Llama packets plus a matched draw, goes to `gemini-4-argon-high` only if Mahmood approves the second labeller. Departure 15's overlap flag doesn't apply: no E5b arm shares a family with either labeller. If run, the second labeller is a plain agreement check, reported descriptively.
+
+### Budget
+
+The selection note's figures are E5's token volumes at each model's us-east-2 list price, plus about $11 of Batch job time per arm. P90 is the median plus 30%.
+
+| Item | Median | P90 |
+|---|---|---|
+| Smoke calls (before sign-off) | under $1 | $5 (approved limit) |
+| Canaries, 3 × 78 episodes | about $3 | $14 (at the $0.060 limit) |
+| S-1 gate re-flight | $4.70 | $5.40 |
+| Llama 3.3 70B / DeepSeek V3.2 / Mistral Large 3 | $22 / $23 / $19 | $29 / $30 / $25 |
+| Their probes | $4.10 | $5.30 |
+| Blind labeller | $15 | $18 |
+| Second labeller (optional) | $10.20 | $11.80 |
+| Retries and other tagged spend | $5 | $5 |
+| **Total** | **about $106** | **about $148** |
+
+E5's month-fit rule (§10.4) applies, with E5's factor of 1.15 × each arm's canary projection. The stop is a metered **wave-level hard stop of $140** over the funding month's metered total when the gate arm starts, after the smoke calls and canaries. That covers the P90 of everything after them (about $130). The launch commit writes the stop and its month into `e5b.yaml`. Until then `e5b.yaml` names no month stop, and S-9 submits nothing. The AWS budget is unchanged ($900 for October; back to $450 from Nov 1 under the amendment of 2026-10-17), and so is its STANDBY action.
+
+### E5b record
+
+The values for this amendment, printed by `scripts/e5b.py check`. E5's freeze record above is unchanged except this file's row, so it still names what E5 flew; its model-registry and prompt-bundle rows are E5's.
+
+| E5b artifact | Hash |
+|---|---|
+| Model registry with the E5b entries | `f66496c060b5eb1c4d35e2087acb6507ccbe5182df068e00aa980688cf1ef221` |
+| Wire digest, `llama-3-3-70b` | `e68eb537ceabff3b820e9e4048f40af99ff642ca7a9cd4678d787baf5650fde0` |
+| Wire digest, `deepseek-v3-2` | `66f6b0e29a37f231920fa6ae24520506d83f3ddec3dd8b974fb2d8d0e1c833eb` |
+| Wire digest, `deepseek-v3-2-fb1` | `060abc04cd5618f1b6a6ccbec3b02c9265e9bb82feb18ead7a0cd6d17e96547d` |
+| Wire digest, `mistral-large-3` | `b9c8bb0e45fa57bf772c338a11bca906b0341b21e1bb28d57b2b4cfa2e1e98f8` |
+| Wire digest, `mistral-large-3-fb1` | `5864645d9a40a48b6337c1db164c4e2910c7e7b6d964ff47c79b5a99750c2b38` |
+| `sweeps/e5b/*.yaml` (sorted, concatenated; base entries) | `828f1e979ee07b371792797180063f185bcb3cfa44595ad9d25caeb2888951b9` |
+| `sweeps/e5b-canary/*.yaml` (sorted, concatenated) | `5420f1805b9bd12063a99ea2ec7b3373d0c11fa2fa6ac87174e8c4433fb169bd` |
+| Image recipe (`docker/Dockerfile.e5b`) | `7d789e657164602340547dcd081043e8576eaae56b818157ec112d967f7eaac9` |
+| E5b image digest | recorded at launch |
+| Wave config (`src/lost_in_place/wave/e5b.yaml`) | recorded at launch, with the accepted entries, canary costs and month stop |
