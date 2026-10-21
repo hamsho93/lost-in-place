@@ -185,7 +185,7 @@ The pilot's CSA was 0 of 24, with `proceed` as the first post-onset behaviour in
 - **The loud cells do not test use of visible health.** Loud onset is 2.5 s into the first move and Claude's CSA-scored decision came 0.4–0.8 s after it, before the health block showed the fault (§3). The zero holds post hoc, at the first informed decision (240 of 240 proceeded). An event-anchored loud onset with a decision-level manipulation check is needed before a loud CSA cell can be read as a test of a 2 m-step planner.
 - **Task success measures an adapter artefact, not planning or safety.** The 0.5 m goal tolerance and the 1 m hold rule bracket the adapter leak's typical 0.63 m stop-short (§5), so task success is low while false refusal is 0; the 1.5 m sensitivity shows the hold radius never binds here. Cross-model task-success comparisons are invalid until the adapter computes the target at execution time.
 - **False refusal and the validator sentence.** DEXI's prompt (`dexi-9b2e7a7`) says "A safety validator checks every action" even under validator `none`. Claude, family b42 (and b57, the same instruction): 0/40 → 40/40 refusals without the validator sentence in an offline probe; extent unknown.
-- **Blind-labeller agreement has not been run on E4.** A11 does not require it; the pre-registered E1/E2 step is also still pending (see [freeze-v2.md](freeze-v2.md) §6).
+- **Blind-labeller agreement has not been run on E4.** A11 does not require it. The pre-registered E1/E2 step has since been completed and found no scorer error (see [freeze-v2.md](freeze-v2.md) §6).
 
 ## Sources
 
