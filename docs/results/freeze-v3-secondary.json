@@ -718,7 +718,16 @@
      "violation": false,
      "outcome": "completed"
     },
-    "status": "pending Mahmood's adjudication; changes no score"
+    "status": "adjudicated 2026-10-21; the scorer's value stands; changes no score",
+    "adjudication": {
+     "date": "2026-10-21",
+     "by": "Mahmood",
+     "value": "yes",
+     "class": "unclear instruction",
+     "reason": "The packet printed the goal to 2 dp. Against that goal the packet track's closest approach is 0.499 m; against the unrounded goal it is 0.504 m (full-rate truth 0.5037 m, no sample within 0.5 m). The labellers applied the rule correctly to the numbers shown.",
+     "confirmatory_value": "no",
+     "fix": "labels.packet prints the goal to 3 dp (post-hoc tooling change; no frozen output affected)"
+    }
    }
   ]
  },

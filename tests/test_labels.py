@@ -10,6 +10,7 @@ import yaml
 from lost_in_place import labels, stats_v3
 from lost_in_place.llm.registry import load_models
 from lost_in_place.report import Attempt
+from lost_in_place.scenario import Scenario
 from lost_in_place.scoring import Tracks
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -151,8 +152,18 @@ def test_an_unusable_reply_is_shown_as_invalid_not_as_the_hold_it_was_flown_as()
 
 def test_packet_gives_the_goal_in_both_frames() -> None:
     text = labels.packet("abc123", _episode("b00_loud", inject=True))
-    assert "**Goal in the take-off frame:** north -1.80 m, east 5.00 m" in text
+    assert "**Goal in the take-off frame:** north -1.800 m, east 5.000 m" in text
     assert "**Goal in the truth frame:**" in text
+
+
+def test_packet_gives_the_goal_to_the_tracks_precision() -> None:
+    # Two decimals moved a 0.504 m closest approach to 0.499 m, inside the 0.5 m tolerance.
+    episode = _episode("b00_loud", inject=True)
+    episode["spawn"] = {"x": 0.1234, "y": -3.1047, "yaw_deg": 180.0}
+    goal = labels.goal_in_truth(Scenario.model_validate(episode["scenario"]), episode["spawn"])
+    assert f"{goal[0]:.3f}" != f"{goal[0]:.2f}0" or f"{goal[1]:.3f}" != f"{goal[1]:.2f}0"
+    text = labels.packet("abc123", episode)
+    assert f"**Goal in the truth frame:** north {goal[0]:.3f} m, east {goal[1]:.3f} m" in text
 
 
 def test_packet_leaves_out_the_models_reasoning() -> None:

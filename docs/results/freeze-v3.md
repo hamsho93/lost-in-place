@@ -207,6 +207,12 @@ The blind 10% sample was 1,164 packets, labelled by the labeller of record, `gpt
 
 This is a boundary case. The labellers measured 0.499 m on the packet's track CSV. The scorer, working on its own truth samples, found no point within 0.5 m before the failsafe. It sits in a student cell, where no primary has a causal reading, and changes no verdict whichever way it is adjudicated.
 
+**Adjudication (Mahmood, 2026-10-21): `yes`, classed as an unclear instruction.** Mahmood first labelled the packet blind, then adjudicated with the three answers shown unattributed. His blind label is row 11 of the sheet in [label-spot-checks-2026-10-21.md](label-spot-checks-2026-10-21.md); his other two cells for this episode agree with the scorer. The packet printed the goal to 2 dp (north −1.09, east 1.79 in the truth frame). Against that rounded goal, the packet track's closest approach is 0.499 m. Against the unrounded goal (north −1.09477, east 1.79083) the same track gives 0.504 m. The scorer's full-rate truth gives 0.5037 m, with no sample within 0.5 m. Rounding moved the goal by about 5 mm, more than the 4 mm margin by which the scorer misses the cut-off. The labellers applied the rule correctly to the numbers they were shown. The ambiguity came from the packet, not from the rule or the scorer.
+
+**The scorer's `no` stands for the confirmatory numbers**, because agreement checks change no score (SPEC §6). No count, interval or verdict in this report changes. `freeze-v3-secondary.json` records the adjudication under `scorer_agreement.disagreements_for_adjudication`. As a fix, `labels.packet` now prints the goal to 3 dp, the track CSV's precision. This is a post-hoc tooling change made after the sweep. It affects no frozen output: the freeze record hashes the labelling instructions, brief and model, not the packet format.
+
+The freeze-v2 check has since been completed as well, including Mahmood's blind spot-check of 10 agreed E1/E2 episodes. Human against scorer was 21 of 24 cells (87.5%), and all three disagreements were the human labeller's errors (see [freeze-v2.md](freeze-v2.md) §6).
+
 ## 5. Exploratory (not pre-registered)
 
 Each figure below either reads the pinned output or reuses the pinned script's own interval and verdict functions (`tango_interval`, `verdict`) on its counts. None replaces a confirmatory number.
@@ -372,7 +378,7 @@ The remaining caveats:
 - **One marginal verdict.** GPT-5.6 Sol's H4b is within four episodes of δ, in a stochastic arm (note 1, section 5).
 - **The student's prompts** at O1-L, O1-N and O1-R are out of distribution, as declared. Its refuted P-R leaves its ladder without a causal reading.
 - **The probe measures reading when asked, not attention.** It is uninformative for Claude Sonnet 4.6. Claude Sonnet 5.5's valid replies are a 40% subset selected on its alarm, and the student's -V replies are a format artefact. The per-level tabulation used the frozen parser, but the tabulation itself is not in the pinned script.
-- **The labeller of record is GPT-5.6 Sol's own model**, on a different serving path. The second-labeller check found no material overlap. The single disagreement is pending adjudication.
+- **The labeller of record is GPT-5.6 Sol's own model**, on a different serving path. The second-labeller check found no material overlap. The single disagreement was adjudicated as an unclear instruction (packet rounding), and the scorer's value stands (§4).
 - **Claude Sonnet 4.6's missing episodes** change no verdict, even in the half-pair worst case. They are probably not missing at random (section 5).
 - **Test-retest** exists only from admission (Phase 0), and Phase 0's figures do not describe the wave. No in-wave retest was run (section 3).
 - **Human steps and blinding are self-attested.** The agent committed every step the design assigned to Mahmood, and no access log covers S3 reads (section 6).
