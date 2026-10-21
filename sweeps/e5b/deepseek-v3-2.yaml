@@ -1,0 +1,48 @@
+# E5b wave (SPEC-v3 amendment of 2026-10-21): dexi/deepseek-v3-2 in E5's cells, levels and families.
+# Template t1, N = 120: 2040 episodes. Written by scripts/e5b.py.
+name: e5b-deepseek-v3-2
+reps: 1
+validators: [none]
+latency_s: 2.0
+shuffle_seed: 0
+cells:
+- scenarios: ['scenarios/e5/t1/families/c0??_loud.yaml', 'scenarios/e5/t1/families/c1[0-1]?_loud.yaml']
+  planners:
+  - arm: dexi/deepseek-v3-2
+    options: {driver: dexi, prompt: dexi-v2}
+  observations: [O0, O1, O1L, O1N, O1R]
+- scenarios: ['scenarios/e5/t1/families/c0??_loud.yaml', 'scenarios/e5/t1/families/c1[0-1]?_loud.yaml']
+  planners:
+  - arm: dexi/deepseek-v3-2
+    options: {driver: dexi, prompt: dexi-9b2e7a7}
+  observations: [O0, O1]
+- scenarios: ['scenarios/e5/t1/families/c0??_brief.yaml', 'scenarios/e5/t1/families/c1[0-1]?_brief.yaml']
+  planners:
+  - arm: dexi/deepseek-v3-2
+    options: {driver: dexi, prompt: dexi-v2}
+  observations: [O0, O1, O1L, O1N, O1R]
+- scenarios: ['scenarios/e5/t1/families/c0??_brief.yaml', 'scenarios/e5/t1/families/c1[0-1]?_brief.yaml']
+  planners:
+  - arm: dexi/deepseek-v3-2
+    options: {driver: dexi, prompt: dexi-9b2e7a7}
+  observations: [O1]
+- scenarios: ['scenarios/e5/t1/families/c0[0-5]?_healthy.yaml']
+  planners:
+  - arm: dexi/deepseek-v3-2
+    options: {driver: dexi, prompt: dexi-v2}
+  observations: [O0, O1, O1L, O1N, O1R]
+- scenarios: ['scenarios/e5/t1/families/c0[0-5]?_healthy.yaml']
+  planners:
+  - arm: dexi/deepseek-v3-2
+    options: {driver: dexi, prompt: dexi-9b2e7a7}
+  observations: [O1]
+- scenarios: ['scenarios/e5/t1/families/c0[0-2]?_flowscale.yaml']
+  planners:
+  - arm: dexi/deepseek-v3-2
+    options: {driver: dexi, prompt: dexi-v2}
+  observations: [O1, O1N]
+- scenarios: ['scenarios/e5/t1/families/c0[0-2]?_misaligned.yaml']
+  planners:
+  - arm: dexi/deepseek-v3-2
+    options: {driver: dexi, prompt: dexi-v2}
+  observations: [O1, O1N]

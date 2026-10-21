@@ -1,0 +1,28 @@
+# E5b canary (SPEC-v3 amendment of 2026-10-21), template t1: dexi/deepseek-v3-2 on k000-k005
+# at the 7 loud and 6 brief levels. 78 episodes. Written by scripts/e5b.py.
+name: e5-canary-t1-deepseek-v3-2
+reps: 1
+validators: [none]
+latency_s: 2.0
+shuffle_seed: 0
+cells:
+- scenarios: ['scenarios/e5/t1/canary/k00[0-5]_loud.yaml']
+  planners:
+  - arm: dexi/deepseek-v3-2
+    options: {driver: dexi, prompt: dexi-v2}
+  observations: [O0, O1, O1L, O1N, O1R]
+- scenarios: ['scenarios/e5/t1/canary/k00[0-5]_loud.yaml']
+  planners:
+  - arm: dexi/deepseek-v3-2
+    options: {driver: dexi, prompt: dexi-9b2e7a7}
+  observations: [O0, O1]
+- scenarios: ['scenarios/e5/t1/canary/k00[0-5]_brief.yaml']
+  planners:
+  - arm: dexi/deepseek-v3-2
+    options: {driver: dexi, prompt: dexi-v2}
+  observations: [O0, O1, O1L, O1N, O1R]
+- scenarios: ['scenarios/e5/t1/canary/k00[0-5]_brief.yaml']
+  planners:
+  - arm: dexi/deepseek-v3-2
+    options: {driver: dexi, prompt: dexi-9b2e7a7}
+  observations: [O1]
