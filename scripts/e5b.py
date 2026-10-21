@@ -43,7 +43,8 @@ alone. An arm is not run if check 1 or 4 fails; otherwise it is descriptive what
 (9.3: E5 was unblinded before E5b), and those two are reported with its results.
 
 `analyse` is E5b's one pinned run: the frozen `lip stats --design v3` over E5's six manifests and the
-three E5b arms'. It refuses to run until `docs/prereg/e5b-unblind.md` is committed, and then checks that
+three E5b arms'. It refuses to run until `docs/prereg/e5b-unblind.md` is on `origin/main` (fetch first)
+and in this checkout, and then checks that
 E5's arms, gates and analysis block equal E5's pinned output (`docs/results/freeze-v3-analysis.json`).
 """
 
@@ -300,9 +301,14 @@ def analyse(runs: str, out: Path, arms: tuple[str, ...] = tuple(ARMS), root: Pat
     """E5b's pinned run, once `UNBLIND` is committed: the frozen `lip stats --design v3` over E5's
     manifests and `arms`', written to `<out>.json` and `<out>.md`. 3 while blinded; 1 if an E5 arm,
     the gates or the analysis block differ from E5's pinned output."""
-    committed = subprocess.run(["git", "cat-file", "-e", f"HEAD:{UNBLIND}"], cwd=root, capture_output=True)
-    if committed.returncode != 0:
-        print(f"E5b is blinded until {UNBLIND} is committed", file=sys.stderr)
+
+    def absent(ref: str) -> bool:
+        found = subprocess.run(["git", "cat-file", "-e", f"{ref}:{UNBLIND}"], cwd=root, capture_output=True)
+        return found.returncode != 0
+
+    missing = [ref for ref in ("HEAD", "origin/main") if absent(ref)]
+    if missing:
+        print(f"E5b is blinded until {UNBLIND} is on origin/main and in this checkout", file=sys.stderr)
         return 3
     manifests = f"{runs.rstrip('/').rsplit('/', 1)[0]}/manifests"
     names = [f"e5-{s}" for s in E5_SWEEPS] + [f"e5b-{arm}" for arm in arms]

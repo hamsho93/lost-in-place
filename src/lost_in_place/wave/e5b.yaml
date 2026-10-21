@@ -47,8 +47,9 @@ arms:
     p90_usd: 5.4
 
   # The three LLM arms run side by side once the gate passes, 21 slots each (63 of the 64 episodes the
-  # queue's 128 vCPUs hold). Their listed order is the month-fit order: if the stop can't hold all
-  # three, the last ones listed are dropped first. An arm found not run at admission is removed from
+  # queue's 128 vCPUs hold). Their listed order is the month-fit order: each is decided once, at its
+  # start, in this order, so an arm that doesn't fit is dropped and a cheaper later one may still
+  # run. An arm found not run at admission is removed from
   # this file with its probe arm, so that nothing waits on it or reserves its cost. Each is a month-fit
   # arm, so its canary gates it (A-3 checks 1 and 4: no `canary_usd_per_episode` here, no
   # submission) and S-8 pauses it at 1.5 x its canary's cost per
