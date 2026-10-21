@@ -6,7 +6,7 @@ One CDK stack, `LostInPlaceSim`, in us-east-1. [README.md](README.md) covers wha
 
 The account also runs unrelated production stacks. Anything account-wide affects them too.
 
-- Only ever deploy `LostInPlaceSim`. Never deploy, modify or delete other stacks, and never re-run `cdk bootstrap` (it's already at version 31).
+- Only ever deploy `LostInPlaceSim` (and `LipE5bProfiles`, below). Never deploy, modify or delete other stacks, and never re-run `cdk bootstrap` (it's already at version 31).
 - Deploy only from `main`, after the change is merged, and run `cdk diff` against the live stack first. Say in the PR exactly what the diff changes.
 - Cost controls must stay scoped to this project. The budget filters on the `project=lost-in-place` tag (`Tags.of(self)` tags everything). The account-wide billing alarm (`accountAlarmUsd`) is off by default; leave it that way.
 - The GitHub OIDC provider (`token.actions.githubusercontent.com`) belongs to the account and is shared with other projects. Import it (`from_open_id_connect_provider_arn`); never create or delete it here.
@@ -18,7 +18,7 @@ The account also runs unrelated production stacks. Anything account-wide affects
 - `maxVcpus` caps concurrent compute, and the compute environment scales to 0 when idle. Keep `minv_cpus=0`.
 
 - Planner model calls (Bedrock) count against the budget only through the tagged application inference profiles this stack creates. Never grant `bedrock:InvokeModel` on a system inference profile (`us.*`, `global.*`) or on foundation models without the `bedrock:InferenceProfileArn` condition; that spend would be untagged and unbudgeted.
-- The one exception to "this stack creates" is a model whose registry `region` isn't the stack's (Sonnet 5.5 and Haiku 5.5, us-east-2). Its tagged profile is created once by CLI in that region, and its ARN is passed as `-c useast2Profiles` (README, "Models in another region"). Don't add a stack in us-east-2 for it.
+- The one exception to "this stack creates" is a model whose registry `region` isn't the stack's (Sonnet 5.5 and Haiku 5.5, us-east-2). Its tagged profile is created once by CLI in that region, and its ARN is passed as `-c useast2Profiles` (README, "Models in another region"). Don't add a stack in us-east-2 for it. The one exception is `LipE5bProfiles` (`e5b-profiles.yaml`), the E5b models' profiles, which Mahmood approved at the E5b sign-off (SPEC-v3 amendment of 2026-10-21); it holds only those three tagged profiles.
 - Models from other providers (e.g. OpenAI) aren't covered by the AWS budget at all. Give them a spending cap on the provider's side before running them at scale.
 
 ## Details that have bitten before

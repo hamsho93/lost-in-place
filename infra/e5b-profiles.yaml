@@ -1,0 +1,52 @@
+AWSTemplateFormatVersion: "2010-09-09"
+# Stack LipE5bProfiles, in us-east-2 (SPEC-v3 amendment of 2026-10-21, sign-off choice 13): the tagged
+# application inference profiles of the three E5b models, so their planner spend carries the project tag
+# and is covered by the budget, BudgetStop and the meter. LostInPlaceSim (us-east-1) can't create
+# resources in us-east-2; their ARNs are passed to it as -c useast2Profiles (README, "The E5b deploys").
+# Raw CloudFormation with no assets, so no bootstrap in us-east-2. Long-form intrinsics keep the file
+# plain YAML (tests/test_e5b_profiles.py). Keep it until every E5b arm, probe and retry has settled.
+Description: lost-in-place E5b planner profiles (Llama 3.3 70B, DeepSeek V3.2, Mistral Large 3)
+Resources:
+  Llama3370b:
+    Type: AWS::Bedrock::ApplicationInferenceProfile
+    Properties:
+      InferenceProfileName: LipE5b-meta-llama3-3-70b-instruct-v1-0
+      Description: "lost-in-place planner calls to us.meta.llama3-3-70b-instruct-v1:0 (E5b)"
+      ModelSource:
+        CopyFrom:
+          Fn::Sub: "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/us.meta.llama3-3-70b-instruct-v1:0"
+      Tags:
+        - {Key: project, Value: lost-in-place}
+        - {Key: purpose, Value: e5b}
+  DeepseekV32:
+    Type: AWS::Bedrock::ApplicationInferenceProfile
+    Properties:
+      InferenceProfileName: LipE5b-deepseek-v3-2
+      Description: lost-in-place planner calls to deepseek.v3.2 (E5b)
+      ModelSource:
+        CopyFrom:
+          Fn::Sub: "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/deepseek.v3.2"
+      Tags:
+        - {Key: project, Value: lost-in-place}
+        - {Key: purpose, Value: e5b}
+  MistralLarge3:
+    Type: AWS::Bedrock::ApplicationInferenceProfile
+    Properties:
+      InferenceProfileName: LipE5b-mistral-mistral-large-3-675b-instruct
+      Description: lost-in-place planner calls to mistral.mistral-large-3-675b-instruct (E5b)
+      ModelSource:
+        CopyFrom:
+          Fn::Sub: "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/mistral.mistral-large-3-675b-instruct"
+      Tags:
+        - {Key: project, Value: lost-in-place}
+        - {Key: purpose, Value: e5b}
+Outputs:
+  Llama3370bProfileArn:
+    Value:
+      Fn::GetAtt: [Llama3370b, InferenceProfileArn]
+  DeepseekV32ProfileArn:
+    Value:
+      Fn::GetAtt: [DeepseekV32, InferenceProfileArn]
+  MistralLarge3ProfileArn:
+    Value:
+      Fn::GetAtt: [MistralLarge3, InferenceProfileArn]
