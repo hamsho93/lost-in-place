@@ -11,7 +11,7 @@ Resources:
     Type: AWS::Bedrock::ApplicationInferenceProfile
     Properties:
       InferenceProfileName: LipE5b-meta-llama3-3-70b-instruct-v1-0
-      Description: "lost-in-place planner calls to us.meta.llama3-3-70b-instruct-v1:0 (E5b)"
+      Description: "lost-in-place planner calls to us.meta.llama3-3-70b-instruct-v1:0 for E5b"
       ModelSource:
         CopyFrom:
           Fn::Sub: "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/us.meta.llama3-3-70b-instruct-v1:0"
@@ -22,7 +22,7 @@ Resources:
     Type: AWS::Bedrock::ApplicationInferenceProfile
     Properties:
       InferenceProfileName: LipE5b-deepseek-v3-2
-      Description: lost-in-place planner calls to deepseek.v3.2 (E5b)
+      Description: lost-in-place planner calls to deepseek.v3.2 for E5b
       ModelSource:
         CopyFrom:
           Fn::Sub: "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/deepseek.v3.2"
@@ -33,7 +33,7 @@ Resources:
     Type: AWS::Bedrock::ApplicationInferenceProfile
     Properties:
       InferenceProfileName: LipE5b-mistral-mistral-large-3-675b-instruct
-      Description: lost-in-place planner calls to mistral.mistral-large-3-675b-instruct (E5b)
+      Description: lost-in-place planner calls to mistral.mistral-large-3-675b-instruct for E5b
       ModelSource:
         CopyFrom:
           Fn::Sub: "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/mistral.mistral-large-3-675b-instruct"
