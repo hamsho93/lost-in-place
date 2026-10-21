@@ -1,0 +1,167 @@
+# The E5b wave (SPEC-v3 amendment of 2026-10-21): Llama 3.3 70B, DeepSeek V3.2 and Mistral Large 3
+# on the frozen E5 protocol, each descriptive (design section 9.3, "Later models"), as
+# `scripts/e5_submit.py --config src/lost_in_place/wave/e5b.yaml` runs it. The rules, thresholds and
+# submitter are E5's; this file sets only the arms, their costs and the months.
+#
+# The sweeps are written by `scripts/e5b.py sweeps` with E5's builders. Each LLM arm flies the entry its
+# smoke call accepted (design 9.2's order), and `model`, `pinned_model` and the sweep name that entry;
+# `scripts/e5b.py check`, the pre-flight, fails if they disagree. Dollar figures are the selection
+# note's: E5's token volumes (about 10k planner calls and 15M input tokens per arm) at each model's
+# us-east-2 list price, plus about $11 of job time per arm, with P90 at +30% for tokenizer differences.
+name: e5b
+n_families: 120
+ledger_prefix: manifests/e5b/ledger
+queries_log: manifests/e5b/queries.log
+poll_s: 60
+topup_min: 5
+array_max: 10
+max_in_flight: 64
+fixed_remaining_usd: 5.0  # retries and other tagged AWS spend
+
+months:
+  # No month has an approved stop yet, so nothing is submitted (S-9). Which month funds the wave and
+  # its stop are Mahmood's to set when he signs off the amendment; the launch commit writes them here.
+  "2026-10": {}
+  "2026-11": {}
+
+preflight_commands:
+  - [uv, run, python, scripts/e5b.py, check]
+# S-1, as in E5: exits 0 only when every scripted gate of section 6 passes on the gate cells, here the
+# scripted control flown again on the image E5b runs.
+gate_command: [uv, run, lip, stats, --design, v3, --gates, "s3://{bucket}/runs", --manifest, "{manifest:scripted-gate}"]
+
+arms:
+  # Section 6's gated cells (loud O1 and O0, brief, healthy; both cadences), on all N families, before
+  # any LLM episode. E5's scripted remainder (timed loud, flowscale) isn't flown again.
+  - name: scripted-gate
+    sweep: sweeps/e5b/scripted.yaml
+    select: {scenario_regex: '_(loud|brief|healthy)$'}
+    cap: 64
+    ramp_step: 10
+    cap_usd: 10
+    estimate_usd: 4.7
+    p90_usd: 5.4
+
+  # The three LLM arms run side by side once the gate passes, 21 slots each (63 of the 64 episodes the
+  # queue's 128 vCPUs hold). Each is a month-fit arm, so its canary gates it (A-3 checks 1 and 4: no
+  # `canary_usd_per_episode` here, no submission) and S-8 pauses it at 1.5 x its canary's cost per
+  # episode. Each is called through its tagged profile in us-east-2, where its tokens are metered (the
+  # region comes from its models.yaml entry). At about one call a minute per slot, an arm uses under
+  # 0.2M TPM: Llama's us. profile lists 800 RPM and 600k TPM there, DeepSeek's and Mistral's in-region
+  # quotas 10k RPM and 100M TPM.
+  - name: llama-3-3-70b
+    sweep: sweeps/e5b/llama-3-3-70b.yaml
+    cap: 21
+    ramp_step: 7
+    needs_gate: true
+    month_fit: true
+    start_after: [{arm: scripted-gate}]
+    bedrock_model: us.meta.llama3-3-70b-instruct-v1:0
+    # Regional (us.) list price, as observed for us-east-2.
+    price: {input_per_mtok: 0.72, output_per_mtok: 0.72}
+    cap_usd: 35
+    estimate_usd: 22
+    p90_usd: 29
+    probe_usd: 1.6
+    model: llama-3-3-70b
+    pinned_model:
+      provider: bedrock
+      model_id: us.meta.llama3-3-70b-instruct-v1:0
+      region: us-east-2
+      max_tokens: 4096
+      temperature: 0
+      tool_choice: auto
+      additional_request_fields: null
+
+  - name: deepseek-v3-2
+    sweep: sweeps/e5b/deepseek-v3-2.yaml
+    cap: 21
+    ramp_step: 7
+    needs_gate: true
+    month_fit: true
+    start_after: [{arm: scripted-gate}]
+    bedrock_model: deepseek.v3.2
+    # In-region (us-east-2) list price.
+    price: {input_per_mtok: 0.62, output_per_mtok: 1.85}
+    cap_usd: 35
+    estimate_usd: 23
+    p90_usd: 30
+    probe_usd: 1.4
+    model: deepseek-v3-2
+    pinned_model:
+      provider: bedrock
+      model_id: deepseek.v3.2
+      region: us-east-2
+      max_tokens: 4096
+      temperature: 0
+      tool_choice: any
+      additional_request_fields: null
+
+  - name: mistral-large-3
+    sweep: sweeps/e5b/mistral-large-3.yaml
+    cap: 21
+    ramp_step: 7
+    needs_gate: true
+    month_fit: true
+    start_after: [{arm: scripted-gate}]
+    bedrock_model: mistral.mistral-large-3-675b-instruct
+    # In-region (us-east-2) list price.
+    price: {input_per_mtok: 0.50, output_per_mtok: 1.50}
+    cap_usd: 35
+    estimate_usd: 19
+    p90_usd: 25
+    probe_usd: 1.1
+    model: mistral-large-3
+    pinned_model:
+      provider: bedrock
+      model_id: mistral.mistral-large-3-675b-instruct
+      region: us-east-2
+      max_tokens: 4096
+      temperature: 0
+      tool_choice: any
+      additional_request_fields: null
+
+  # The in-wave comprehension probes (`scripts/e5_probe.py`, 840 calls per arm), each counted in its
+  # arm's projection.
+  - name: probe-llama-3-3-70b
+    kind: external
+    counted_in: llama-3-3-70b
+    bedrock_model: us.meta.llama3-3-70b-instruct-v1:0
+    price: {input_per_mtok: 0.72, output_per_mtok: 0.72}
+    model: llama-3-3-70b
+    estimate_usd: 1.6
+    p90_usd: 2.1
+
+  - name: probe-deepseek-v3-2
+    kind: external
+    counted_in: deepseek-v3-2
+    bedrock_model: deepseek.v3.2
+    price: {input_per_mtok: 0.62, output_per_mtok: 1.85}
+    model: deepseek-v3-2
+    estimate_usd: 1.4
+    p90_usd: 1.8
+
+  - name: probe-mistral-large-3
+    kind: external
+    counted_in: mistral-large-3
+    bedrock_model: mistral.mistral-large-3-675b-instruct
+    price: {input_per_mtok: 0.50, output_per_mtok: 1.50}
+    model: mistral-large-3
+    estimate_usd: 1.1
+    p90_usd: 1.4
+
+  # The blind labeller (gpt-5.6-sol-high, as for E5) over the E5b arms' 10% samples, outside AWS; its
+  # spend is recorded when its window closes.
+  - name: labeller
+    kind: external
+    cap_usd: 20
+    estimate_usd: 15
+    p90_usd: 18
+
+  # The second labeller (gemini-4-argon-high) double-codes a matched draw, outside AWS. Optional for
+  # E5b (no arm shares a family with either labeller); dropped from this file if Mahmood declines it.
+  - name: labeller-2
+    kind: external
+    cap_usd: 14
+    estimate_usd: 10.2
+    p90_usd: 11.8
