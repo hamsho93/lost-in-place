@@ -1,0 +1,17 @@
+# The E5b image (SPEC-v3 amendment of 2026-10-21): the frozen E5 image, by digest, with only the model
+# registry replaced so the E5b entries resolve. PX4, Gazebo, the worlds, the scenarios and the runner are
+# the frozen image's bytes; the registry's first part is byte-identical to the one frozen in it
+# (`scripts/e5b.py check`). The runner is installed editable from /opt/lost-in-place/src, so the copied
+# file is the one it reads.
+#
+# Built and pushed by `.github/workflows/image-e5b.yml` on main. The repository URI comes from the
+# ECR_IMAGE_REPOSITORY variable, so the account ID stays out of git:
+#   docker build -f docker/Dockerfile.e5b --build-arg BASE_REPOSITORY=<repository> \
+#     --build-arg GIT_SHA=$(git rev-parse HEAD) -t lost-in-place:e5b .
+ARG BASE_REPOSITORY
+FROM ${BASE_REPOSITORY}@sha256:5470354eeb560ff84727ba89e69843b9d696dceac8075ebbea50e989bbde5f86
+
+COPY src/lost_in_place/llm/models.yaml /opt/lost-in-place/src/lost_in_place/llm/models.yaml
+
+ARG GIT_SHA=unknown
+ENV LIP_GIT_SHA=$GIT_SHA
