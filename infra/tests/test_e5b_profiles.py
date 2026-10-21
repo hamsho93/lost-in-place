@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 from typing import Any
 
@@ -54,3 +55,10 @@ def test_every_profile_carries_the_budget_tag(profiles: dict[str, dict[str, Any]
         tags = {t["Key"]: t["Value"] for t in props["Tags"]}
         assert tags[PROJECT_TAG_KEY] == PROJECT_TAG_VALUE
         assert props["InferenceProfileName"].startswith("LipE5b-")
+
+
+def test_names_and_descriptions_pass_bedrocks_patterns(profiles: dict[str, dict[str, Any]]) -> None:
+    # CloudFormation's early validation rejects the whole change set otherwise.
+    for props in profiles.values():
+        assert re.fullmatch(r"([0-9a-zA-Z:.][ _-]?)+", props["Description"])
+        assert re.fullmatch(r"([0-9a-zA-Z][ _-]?)+", props["InferenceProfileName"])
