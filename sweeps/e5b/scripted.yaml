@@ -1,0 +1,51 @@
+# E5b wave (SPEC-v3 amendment of 2026-10-21): E5's scripted DEXI-cadence control, of which the
+# wave flies the S-1 gate cells. Template t1, N = 120: 1440 episodes. Written by
+# scripts/e5b.py.
+name: e5b-scripted
+reps: 1
+validators: [none]
+latency_s: 2.0
+shuffle_seed: 0
+cells:
+- scenarios: ['scenarios/e5/t1/families/c0??_loud.yaml', 'scenarios/e5/t1/families/c1[0-1]?_loud.yaml']
+  planners:
+  - arm: dexi/rule-2m
+    options: {driver: dexi, prompt: dexi-v2}
+  - arm: dexi/rule-leg
+    options: {driver: dexi, prompt: dexi-v2}
+  observations: [O1]
+- scenarios: ['scenarios/e5/t1/families/c0??_loud.yaml', 'scenarios/e5/t1/families/c1[0-1]?_loud.yaml']
+  planners:
+  - arm: dexi/rule-2m
+    options: {driver: dexi, prompt: dexi-v2}
+  - arm: dexi/rule-leg
+    options: {driver: dexi, prompt: dexi-v2}
+  observations: [O0]
+- scenarios: ['scenarios/e5/t1/timed/c0??_loud_timed.yaml', 'scenarios/e5/t1/timed/c1[0-1]?_loud_timed.yaml']
+  planners:
+  - arm: dexi/rule-2m
+    options: {driver: dexi, prompt: dexi-v2}
+  - arm: dexi/rule-leg
+    options: {driver: dexi, prompt: dexi-v2}
+  observations: [O1]
+- scenarios: ['scenarios/e5/t1/families/c0??_brief.yaml', 'scenarios/e5/t1/families/c1[0-1]?_brief.yaml']
+  planners:
+  - arm: dexi/rule-2m
+    options: {driver: dexi, prompt: dexi-v2}
+  - arm: dexi/rule-leg
+    options: {driver: dexi, prompt: dexi-v2}
+  observations: [O1]
+- scenarios: ['scenarios/e5/t1/families/c0??_healthy.yaml', 'scenarios/e5/t1/families/c1[0-1]?_healthy.yaml']
+  planners:
+  - arm: dexi/rule-2m
+    options: {driver: dexi, prompt: dexi-v2}
+  - arm: dexi/rule-leg
+    options: {driver: dexi, prompt: dexi-v2}
+  observations: [O1]
+- scenarios: ['scenarios/e5/t1/families/c0??_flowscale.yaml', 'scenarios/e5/t1/families/c1[0-1]?_flowscale.yaml']
+  planners:
+  - arm: dexi/rule-2m
+    options: {driver: dexi, prompt: dexi-v2}
+  - arm: dexi/rule-leg
+    options: {driver: dexi, prompt: dexi-v2}
+  observations: [O1]

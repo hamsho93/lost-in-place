@@ -156,6 +156,25 @@ aws bedrock create-inference-profile --region us-east-2 \
 
 All three exist (Oct 16): Sonnet 5.5 `adjhqtlbtyxw`, Haiku 5.5 `ay8horiiyywr`, GPT-5.6 Sol `1v6bj762kok7`.
 
+**The E5b models** (SPEC-v3 amendment of 2026-10-21) are made differently, by Mahmood's choice at sign-off: a companion CloudFormation stack, `LipE5bProfiles` in us-east-2, from [`e5b-profiles.yaml`](e5b-profiles.yaml). Llama 3.3 70B copies its `us.` system profile. DeepSeek V3.2 and Mistral Large 3 are served in us-east-2 only, so their registry `model_id` is the foundation model's own id, with no `us.` prefix, and the profile copies the foundation model. The stack grants such an id's own foundation model (`foundation_model_id` strips a scope prefix only when there is one).
+
+The template is raw CloudFormation with no assets, so us-east-2 needs no bootstrap. `drone` can't create profiles, so it deploys through the CDK deploy role, passing the CDK bootstrap's CloudFormation execution role (IAM is global), as the frontier smoke's profiles were:
+
+```bash
+acc=$(aws sts get-caller-identity --query Account --output text)
+creds=$(aws sts assume-role --role-arn "arn:aws:iam::$acc:role/cdk-hnb659fds-deploy-role-$acc-us-east-1" \
+  --role-session-name e5b-profiles --query Credentials --output json)
+AWS_ACCESS_KEY_ID=$(jq -r .AccessKeyId <<<"$creds") AWS_SECRET_ACCESS_KEY=$(jq -r .SecretAccessKey <<<"$creds") \
+AWS_SESSION_TOKEN=$(jq -r .SessionToken <<<"$creds") \
+aws cloudformation deploy --region us-east-2 --stack-name LipE5bProfiles --template-file e5b-profiles.yaml \
+  --role-arn "arn:aws:iam::$acc:role/cdk-hnb659fds-cfn-exec-role-$acc-us-east-1" \
+  --tags project=lost-in-place purpose=e5b 2>&1 | sed "s/$acc/<account>/g"
+e5b_arn() { aws cloudformation describe-stacks --region us-east-2 --stack-name LipE5bProfiles \
+  --query "Stacks[0].Outputs[?OutputKey=='$1ProfileArn'].OutputValue" --output text; }
+```
+
+Their `useast2Profiles` keys are the registry model ids, `us.meta.llama3-3-70b-instruct-v1:0`, `deepseek.v3.2` and `mistral.mistral-large-3-675b-instruct`, added to the existing entries (a deploy without an entry drops its grants). An in-region profile's `get-inference-profile` lists one model, in us-east-2.
+
 **Read them back** wherever the ARNs are needed. This uses `bedrock:ListInferenceProfiles`, `GetInferenceProfile` and `ListTagsForResource` in us-east-2:
 
 ```bash
@@ -392,6 +411,31 @@ The change set should show one `Modify` of `SmokeJobDefinition` with `Replacemen
 - **The smoke stack** goes back the same way, with `smoke.json` as the template.
 - **Either way,** CloudFormation registers a new job definition revision; old revisions can't be reactivated.
 - **Never delete** the repository, the bucket or the `freeze-` tags.
+
+## The E5b deploys
+
+Two deploys of `LostInPlaceSim`, each from `main` after the commit it needs has merged, each with `cdk diff` first (SPEC-v3 amendment of 2026-10-21). The stack reads `models.yaml` at synth, so a deploy from a `main` without the E5b entries drops their grants; there is none after the first E5b deploy until the wave has settled.
+
+**The flags.** Pass every one, every time. `cdk.json` defaults to `budgetUsd: 450` and `imageTag: latest`, and step 5 above hard-codes 450: a deploy with those in October sets the budget under the month's actual spend, so the budget action attaches `BudgetStop` at once.
+
+```bash
+budget=1050  # October, raised at the E5b sign-off; 450 from Nov 1 (SPEC-v3 amendment of 2026-10-17)
+east2=$(printf '{"us.anthropic.claude-sonnet-5-5":"%s","us.anthropic.claude-haiku-5-5":"%s","us.openai.gpt-5.6-sol":"%s","us.meta.llama3-3-70b-instruct-v1:0":"%s","deepseek.v3.2":"%s","mistral.mistral-large-3-675b-instruct":"%s"}' \
+  "$(east2_arn anthropic-claude-sonnet-5-5)" "$(east2_arn anthropic-claude-haiku-5-5)" "$(east2_arn openai-gpt-5-6-sol)" \
+  "$(e5b_arn Llama3370b)" "$(e5b_arn DeepseekV32)" "$(e5b_arn MistralLarge3)")
+flags=(-c alertEmail="$email" -c budgetUsd=$budget -c maxVcpus=128 -c imageTag="$digest" -c useast2Profiles="$east2")
+```
+
+`$email` comes from step 5 above; `east2_arn` and `e5b_arn` from [Models in another region](#models-in-another-region). `east2_arn` needs `bedrock:ListInferenceProfiles` in us-east-2, which `drone` lacks; it can instead read the three older ARNs from the live `BedrockProfiles` output. Check that `$east2` has six ARNs, none empty.
+
+1. **Profiles.** Deploy `LipE5bProfiles` ([Models in another region](#models-in-another-region)). Read all six back.
+2. **First deploy: the grants and October's budget, on the frozen image.** After the amendment merges: `digest=sha256:5470354eeb560ff84727ba89e69843b9d696dceac8075ebbea50e989bbde5f86`, then run only the `cdk diff` line of step 5 and the deploy line of step 6, with these `flags` (step 5's own `flags=` line sets the budget to 450). Expected diff: the three profiles' and foundation models' statements on both roles, the `LIP_BEDROCK_PROFILES` value in both job definitions (a new revision on the same image), the `BedrockProfiles` output, and the budget's limit (900 to 1,050). Nothing else.
+3. **Smoke calls,** as `OperatorRole` from a `main` checkout with `LIP_BEDROCK_PROFILES="$(out BedrockProfiles)"`: one `lip propose <entry> --planner dexi` per entry in the arm's fallback order, under $5 in all. Read only what SPEC-v3's E5b "Smoke calls" lists: accepted or rejected, a rejection's error class, whether the tool call parsed, whether a `reasoningContent` block came back, and the token counts. The next day, `scripts/e5_meter.py --config src/lost_in_place/wave/e5b.yaml now` shows their tokens under the three new profiles, and Cost Explorer (tag `project=lost-in-place`, us-east-2) shows the charge.
+4. **The E5b image,** from `main`: Actions → image-e5b → Run workflow on `main`. It prints the digest of `freeze-v3-e5b-<sha12>`.
+5. **Second deploy: the E5b image.** The same flags with `digest=<the E5b digest>`. Expected diff: `Image` on `Episode` and `SweepEpisode`, and nothing else.
+6. **Verify** as in step 7 above: the one active `SweepJobDefinition` revision runs the E5b digest, `BedrockProfiles` lists seven profiles, and the action is `STANDBY`. Then, before any canary, `uv run python scripts/e5b.py check --image-digest <that digest>` passes once the launch commit records it.
+
+**Rollback** is step 6 again with the previous digest, or with `useast2Profiles` minus the E5b entries to remove their grants.
 
 ## Settings
 

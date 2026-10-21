@@ -1,0 +1,47 @@
+name: image-e5b
+
+# The E5b image (SPEC-v3 amendment of 2026-10-21): the frozen E5 image with only the model registry
+# replaced (docker/Dockerfile.e5b). Run by hand on main; the push role trusts main only.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      PUSH_ROLE: ${{ vars.AWS_IMAGE_PUSH_ROLE }}
+      REPOSITORY: ${{ vars.ECR_IMAGE_REPOSITORY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.PUSH_ROLE }}
+          aws-region: us-east-1
+      - uses: aws-actions/amazon-ecr-login@v2
+      - name: Build on the frozen digest
+        run: |
+          docker build -f docker/Dockerfile.e5b --build-arg BASE_REPOSITORY="$REPOSITORY" \
+            --build-arg GIT_SHA="$GITHUB_SHA" -t lost-in-place:e5b .
+      - run: docker run --rm lost-in-place:e5b doctor
+      - name: The image reads this registry and resolves every E5b entry
+        run: |
+          want=$(sha256sum src/lost_in_place/llm/models.yaml | cut -d' ' -f1)
+          got=$(docker run --rm --entrypoint sha256sum lost-in-place:e5b \
+            /opt/lost-in-place/src/lost_in_place/llm/models.yaml | cut -d' ' -f1)
+          test "$want" = "$got"
+          docker run --rm --entrypoint python lost-in-place:e5b -c \
+            "from lost_in_place.llm.registry import get_model
+          for m in ('llama-3-3-70b', 'deepseek-v3-2', 'deepseek-v3-2-fb1', 'mistral-large-3', 'mistral-large-3-fb1'):
+              print(m, get_model(m).model_id)"
+      - name: Push, tagged freeze-* so the ECR lifecycle keeps it
+        run: |
+          tag="$REPOSITORY:freeze-v3-e5b-${GITHUB_SHA::12}"
+          docker tag lost-in-place:e5b "$tag"
+          docker push "$tag"
+          docker inspect --format '{{index .RepoDigests 0}}' "$tag" | sed 's/.*@//'
