@@ -3,6 +3,8 @@ changed, E5's freeze record still describes E5, the wave config pins what the sw
 admission rule runs an arm only on an accepted smoke call and an affordable canary."""
 
 import importlib.util
+import json
+import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -14,6 +16,7 @@ import yaml
 from lost_in_place.llm.registry import load_models
 from lost_in_place.wave import config
 from lost_in_place.wave.aws import mask
+from lost_in_place.wave.store import LocalStore
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "e5b.py"
@@ -80,6 +83,56 @@ def test_e5s_record_still_describes_e5(e5b: ModuleType) -> None:
     assert problems == []
     assert {f"Entry flown, `{arm}`" for arm in e5b.ARMS} <= set(values)
     assert {f"Wire digest, `{e}`" for e in e5b.ENTRIES} <= set(values)
+
+
+def test_the_e5b_record_is_read_from_its_section_only(e5b: ModuleType) -> None:
+    text = "\n".join(
+        [
+            "| Model registry with the E5b entries | `aaa` |",
+            e5b.SECTION,
+            "| E5b artifact | Hash |",
+            "|---|---|",
+            "| Model registry with the E5b entries | `bbb` |",
+            "| E5b image digest | recorded at launch |",
+            "## Next",
+            "| Wave config (`x`) | `ccc` |",
+        ]
+    )
+    assert e5b.recorded_e5b(text) == {"Model registry with the E5b entries": "bbb"}
+    assert e5b.recorded_e5b("no section") == {}
+
+
+def test_every_e5b_record_row_is_one_check_prints(e5b: ModuleType) -> None:
+    recorded = e5b.recorded_e5b((ROOT / "SPEC-v3.md").read_text())
+    _, values = e5b.check()
+    assert "Model registry with the E5b entries" in recorded
+    assert {row: values.get(row) for row in recorded} == recorded
+
+
+def test_the_image_recipe_must_build_on_one_digest(e5b: ModuleType) -> None:
+    digest = "sha256:" + "a" * 64
+    assert e5b.dockerfile_bases((ROOT / "docker/Dockerfile.e5b").read_text()) == [
+        "sha256:5470354eeb560ff84727ba89e69843b9d696dceac8075ebbea50e989bbde5f86"
+    ]
+    assert e5b.dockerfile_bases(f"FROM ${{R}}@{digest}\nFROM ubuntu:24.04 AS b\n") == [digest, ""]
+
+
+def test_analyse_refuses_while_blinded(e5b: ModuleType, tmp_path: Path) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    assert e5b.analyse("s3://b/runs", tmp_path / "out", root=tmp_path) == 3
+    assert not (tmp_path / "out.json").exists()
+
+
+def test_canary_health_logs_its_read(e5b: ModuleType, tmp_path: Path) -> None:
+    result = {"template": "t1", "arms": {"llama-3-3-70b": _canary()}}
+    where = e5b.log_canary_health(
+        LocalStore(tmp_path), "local", {"cmd": "canary-health", "runs_root": "runs"}, result
+    )
+    (line,) = (tmp_path / "manifests/e5b/queries.log").read_text().splitlines()
+    logged = json.loads(line)
+    assert where == str(tmp_path / "manifests/e5b/queries.log")
+    assert logged["rows"] == 1 and logged["query"]["cmd"] == "canary-health"
+    assert logged["columns"] == sorted(_canary())
 
 
 def test_the_frozen_registry_must_be_a_prefix(e5b: ModuleType) -> None:

@@ -414,6 +414,31 @@ The change set should show one `Modify` of `SmokeJobDefinition` with `Replacemen
 - **Either way,** CloudFormation registers a new job definition revision; old revisions can't be reactivated.
 - **Never delete** the repository, the bucket or the `freeze-` tags.
 
+## The E5b deploys
+
+Two deploys of `LostInPlaceSim`, each from `main` after the commit it needs has merged, each with `cdk diff` first (SPEC-v3 amendment of 2026-10-21). The stack reads `models.yaml` at synth, so a deploy from a `main` without the E5b entries drops their grants; there is none after the first E5b deploy until the wave has settled.
+
+**The flags.** Pass every one, every time. `cdk.json` defaults to `budgetUsd: 450` and `imageTag: latest`, and step 5 above hard-codes 450: a deploy with those in October sets the budget under the month's actual spend, so the budget action attaches `BudgetStop` at once.
+
+```bash
+budget=900   # October; 450 from Nov 1 (SPEC-v3 amendment of 2026-10-17)
+east2=$(printf '{"us.anthropic.claude-sonnet-5-5":"%s","us.anthropic.claude-haiku-5-5":"%s","us.openai.gpt-5.6-sol":"%s","us.meta.llama3-3-70b-instruct-v1:0":"%s","deepseek.v3.2":"%s","mistral.mistral-large-3-675b-instruct":"%s"}' \
+  "$(east2_arn anthropic-claude-sonnet-5-5)" "$(east2_arn anthropic-claude-haiku-5-5)" "$(east2_arn openai-gpt-5-6-sol)" \
+  "$(east2_arn meta-llama3-3-70b-instruct-v1-0)" "$(east2_arn deepseek-v3-2)" "$(east2_arn mistral-mistral-large-3-675b-instruct)")
+flags=(-c alertEmail="$email" -c budgetUsd=$budget -c maxVcpus=128 -c imageTag="$digest" -c useast2Profiles="$east2")
+```
+
+`$email` comes from step 5 above; `east2_arn` from [Models in another region](#models-in-another-region). Check that `$east2` has six ARNs, none empty.
+
+1. **Profiles.** An administrator in us-east-2 creates the three E5b profiles ([Models in another region](#models-in-another-region)); `drone` can't. Read all six back.
+2. **First deploy: the grants, on the frozen image.** After the PR with the stack fix and the registry entries merges: `digest=sha256:5470354eeb560ff84727ba89e69843b9d696dceac8075ebbea50e989bbde5f86`, then diff and deploy as in steps 5 and 6 above. Expected diff: the three profiles' and foundation models' statements on both roles, the `LIP_BEDROCK_PROFILES` value in both job definitions (a new revision on the same image), and the `BedrockProfiles` output. Nothing else.
+3. **Smoke calls,** as `OperatorRole` from a `main` checkout with `LIP_BEDROCK_PROFILES="$(out BedrockProfiles)"`: one `lip propose <entry> --planner dexi` per entry in the arm's fallback order, under $5 in all. Read only accepted or rejected and whether the tool call parsed. The next day, `scripts/e5_meter.py --config src/lost_in_place/wave/e5b.yaml now` shows their tokens under the three new profiles, and Cost Explorer (tag `project=lost-in-place`, us-east-2) shows the charge.
+4. **The E5b image,** after sign-off merges: Actions → image-e5b → Run workflow on `main`. It prints the digest of `freeze-v3-e5b-<sha12>`.
+5. **Second deploy: the E5b image.** The same flags with `digest=<the E5b digest>`. Expected diff: `Image` on `Episode` and `SweepEpisode`, and nothing else.
+6. **Verify** as in step 7 above: the one active `SweepJobDefinition` revision runs the E5b digest, `BedrockProfiles` lists seven profiles, and the action is `STANDBY`. Then, before any canary, `uv run python scripts/e5b.py check --image-digest <that digest>` passes once the launch commit records it.
+
+**Rollback** is step 6 again with the previous digest, or with `useast2Profiles` minus the E5b entries to remove their grants.
+
 ## Settings
 
 | Context key | Default | Meaning |

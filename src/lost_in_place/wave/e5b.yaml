@@ -19,10 +19,14 @@ max_in_flight: 64
 fixed_remaining_usd: 5.0  # retries and other tagged AWS spend
 
 months:
-  # No month has an approved stop yet, so nothing is submitted (S-9). Which month funds the wave and
-  # its stop are Mahmood's to set when he signs off the amendment; the launch commit writes them here.
+  # No month has an approved stop yet, so nothing is submitted (S-9). One month funds the whole wave:
+  # the launch commit writes its stop here (the meter's reading under this file when the gate arm
+  # starts, plus $140), and the other month stays without one. The meter restarts at a month's
+  # start, so a wave still running then stops submitting until a dated amendment funds the rest.
   "2026-10": {}
   "2026-11": {}
+# Past, as in E5: a month-fit arm that doesn't fit under the stop is dropped, not deferred.
+deferral_deadline: "2026-10-20"
 
 preflight_commands:
   - [uv, run, python, scripts/e5b.py, check]
@@ -43,8 +47,11 @@ arms:
     p90_usd: 5.4
 
   # The three LLM arms run side by side once the gate passes, 21 slots each (63 of the 64 episodes the
-  # queue's 128 vCPUs hold). Each is a month-fit arm, so its canary gates it (A-3 checks 1 and 4: no
-  # `canary_usd_per_episode` here, no submission) and S-8 pauses it at 1.5 x its canary's cost per
+  # queue's 128 vCPUs hold). Their listed order is the month-fit order: if the stop can't hold all
+  # three, the last ones listed are dropped first. An arm found not run at admission is removed from
+  # this file with its probe arm, so that nothing waits on it or reserves its cost. Each is a month-fit
+  # arm, so its canary gates it (A-3 checks 1 and 4: no `canary_usd_per_episode` here, no
+  # submission) and S-8 pauses it at 1.5 x its canary's cost per
   # episode. Each is called through its tagged profile in us-east-2, where its tokens are metered (the
   # region comes from its models.yaml entry). At about one call a minute per slot, an arm uses under
   # 0.2M TPM: Llama's us. profile lists 800 RPM and 600k TPM there, DeepSeek's and Mistral's in-region

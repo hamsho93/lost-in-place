@@ -122,11 +122,13 @@ claude-haiku-5-5:
     non-default temperature, and the smoke flies the configuration expected to work.
 
 # E5b (SPEC-v3 amendment of 2026-10-21): three arms added after E5 on the frozen E5 protocol, each
-# descriptive under freeze-v3 (design 9.3, "Later models"). Each is its lab's newest model that
-# Bedrock serves, not its lab's newest model. All are called in us-east-2 through a tagged
-# application inference profile there; model_id is a system profile (us.) or, where the model is
-# served in-region only, the foundation model's own id. Fallback entries are applied as in design
-# 9.2: only when the smoke call's request is rejected, never for an invalid reply.
+# descriptive under freeze-v3 (design 9.3, "Later models"). None is its lab's newest model; DeepSeek
+# V3.2 and Mistral Large 3 are their labs' newest general-purpose models that Bedrock serves in
+# us-east-2, and Llama 3.3 70B is older than the Llama 4 models Bedrock also serves there (see
+# SPEC-v3's E5b section). All are called in us-east-2 through a tagged application inference
+# profile there; model_id is a system profile (us.) or, where the model is served in-region only,
+# the foundation model's own id. Fallback entries are applied as in design 9.2: only when the smoke
+# call's request is rejected, never for an invalid reply.
 llama-3-3-70b:
   provider: bedrock
   model_id: us.meta.llama3-3-70b-instruct-v1:0
@@ -135,9 +137,9 @@ llama-3-3-70b:
   temperature: 0
   tool_choice: auto
   notes: >-
-    E5b arm, added 2026-10-21: Meta Llama 3.3 70B Instruct (Dec 2024), the newest Meta open-weight
-    model on Bedrock, through the us. system profile copied into a tagged us-east-2 profile.
-    tool_choice auto because Converse accepts only auto for Meta models, so no fallback is declared;
+    E5b arm, added 2026-10-21: Meta Llama 3.3 70B Instruct (Dec 2024), the dense 70B open-weight tier
+    (Bedrock also serves the newer Llama 4 Scout and Maverick), through the us. system profile copied
+    into a tagged us-east-2 profile. tool_choice auto because Converse accepts only auto for Meta models, so no fallback is declared;
     a reply without a tool call is invalid, as for claude-sonnet-5-5. Not a reasoning model.
 
 deepseek-v3-2:
@@ -149,7 +151,7 @@ deepseek-v3-2:
   tool_choice: any
   notes: >-
     E5b arm, added 2026-10-21: DeepSeek V3.2 (671B MoE, open weights), served in-region in us-east-2,
-    without thinking. The V4 family is not on Bedrock. tool_choice any, as for claude-sonnet-4-6 and
+    called without its thinking mode. The V4 family is not on Bedrock. tool_choice any, as for claude-sonnet-4-6 and
     gpt-5.6-sol; Bedrock doesn't document any for this model, so fallback 1 below is pre-declared.
 
 deepseek-v3-2-fb1:

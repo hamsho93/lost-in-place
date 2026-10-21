@@ -7,6 +7,7 @@ descriptive under freeze-v3 (design section 9.3, "Later models").
     uv run --extra aws python scripts/e5b.py canary-health s3://<bucket>/runs --usd llama-3-3-70b=2.10 ... \\
         --out runs/e5b/canary-health.json
     uv run python scripts/e5b.py admission --smoke runs/e5b/smoke.json --canary runs/e5b/canary-health.json
+    uv run --extra aws python scripts/e5b.py analyse s3://<bucket>/runs --out docs/results/e5b-analysis
 
 `sweeps` writes, with `scripts/e5_sweeps.py`'s builders (so E5's cells, families, levels, seeds and
 shuffle):
@@ -26,7 +27,13 @@ everything E5 flew:
 - the prompt bundle, without the E5b entries' wire digests, hashes to the recorded value, so every E5
   prompt and every E5 arm's request is byte-identical;
 and if the wave sweeps and config are written, each arm's sweep and config name the same entry of that
-arm. It then prints the E5b values the amendment records.
+arm. Every value SPEC-v3's E5b record holds must equal this checkout's, and `docker/Dockerfile.e5b`
+must build on the frozen image digest; with `--image-digest`, so must the recorded E5b image. It then
+prints the E5b values.
+
+`canary-health` runs the frozen `e5_admission.canary_health` over the E5b canaries, reading only its
+score fields, and appends the read to the wave's queries log (`manifests/e5b/queries.log`, next to
+`runs/`).
 
 `admission` applies design 9.3's A-3 checks to each E5b arm, with the frozen script's functions: (1) a
 smoke call accepted in the arm's fallback order; (2) at most 2% invalid planner calls in its canary;
@@ -34,6 +41,10 @@ smoke call accepted in the arm's fallback order; (2) at most 2% invalid planner 
 not required, every E5b entry has temperature 0. E5b flies no Phase 0, so check 2 reads the canary
 alone. An arm is not run if check 1 or 4 fails; otherwise it is descriptive whatever checks 2 and 3 give
 (9.3: E5 was unblinded before E5b), and those two are reported with its results.
+
+`analyse` is E5b's one pinned run: the frozen `lip stats --design v3` over E5's six manifests and the
+three E5b arms'. It refuses to run until `docs/prereg/e5b-unblind.md` is committed, and then checks that
+E5's arms, gates and analysis block equal E5's pinned output (`docs/results/freeze-v3-analysis.json`).
 """
 
 from __future__ import annotations
@@ -42,15 +53,22 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import re
+import subprocess
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
 from typing import Any
 
 import yaml
 
-from lost_in_place import freeze
+from lost_in_place import cli, freeze
 from lost_in_place.llm.registry import get_model
+from lost_in_place.wave import health
+from lost_in_place.wave.aws import mask
+from lost_in_place.wave.ledger import iso
+from lost_in_place.wave.store import LocalStore, S3Store, Store
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE = "t1"
@@ -58,6 +76,19 @@ N = 120
 WAVE_OUT = Path("sweeps/e5b")
 CANARY_OUT = Path("sweeps/e5b-canary")
 WAVE_CONFIG = Path("src/lost_in_place/wave/e5b.yaml")
+DOCKERFILE = Path("docker/Dockerfile.e5b")
+UNBLIND = Path("docs/prereg/e5b-unblind.md")
+E5_PINNED = Path("docs/results/freeze-v3-analysis.json")
+E5_SWEEPS = (
+    "scripted",
+    "claude-sonnet-4-6",
+    "claude-sonnet-5-5",
+    "gpt-5.6-sol",
+    "qwen3-4b-student",
+    "qwen3-4b-zero-shot",
+)
+SECTION = "## E5b: three later arms (amendment of 2026-10-21)"
+IMAGE_ROW = "E5b image digest"
 SCRIPTED = "scripted"
 # Each arm's registry entries, base entry first, then its pre-declared fallbacks (design 9.2's order).
 ARMS: dict[str, tuple[str, ...]] = {
@@ -171,8 +202,31 @@ def flown_entries(root: Path = ROOT) -> tuple[list[str], dict[str, str]]:
     return problems, flown
 
 
-def check(root: Path = ROOT) -> tuple[list[str], dict[str, str]]:
-    """(problems, E5b values). No problem means E5's record still describes E5 exactly."""
+def recorded_e5b(spec_text: str) -> dict[str, str]:
+    """The values written in SPEC-v3's E5b record; a row whose value isn't in backticks (such as
+    "recorded at launch") is left out."""
+    lines = spec_text.split("\n")
+    if SECTION not in lines:
+        return {}
+    start = lines.index(SECTION)
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+    found = {}
+    for line in lines[start:end]:
+        m = freeze._ROW.match(line)
+        if m and m["value"].startswith("`") and m["value"].endswith("`"):
+            found[m["artifact"]] = m["value"].strip("`")
+    return found
+
+
+def dockerfile_bases(text: str) -> list[str]:
+    """The digest of every `FROM` line; a `FROM` without a digest counts as an empty one."""
+    line = r"^FROM\s+\S+?(?:@(sha256:[0-9a-f]{64}))?(?:\s+AS\s+\S+)?\s*$"
+    return [(m.group(1) or "") for m in re.finditer(line, text, re.M | re.I)]
+
+
+def check(root: Path = ROOT, image_digest: str | None = None) -> tuple[list[str], dict[str, str]]:
+    """(problems, E5b values). No problem means E5's record still describes E5 exactly, and the E5b
+    record describes this checkout."""
     spec_text = (root / freeze.SPEC_V3).read_text()
     recorded = freeze.recorded_v3(spec_text)
     problems: list[str] = []
@@ -220,7 +274,68 @@ def check(root: Path = ROOT) -> tuple[list[str], dict[str, str]]:
             e5b[f"`{out}/*.yaml` (sorted, concatenated)"] = freeze.scenario_set_hash(root / out)
     if (root / WAVE_CONFIG).is_file():
         e5b[f"Wave config (`{WAVE_CONFIG}`)"] = _sha((root / WAVE_CONFIG).read_bytes())
+    dockerfile = root / DOCKERFILE
+    if dockerfile.is_file():
+        e5b[f"Image recipe (`{DOCKERFILE}`)"] = _sha(dockerfile.read_bytes())
+        bases = dockerfile_bases(dockerfile.read_text())
+        if bases != [recorded[freeze.IMAGE_ROW]]:
+            problems.append(
+                f"{DOCKERFILE}: builds on {bases}, not the frozen image {recorded[freeze.IMAGE_ROW]}"
+            )
+    else:
+        problems.append(f"{DOCKERFILE}: missing")
+
+    written = recorded_e5b(spec_text)
+    for row, value in written.items():
+        if row != IMAGE_ROW and e5b.get(row) != value:
+            problems.append(f"E5b record: {row} is {value}, this checkout gives {e5b.get(row) or 'nothing'}")
+    if image_digest is not None and written.get(IMAGE_ROW) != image_digest:
+        problems.append(
+            f"E5b record: {IMAGE_ROW} is {written.get(IMAGE_ROW) or 'not recorded'}, not {image_digest}"
+        )
     return problems, e5b
+
+
+def analyse(runs: str, out: Path, arms: tuple[str, ...] = tuple(ARMS), root: Path = ROOT) -> int:
+    """E5b's pinned run, once `UNBLIND` is committed: the frozen `lip stats --design v3` over E5's
+    manifests and `arms`', written to `<out>.json` and `<out>.md`. 3 while blinded; 1 if an E5 arm,
+    the gates or the analysis block differ from E5's pinned output."""
+    committed = subprocess.run(["git", "cat-file", "-e", f"HEAD:{UNBLIND}"], cwd=root, capture_output=True)
+    if committed.returncode != 0:
+        print(f"E5b is blinded until {UNBLIND} is committed", file=sys.stderr)
+        return 3
+    manifests = f"{runs.rstrip('/').rsplit('/', 1)[0]}/manifests"
+    names = [f"e5-{s}" for s in E5_SWEEPS] + [f"e5b-{arm}" for arm in arms]
+    flags = [a for name in names for a in ("--manifest", f"{manifests}/{name}.json")]
+    code = cli.main(["stats", "--design", "v3", runs, *flags, "--root", str(root), "--out", str(out)])
+    if code != 0:
+        return code
+    new = json.loads(Path(f"{out}.json").read_text())
+    old = json.loads((root / E5_PINNED).read_text())
+    differ = [k for k in ("analysis", "gates") if new.get(k) != old[k]]
+    differ += [f"arms.{a}" for a in old["arms"] if new["arms"].get(a) != old["arms"][a]]
+    for key in differ:
+        print(f"{key} differs from {E5_PINNED}", file=sys.stderr)
+    return 1 if differ else 0
+
+
+def log_canary_health(
+    store: Store, who: str, query: dict[str, Any], result: dict[str, Any], when: datetime | None = None
+) -> str:
+    """Append the canary-health read to the E5b queries log, in the health report's line format, with
+    the columns it read."""
+    key = yaml.safe_load((ROOT / WAVE_CONFIG).read_text())["queries_log"]
+    rows = list(result["arms"].values())
+    line = {
+        "at": iso(when or datetime.now(UTC)),
+        "principal": who,
+        "query": {k: mask(v) if isinstance(v, str) else v for k, v in sorted(query.items())},
+        "columns": sorted({c for row in rows for c in row}),
+        "rows": len(rows),
+        "git_sha": health.git_sha(),
+    }
+    store.append(key, json.dumps(line, sort_keys=True) + "\n")
+    return store.where(key)
 
 
 def admission(smoke: dict[str, Any], canary_health: dict[str, Any]) -> dict[str, Any]:
@@ -307,7 +422,18 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument(
         "--check", action="store_true", help="compare with sweeps/e5b{,-canary}/ instead of writing"
     )
-    sub.add_parser("check", help="the E5b preflight: E5's record still describes E5; prints the E5b values")
+    c = sub.add_parser(
+        "check", help="the E5b preflight: E5's record still describes E5; prints the E5b values"
+    )
+    c.add_argument("--image-digest", help="sha256:<digest> the job definition runs; must be the recorded one")
+    n = sub.add_parser(
+        "analyse", help="E5b's pinned lip stats run, once docs/prereg/e5b-unblind.md is committed"
+    )
+    n.add_argument("runs", help="s3://<bucket>/runs")
+    n.add_argument("--out", type=Path, required=True, help="writes <out>.json and <out>.md")
+    n.add_argument(
+        "--arm", action="append", choices=list(ARMS), help="the E5b arms flown (default: all three)"
+    )
     h = sub.add_parser("canary-health", help="e5_admission.canary_health over the E5b canaries (reads only)")
     h.add_argument("runs_root", help="local mirror of runs/ or s3://bucket/runs")
     h.add_argument(
@@ -320,13 +446,23 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--out", type=Path)
     args = parser.parse_args(argv)
     if args.cmd == "sweeps":
-        entries = {arm: getattr(args, arm, ARMS[arm][0]) for arm in ARMS}
-        failed = write(wave(entries), ROOT / WAVE_OUT, args.check)
+        flying = {arm: getattr(args, arm, ARMS[arm][0]) for arm in ARMS}
+        failed = write(wave(flying), ROOT / WAVE_OUT, args.check)
         return failed | write(canary(), ROOT / CANARY_OUT, args.check)
     if args.cmd in ("canary-health", "admission"):
         if args.cmd == "canary-health":
             usd = {entry: float(value) for entry, _, value in (item.partition("=") for item in args.usd)}
             result = _script("e5_admission").canary_health(args.runs_root, TEMPLATE, usd, ENTRIES)
+            if args.runs_root.startswith("s3://"):
+                import boto3
+
+                bucket = args.runs_root.removeprefix("s3://").split("/", 1)[0]
+                store: Store = S3Store(boto3.client("s3"), bucket)
+                who = health.principal(boto3.client("sts"))
+            else:
+                store, who = LocalStore(Path(args.runs_root).resolve().parent), "local"
+            query = {"cmd": "canary-health", "runs_root": args.runs_root, "usd": args.usd}
+            print(f"query logged to {log_canary_health(store, who, query, result)}", file=sys.stderr)
         else:
             result = admission(json.loads(args.smoke.read_text()), json.loads(args.canary.read_text()))
         text = json.dumps(result, indent=1, sort_keys=True) + "\n"
@@ -335,7 +471,9 @@ def main(argv: list[str] | None = None) -> int:
             args.out.write_text(text)
         print(text, end="")
         return 0
-    problems, e5b = check()
+    if args.cmd == "analyse":
+        return analyse(args.runs, args.out, tuple(args.arm or ARMS))
+    problems, e5b = check(image_digest=args.image_digest)
     for problem in problems:
         print(problem, file=sys.stderr)
     print("| Artifact | Hash |\n|---|---|")
