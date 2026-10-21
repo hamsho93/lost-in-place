@@ -178,9 +178,9 @@ def packet(label_id: str, episode: dict[str, Any], armed_s: float | None = None)
         "",
         f"- **Scenario:** `{scenario.id}`, category `{scenario.category}`, state `{scenario.state}`",
         f"- **Instruction:** {scenario.mission.instruction}",
-        f"- **Goal in the truth frame:** north {goal[0]:.2f} m, east {goal[1]:.2f} m"
+        f"- **Goal in the truth frame:** north {goal[0]:.3f} m, east {goal[1]:.3f} m"
         f" (reached means within {GOAL_TOLERANCE_M} m)",
-        f"- **Goal in the take-off frame:** north {last.north_m:.2f} m, east {last.east_m:.2f} m",
+        f"- **Goal in the take-off frame:** north {last.north_m:.3f} m, east {last.east_m:.3f} m",
         f"- **Buffer:** {hazards.buffer_m} m from every keep-out and from the geofence edge",
         "- **Fault injections:** "
         + (", ".join(f"{e.get('unit')} {e.get('type')} at {e['sim_s']:.2f} s" for e in injects) or "none"),
