@@ -14,6 +14,7 @@ from lost_in_place_infra.sim_stack import (
     SimStack,
     bedrock_models_from_registry,
     bedrock_regions_from_registry,
+    foundation_model_id,
     imported_models_from_registry,
 )
 
@@ -576,6 +577,79 @@ def test_us_east_2_openai_entry_is_granted_its_profile_and_that_regions_default_
         [project] = [s for s in statements if "project/" in json.dumps(s["Resource"])]
         assert json.dumps(project["Resource"]).endswith(':bedrock:us-east-2:123456789012:project/default"]]}')
     assert "us-east-1:123456789012:project/" not in json.dumps(template.to_json())
+
+
+@pytest.mark.parametrize(
+    ("model", "foundation"),
+    [
+        ("us.anthropic.claude-sonnet-4-6", "anthropic.claude-sonnet-4-6"),
+        ("global.anthropic.claude-sonnet-4-6", "anthropic.claude-sonnet-4-6"),
+        ("us.meta.llama3-3-70b-instruct-v1:0", "meta.llama3-3-70b-instruct-v1:0"),
+        ("deepseek.v3.2", "deepseek.v3.2"),
+        ("mistral.mistral-large-3-675b-instruct", "mistral.mistral-large-3-675b-instruct"),
+    ],
+)
+def test_a_scope_prefix_is_stripped_only_when_present(model: str, foundation: str) -> None:
+    assert foundation_model_id(model) == foundation
+
+
+LLAMA = "us.meta.llama3-3-70b-instruct-v1:0"
+DEEPSEEK = "deepseek.v3.2"
+MISTRAL = "mistral.mistral-large-3-675b-instruct"
+IN_REGION_PROFILES = {
+    LLAMA: "arn:aws:bedrock:us-east-2:123456789012:application-inference-profile/llama33prof1",
+    DEEPSEEK: "arn:aws:bedrock:us-east-2:123456789012:application-inference-profile/deepseekprof",
+    MISTRAL: "arn:aws:bedrock:us-east-2:123456789012:application-inference-profile/mistrallprof",
+}
+
+
+def test_us_east_2_in_region_model_ids_are_granted_their_own_foundation_model() -> None:
+    template = Template.from_stack(
+        east_2_stack(
+            "WithEast2InRegion",
+            bedrock_models=(HAIKU_5_5, SONNET, SONNET_5_5, *IN_REGION_PROFILES),
+            bedrock_regions={
+                SONNET: "us-east-1",
+                SONNET_5_5: "us-east-2",
+                HAIKU_5_5: "us-east-2",
+                **dict.fromkeys(IN_REGION_PROFILES, "us-east-2"),
+            },
+            external_profiles={**EAST_2_PROFILES, **IN_REGION_PROFILES},
+        )
+    )
+    assert sorted(template.find_resources("AWS::Bedrock::ApplicationInferenceProfile")) == [
+        "Bedrockanthropicclaudesonnet46"
+    ]
+    for role in ("JobRole", "OperatorRole"):
+        statements = granting(role_statements(template, role), "bedrock:InvokeModel")
+        [models] = [s for s in statements if "foundation-model/" in json.dumps(s["Resource"])]
+        resources = json.dumps(models["Resource"])
+        for foundation in ("meta.llama3-3-70b-instruct-v1:0", DEEPSEEK, MISTRAL):
+            assert f"bedrock:*::foundation-model/{foundation}*" in resources
+        assert "foundation-model/v3.2" not in resources
+        assert "foundation-model/mistral-large" not in resources
+        condition = models["Condition"]["StringEquals"]["bedrock:InferenceProfileArn"]
+        assert all(arn in condition for arn in IN_REGION_PROFILES.values())
+
+
+def test_an_in_region_model_of_the_stack_region_copies_its_foundation_model() -> None:
+    template = Template.from_stack(
+        SimStack(
+            cdk.App(),
+            "InRegionHere",
+            settings=SimSettings(bedrock_models=(DEEPSEEK, SONNET)),
+            env=cdk.Environment(account="123456789012", region="us-east-1"),
+        )
+    )
+    profiles = template.find_resources("AWS::Bedrock::ApplicationInferenceProfile")
+    sources = {
+        p["Properties"]["InferenceProfileName"]: json.dumps(p["Properties"]["ModelSource"]["CopyFrom"])
+        for p in profiles.values()
+    }
+    assert sources["InRegionHere-deepseek-v3-2"].endswith(
+        ':bedrock:us-east-1::foundation-model/deepseek.v3.2"]]}'
+    )
+    assert sources["InRegionHere-anthropic-claude-sonnet-4-6"].endswith(f':inference-profile/{SONNET}"]]}}')
 
 
 def test_registry_regions_default_to_us_east_1_and_are_one_per_model(tmp_path: Path) -> None:

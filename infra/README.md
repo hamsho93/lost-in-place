@@ -156,6 +156,27 @@ aws bedrock create-inference-profile --region us-east-2 \
 
 All three exist (Oct 16): Sonnet 5.5 `adjhqtlbtyxw`, Haiku 5.5 `ay8horiiyywr`, GPT-5.6 Sol `1v6bj762kok7`.
 
+**The E5b models** (SPEC-v3 amendment of 2026-10-21) are created the same way. Llama 3.3 70B copies its `us.` system profile. DeepSeek V3.2 and Mistral Large 3 are served in us-east-2 only, so their registry `model_id` is the foundation model's own id, with no `us.` prefix, and the profile copies the foundation model. The stack grants such an id's own foundation model (`foundation_model_id` strips a scope prefix only when there is one).
+
+```bash
+aws bedrock create-inference-profile --region us-east-2 \
+  --inference-profile-name LostInPlaceSim-meta-llama3-3-70b-instruct-v1-0 \
+  --description "lost-in-place planner calls to us.meta.llama3-3-70b-instruct-v1:0" \
+  --model-source copyFrom="arn:aws:bedrock:us-east-2:$acc:inference-profile/us.meta.llama3-3-70b-instruct-v1:0" \
+  --tags key=project,value=lost-in-place \
+  --query '[inferenceProfileArn,status]' --output text | sed "s/$acc/<account>/g"
+for m in deepseek.v3.2 mistral.mistral-large-3-675b-instruct; do
+  aws bedrock create-inference-profile --region us-east-2 \
+    --inference-profile-name "LostInPlaceSim-${m//./-}" \
+    --description "lost-in-place planner calls to $m" \
+    --model-source copyFrom="arn:aws:bedrock:us-east-2::foundation-model/$m" \
+    --tags key=project,value=lost-in-place \
+    --query '[inferenceProfileArn,status]' --output text | sed "s/$acc/<account>/g"
+done
+```
+
+Their `useast2Profiles` keys are the registry model ids, `us.meta.llama3-3-70b-instruct-v1:0`, `deepseek.v3.2` and `mistral.mistral-large-3-675b-instruct`, added to the existing entries (a deploy without an entry drops its grants). An in-region profile's `get-inference-profile` lists one model, in us-east-2.
+
 **Read them back** wherever the ARNs are needed. This uses `bedrock:ListInferenceProfiles`, `GetInferenceProfile` and `ListTagsForResource` in us-east-2:
 
 ```bash

@@ -71,6 +71,16 @@ FROZEN_IMAGE_TAG_PREFIX = "freeze-"
 EXTERNAL_PROFILE_ARN = re.compile(
     r"arn:aws[a-z-]*:bedrock:(?P<region>[a-z0-9-]+):(?P<account>\d{12}):application-inference-profile/[a-z0-9]+"
 )
+# A system profile id starts with its routing scope ("us.anthropic.x"); an in-region model id is the
+# foundation model's own ("deepseek.v3.2"), which a vendor name with a dot inside would otherwise lose.
+SYSTEM_PROFILE_SCOPE = re.compile(r"(?:us|us-gov|eu|apac|jp|au|ca|global)\.")
+
+
+def foundation_model_id(model: str) -> str:
+    """The foundation model a registry model id calls: "us.anthropic.x" -> "anthropic.x", and an
+    in-region id such as "deepseek.v3.2" as it is."""
+    scope = SYSTEM_PROFILE_SCOPE.match(model)
+    return model[scope.end() :] if scope else model
 
 
 @dataclass(frozen=True)
@@ -89,8 +99,9 @@ class SimSettings:
     # Needs the account's token.actions.githubusercontent.com OIDC provider, which is shared by
     # every stack in the account and so is imported rather than created here.
     github_repo: str = ""
-    # Bedrock system inference profiles the planner may call (e.g. "us.anthropic.claude-sonnet-4-6").
-    # Each gets a tagged application inference profile, so its spend counts against the budget.
+    # Bedrock models the planner may call: system inference profiles (e.g.
+    # "us.anthropic.claude-sonnet-4-6") or in-region foundation model ids (e.g. "deepseek.v3.2"). Each
+    # gets a tagged application inference profile, so its spend counts against the budget.
     bedrock_models: tuple[str, ...] = ()
     # The region each Bedrock model is called in (registry `region`); unlisted means the stack's.
     bedrock_regions: Mapping[str, str] = field(default_factory=dict)
@@ -244,7 +255,7 @@ class SimStack(Stack):
         if stray := sorted(set(settings.external_profiles) - set(other_regions)):
             raise ValueError(f"External profiles for models not registered in another region: {stray}")
         for model in settings.bedrock_models:
-            foundation_model = model.split(".", 1)[1]  # "us.anthropic.x" -> "anthropic.x"
+            foundation_model = foundation_model_id(model)
             if model in other_regions:
                 region = other_regions[model]
                 arn = settings.external_profiles.get(model)
@@ -270,13 +281,18 @@ class SimStack(Stack):
                 if foundation_model.startswith("openai."):
                     openai_regions.add(region)
                 continue
+            source = (
+                f"arn:{self.partition}:bedrock:{self.region}::foundation-model/{model}"
+                if foundation_model == model
+                else f"arn:{self.partition}:bedrock:{self.region}:{self.account}:inference-profile/{model}"
+            )
             profile = bedrock.CfnApplicationInferenceProfile(
                 self,
                 f"Bedrock-{foundation_model}",
                 inference_profile_name=f"{self.stack_name}-{re.sub('[^0-9a-zA-Z]+', '-', foundation_model)}",
                 description=f"lost-in-place planner calls to {model}",
                 model_source=bedrock.CfnApplicationInferenceProfile.InferenceProfileModelSourceProperty(
-                    copy_from=f"arn:{self.partition}:bedrock:{self.region}:{self.account}:inference-profile/{model}"
+                    copy_from=source
                 ),
             )
             bedrock_profiles[model] = profile.attr_inference_profile_arn
