@@ -120,3 +120,66 @@ claude-haiku-5-5:
     Smoke-only, never in a freeze-v3 sweep, and flown before the 2026-10-17 switch to default
     effort, so it keeps effort low. No temperature: Anthropic's docs say Haiku 5.5 rejects any
     non-default temperature, and the smoke flies the configuration expected to work.
+
+# E5b (SPEC-v3 amendment of 2026-10-21): three arms added after E5 on the frozen E5 protocol, each
+# descriptive under freeze-v3 (design 9.3, "Later models"). Each is its lab's newest model that
+# Bedrock serves, not its lab's newest model. All are called in us-east-2 through a tagged
+# application inference profile there; model_id is a system profile (us.) or, where the model is
+# served in-region only, the foundation model's own id. Fallback entries are applied as in design
+# 9.2: only when the smoke call's request is rejected, never for an invalid reply.
+llama-3-3-70b:
+  provider: bedrock
+  model_id: us.meta.llama3-3-70b-instruct-v1:0
+  region: us-east-2
+  max_tokens: 4096
+  temperature: 0
+  tool_choice: auto
+  notes: >-
+    E5b arm, added 2026-10-21: Meta Llama 3.3 70B Instruct (Dec 2024), the newest Meta open-weight
+    model on Bedrock, through the us. system profile copied into a tagged us-east-2 profile.
+    tool_choice auto because Converse accepts only auto for Meta models, so no fallback is declared;
+    a reply without a tool call is invalid, as for claude-sonnet-5-5. Not a reasoning model.
+
+deepseek-v3-2:
+  provider: bedrock
+  model_id: deepseek.v3.2
+  region: us-east-2
+  max_tokens: 4096
+  temperature: 0
+  tool_choice: any
+  notes: >-
+    E5b arm, added 2026-10-21: DeepSeek V3.2 (671B MoE, open weights), served in-region in us-east-2,
+    without thinking. The V4 family is not on Bedrock. tool_choice any, as for claude-sonnet-4-6 and
+    gpt-5.6-sol; Bedrock doesn't document any for this model, so fallback 1 below is pre-declared.
+
+deepseek-v3-2-fb1:
+  provider: bedrock
+  model_id: deepseek.v3.2
+  region: us-east-2
+  max_tokens: 4096
+  temperature: 0
+  tool_choice: auto
+  notes: >-
+    Fallback 1 of deepseek-v3-2: tool_choice auto. A reply without a tool call is invalid, as under any.
+
+mistral-large-3:
+  provider: bedrock
+  model_id: mistral.mistral-large-3-675b-instruct
+  region: us-east-2
+  max_tokens: 4096
+  temperature: 0
+  tool_choice: any
+  notes: >-
+    E5b arm, added 2026-10-21: Mistral Large 3 (675B MoE, 41B active, open weights), served in-region
+    in us-east-2, not a reasoning model. tool_choice any, which Bedrock documents for Mistral Large;
+    fallback 1 below is pre-declared in case this model rejects it.
+
+mistral-large-3-fb1:
+  provider: bedrock
+  model_id: mistral.mistral-large-3-675b-instruct
+  region: us-east-2
+  max_tokens: 4096
+  temperature: 0
+  tool_choice: auto
+  notes: >-
+    Fallback 1 of mistral-large-3: tool_choice auto. A reply without a tool call is invalid, as under any.
