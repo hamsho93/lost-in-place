@@ -14,12 +14,42 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
-    env:
-      # Repository variables set from the LostInPlaceSim outputs, so the account ID stays out of git.
-      PUSH_ROLE: ${{ vars.AWS_IMAGE_PUSH_ROLE }}
-      REPOSITORY: ${{ vars.ECR_IMAGE_REPOSITORY }}
     steps:
       - uses: actions/checkout@v4
+      # Prefer repository Secrets (auto-masked in Actions logs). Fall back to Variables so
+      # existing setups keep working. Do not put role/repo URIs in job-level env: that dump
+      # is public on this repo. Mask resolved values before any later step can print them.
+      - name: Resolve image push config
+        id: push
+        env:
+          PUSH_ROLE_SECRET: ${{ secrets.AWS_IMAGE_PUSH_ROLE }}
+          REPOSITORY_SECRET: ${{ secrets.ECR_IMAGE_REPOSITORY }}
+          PUSH_ROLE_VAR: ${{ vars.AWS_IMAGE_PUSH_ROLE }}
+          REPOSITORY_VAR: ${{ vars.ECR_IMAGE_REPOSITORY }}
+        run: |
+          ROLE="${PUSH_ROLE_SECRET:-$PUSH_ROLE_VAR}"
+          REPO="${REPOSITORY_SECRET:-$REPOSITORY_VAR}"
+          if [ -n "$ROLE" ]; then
+            echo "::add-mask::$ROLE"
+          fi
+          if [ -n "$REPO" ]; then
+            echo "::add-mask::$REPO"
+          fi
+          # Mask any 12-digit account id embedded in the values (later log lines only).
+          printf '%s\n%s\n' "$ROLE" "$REPO" | grep -oE '[0-9]{12}' | sort -u | while read -r id; do
+            echo "::add-mask::$id"
+          done
+          if [ -n "$ROLE" ] && [ -n "$REPO" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "AWS image push: configured"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "AWS image push: not configured"
+          fi
+          {
+            echo "PUSH_ROLE=$ROLE"
+            echo "REPOSITORY=$REPO"
+          } >> "$GITHUB_ENV"
       - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v6
         with:
@@ -32,14 +62,14 @@ jobs:
       - run: docker run --rm lost-in-place:ci doctor
       - name: Episode output directory is writable
         run: docker run --rm --entrypoint test lost-in-place:ci -w runs
-      - if: github.ref == 'refs/heads/main' && env.PUSH_ROLE != '' && env.REPOSITORY != ''
+      - if: github.ref == 'refs/heads/main' && steps.push.outputs.configured == 'true'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ env.PUSH_ROLE }}
           aws-region: us-east-1
-      - if: github.ref == 'refs/heads/main' && env.PUSH_ROLE != '' && env.REPOSITORY != ''
+      - if: github.ref == 'refs/heads/main' && steps.push.outputs.configured == 'true'
         uses: aws-actions/amazon-ecr-login@v2
-      - if: github.ref == 'refs/heads/main' && env.PUSH_ROLE != '' && env.REPOSITORY != ''
+      - if: github.ref == 'refs/heads/main' && steps.push.outputs.configured == 'true'
         run: |
           for tag in latest "${GITHUB_SHA::12}"; do
             docker tag lost-in-place:ci "$REPOSITORY:$tag"

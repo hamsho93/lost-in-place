@@ -14,11 +14,39 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    env:
-      PUSH_ROLE: ${{ vars.AWS_IMAGE_PUSH_ROLE }}
-      REPOSITORY: ${{ vars.ECR_IMAGE_REPOSITORY }}
     steps:
       - uses: actions/checkout@v4
+      # Prefer repository Secrets (auto-masked). Fall back to Variables. No job-level env dump
+      # of role ARN / ECR URI (those embed the account ID and were visible on public runs).
+      - name: Resolve image push config
+        id: push
+        env:
+          PUSH_ROLE_SECRET: ${{ secrets.AWS_IMAGE_PUSH_ROLE }}
+          REPOSITORY_SECRET: ${{ secrets.ECR_IMAGE_REPOSITORY }}
+          PUSH_ROLE_VAR: ${{ vars.AWS_IMAGE_PUSH_ROLE }}
+          REPOSITORY_VAR: ${{ vars.ECR_IMAGE_REPOSITORY }}
+        run: |
+          ROLE="${PUSH_ROLE_SECRET:-$PUSH_ROLE_VAR}"
+          REPO="${REPOSITORY_SECRET:-$REPOSITORY_VAR}"
+          if [ -n "$ROLE" ]; then
+            echo "::add-mask::$ROLE"
+          fi
+          if [ -n "$REPO" ]; then
+            echo "::add-mask::$REPO"
+          fi
+          printf '%s\n%s\n' "$ROLE" "$REPO" | grep -oE '[0-9]{12}' | sort -u | while read -r id; do
+            echo "::add-mask::$id"
+          done
+          if [ -z "$ROLE" ] || [ -z "$REPO" ]; then
+            echo "AWS image push: not configured (need AWS_IMAGE_PUSH_ROLE and ECR_IMAGE_REPOSITORY)"
+            exit 1
+          fi
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+          echo "AWS image push: configured"
+          {
+            echo "PUSH_ROLE=$ROLE"
+            echo "REPOSITORY=$REPO"
+          } >> "$GITHUB_ENV"
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ env.PUSH_ROLE }}
