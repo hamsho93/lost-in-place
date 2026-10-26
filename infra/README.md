@@ -34,12 +34,12 @@ Before the first deploy:
 
 ## Push the image and run episodes
 
-The `image` workflow pushes `latest` and the short commit SHA to ECR when it runs on `main`. Set two repository variables from the stack outputs once (under Settings → Secrets and variables → Actions → Variables):
+The `image` workflow pushes `latest` and the short commit SHA to ECR when it runs on `main`. Set these from the stack outputs once (Settings → Secrets and variables → Actions). Prefer **Secrets** over Variables on a public repo: Variables are readable by anyone with settings access, and (unlike Secrets) are not auto-masked in Actions logs. The workflows accept either; Secrets win when both are set.
 
 - `AWS_IMAGE_PUSH_ROLE`: the `ImagePushRoleArn` output;
 - `ECR_IMAGE_REPOSITORY`: the `ImageRepository` output.
 
-While either variable is unset, the workflow only builds the image and runs `doctor`. The push role uses the account's GitHub OIDC provider (`token.actions.githubusercontent.com`), which must already exist; create it once per account if it does not.
+While either value is unset, the workflow only builds the image and runs `doctor`. Logs print only `AWS image push: configured` / `not configured`, not the role ARN or ECR URI. The push role uses the account's GitHub OIDC provider (`token.actions.githubusercontent.com`), which must already exist; create it once per account if it does not.
 
 `githubRepo` must match the repository part of the OIDC token's `sub` claim. This repository was created after 2026-07-15, so GitHub uses its immutable format, `owner@OWNER_ID/name@REPO_ID`, rather than `owner/name`. Check it with `gh api repos/OWNER/REPO/actions/oidc/customization/sub` (the `sub_claim_prefix` field, minus the leading `repo:`).
 
