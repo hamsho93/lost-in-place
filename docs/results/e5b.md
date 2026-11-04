@@ -1,6 +1,6 @@
 # E5b results (three later descriptive arms)
 
-**Status: draft for review, not published.** Mahmood unblinded E5b in chat on 2026-10-22 at 21:35 America/New_York ("unblind"; 2026-10-23 01:35 UTC). The marker is `docs/prereg/e5b-unblind.md` on `main` (merge of PR #90, commit `61b48a8` / merge `fbd37f1`). Every E5b arm is **descriptive** (design §9.3; E5 was already unblinded): estimates and intervals only, no verdicts, no place in m.
+**Status: published as of 2026-11-03 (America/New_York).** Mahmood unblinded E5b in chat on 2026-10-22 at 21:35 America/New_York ("unblind"; 2026-10-23 01:35 UTC). The marker is `docs/prereg/e5b-unblind.md` on `main` (merge of PR #90, commit `61b48a8` / merge `fbd37f1`). Every E5b arm is **descriptive** (design §9.3; E5 was already unblinded): estimates and intervals only, no verdicts, no place in m.
 
 The numbers below come from the single pinned run
 
@@ -84,5 +84,5 @@ Almost no within-window stops on O0–O1-N for any arm (none_in_window ≈ n). A
 ## 5. Decisions still on Mahmood
 
 1. Optional own-account commit of `docs/prereg/e5b-unblind.md` (sign-off choice 5 / design §12), as with E5.
-2. Merge the results PR when satisfied with this draft.
+2. Merge the publication pull request when satisfied with this report.
 3. Whether any of these models should ever get a confirmatory freeze (would need a new freeze; all three fail the stop-rule bar here; Llama’s `auto` invalid rate is structural under the current Meta Converse constraint).

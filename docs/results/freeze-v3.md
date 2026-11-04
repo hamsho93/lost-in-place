@@ -1,6 +1,6 @@
 # E5 results (freeze-v3, the O-ladder wave)
 
-**Status: draft for review, not published.** Mahmood unblinded E5 on Oct 19, 2026 at 22:34 UTC ("Unblind"). The marker is commit `d7153de` on `main`. The numbers below come from a single run of the pinned analysis script, `lip stats --design v3` (`src/lost_in_place/stats_v3.py`, SHA-256 `15bdfb02…5db9c28`, unchanged since the `freeze-v3` tag), over all six E5 manifests: 11,601 scored episodes, exit 0. Nothing in the confirmatory sections was recomputed. Sections labelled **exploratory** were not pre-registered. The script's full output is in [freeze-v3-analysis.md](freeze-v3-analysis.md) and [freeze-v3-analysis.json](freeze-v3-analysis.json).
+**Status: published as of 2026-11-03 (America/New_York).** Mahmood unblinded E5 on Oct 19, 2026 at 22:34 UTC ("Unblind"). The marker is commit `d7153de` on `main`. The numbers below come from a single run of the pinned analysis script, `lip stats --design v3` (`src/lost_in_place/stats_v3.py`, SHA-256 `15bdfb02…5db9c28`, unchanged since the `freeze-v3` tag), over all six E5 manifests: 11,601 scored episodes, exit 0. Nothing in the confirmatory sections was recomputed. Sections labelled **exploratory** were not pre-registered. The script's full output is in [freeze-v3-analysis.md](freeze-v3-analysis.md) and [freeze-v3-analysis.json](freeze-v3-analysis.json).
 
 *Revised Oct 20, 2026 after an independent methodology and statistics review. The text, the framing and the exploratory section changed. No confirmatory number and no verdict changed.*
 
