@@ -32,16 +32,41 @@ To run episodes on spot AWS Batch, see [`infra/`](infra/README.md). The first sm
 
 ## Results
 
-- [**freeze-v2** (E1 and E2, 15 October 2026)](docs/results/freeze-v2.md). The first confirmatory sweeps, 5,112 episodes, scored by the analysis script pinned before unblinding. Under silent frame misalignment, neither validator caught a hazardous move. Neither Qwen3-4B arm produced a correct safe action under the loud or flow-scale faults, 0 of 120 per cell, so H1a is inconclusive under the pre-registered rule. The bound excludes an effect of 15 points or more.
+Correct safe action is the first decision after the fault. A later stop is a different result. The flights are in simulation. Nothing here was flown on the aircraft.
 
-  For the student this is a fair test: the first post-onset decision showed the fault in 480 of 480 loud episodes. For the zero-shot arm, those first decisions were scored while the 2 s mean flow quality still read 130–185, which looks healthy, so the fault was not yet visible in the health block. That loud zero holds only post hoc, at the first decision that showed the fault (240 of 240 proceeded). The silent cells (misalignment, flow scale) are violations by construction, a no-cue negative control.
-- [**E4**, Claude Sonnet 4.6 (15 October 2026)](docs/results/e4-claude.md). A descriptive reference arm, 1,200 episodes under amendment A11, with no hypothesis test. Correct safe action was 0 of 120 in each loud and flow-scale cell. On the loud zeros, those first decisions were scored while the 2 s mean flow quality still read 130–185, which looks healthy, so the fault was not yet visible in the health block. Same timing as the zero-shot arm.
+The reports are indexed in [docs/results/](docs/results/README.md).
 
-  Claude never falsely refused a control. It reached the goal in only 12–23% of controls because a relative-move leak in the DEXI adapter leaves it a median 0.63 m short. Across the student, zero-shot, and Claude, every loud and flow-scale cell is 0 of 120. Only the student's loud cells test use of visible health. E4 is not compared with E2 by any test.
-- [**E5** (freeze-v3)](docs/results/freeze-v3.md). The O-ladder wave. Published 3 November 2026 (New York).
-- [**E5b**](docs/results/e5b.md). Llama 3.3 70B, DeepSeek V3.2, and Mistral Large 3, run after E5 was already unblinded. Descriptive only: estimates and intervals, no verdicts. Published 3 November 2026 (New York).
+### [E1 and E2](docs/results/freeze-v2.md), 15 October 2026
 
-The index of results reports is [docs/results/](docs/results/README.md).
+5,112 episodes, scored by the analysis script pinned before unblinding.
+
+Under silent frame misalignment, neither validator caught a hazardous move. A geometry checker in the estimated frame misses a yaw error it cannot see. Neither Qwen3-4B arm took a correct safe action on the loud fault or the flow-scale fault, 0 of 120 per cell, so H1a is inconclusive. The bound excludes an effect of 15 points or more.
+
+For the student, the loud zero is a fair test: the first decision showed the fault in 480 of 480 episodes. For the zero-shot arm it is not. Those first decisions were scored while the 2 s mean flow quality still read 130–185, which looks healthy, so the fault was not yet visible in the health block. The zero holds only post hoc, at the first decision that showed the fault (240 of 240 proceeded). The silent cells are violations by construction, a no-cue negative control.
+
+### [E4, Claude Sonnet 4.6](docs/results/e4-claude.md), 15 October 2026
+
+Descriptive only. 1,200 episodes, no hypothesis test, and not compared with E2.
+
+Correct safe action was 0 of 120 in each loud and flow-scale cell, the same picture as the two Qwen arms. The loud zeros have the same timing as zero-shot: flow quality still read 130–185, so the fault was not yet visible. Only the student's loud cells test use of visible health. Claude never falsely refused a control. It reached the goal in only 12–23% of controls, a median 0.63 m short, because of a relative-move leak in the DEXI adapter.
+
+### [E5](docs/results/freeze-v3.md), published 3 November 2026
+
+On a dead flow sensor, raw health numbers do not change the first decision of Claude Sonnet 4.6 or either Qwen arm (0 of 120). They change Claude Sonnet 5.5's first decision in 58 of 120 episodes. GPT-5.6 Sol is 1 of 120 at that first decision. Asked directly at that prompt, it calls the estimate unreliable in 120 of 120 replies and still continues in 119 of 120. It then takes a safe action within 10 seconds in 116 of 120, near PX4's own landing. That later stop is not a correct safe action.
+
+Told an explicit hold-then-land rule, four of the five language models take a correct safe action almost every time: Claude Sonnet 4.6 in 118 of 119 scored episodes, Claude Sonnet 5.5 in 119 of 120, GPT-5.6 Sol in 118 of 120, and Qwen3-4B zero-shot in 116 of 120. The brief-dropout guards for that rule stay at the floor. Zero-shot's first hold often does not stick: sustained safety is 30 of 120. The Qwen3-4B student stays at 0 of 120. That prompt was out of distribution for it, and it flies whole legs.
+
+The same rule in code, a hard-coded estimator check, is 118 of 120 on 2 m steps and 120 of 120 on whole legs, with 0 of 120 false refusals on the brief dropout.
+
+Annotating the health fields in plain English raises first-decision stops on the fault that stays off, and also false-refuses the 3-second dropout. At the first decision those two faults still look the same.
+
+On optical-flow scale 0.7, where quality stays high, every arm including that check scored 0 correct safe actions. The check catches a dead flow sensor. It misses a scale fault.
+
+### [E5b](docs/results/e5b.md), published 3 November 2026
+
+Llama 3.3 70B, DeepSeek V3.2, and Mistral Large 3, run after E5 was already unblinded. Descriptive only: estimates and intervals, no verdicts, and no ranking.
+
+Raw health does not change their first decision (0 of 120). They miss the stop-rule bar: Llama 0 of 118, DeepSeek 0 of 120, Mistral 9 of 120. Llama flew with `tool_choice=auto`, because the API would not force a tool call, and about 62% of its planner calls were invalid (12,705 of 20,502).
 
 ## Repository
 
