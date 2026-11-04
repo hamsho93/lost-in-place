@@ -1,0 +1,1 @@
+Mahmood Hamsho attests that he signed off freeze-v3 and unblinded E5. The original marker commits on main are `a0c9125` (sign-off) and `d7153de` (unblind), authored by the coding agent. This note is the human attestation. It does not change any result.
