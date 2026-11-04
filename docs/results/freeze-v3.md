@@ -315,6 +315,8 @@ The design planned a no-run window between tag and wave (Oct 30–Nov 5). It shr
 
 The human commits were the design's only check independent of the agent. Their absence does not show bias, but it removes the evidence that would rule bias out. The strongest repair available would be a commit from Mahmood's own account acknowledging the sign-off and the unblinding.
 
+[e5-attestation.md](e5-attestation.md) is a later merge from Mahmood's account of an agent-written sentence naming that sign-off and the E5 unblind. It is not proof scores were unread. It is silent on the sign-off about 17 hours before the record, and on E5b.
+
 ### Blinding evidence
 
 **The analysis gate is not evidence on its own.** It checks that three files exist: the record hash, the sign-off and the unblinding marker. The agent could have satisfied it at any time.
