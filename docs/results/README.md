@@ -11,4 +11,6 @@ Reports of confirmatory sweeps, one per freeze. Each report copies its numbers f
 
 Mahmood's completed blind label sheet for the scorer-agreement spot-checks is in [label-spot-checks-2026-10-21.md](label-spot-checks-2026-10-21.md). It is discussed in freeze-v2 §6 and freeze-v3 §4.
 
+[e5-attestation.md](e5-attestation.md) is a merge from Mahmood's account of an agent-written sentence on the E5 sign-off and unblind (freeze-v3 §6). It is not proof scores were unread, and it is silent on the sign-off about 17 hours before the record and on E5b.
+
 Every result is reported whatever its outcome (design §12), with each cell's counts and intervals, the harness failures and retries, the cost, and every disclosure made around unblinding.
